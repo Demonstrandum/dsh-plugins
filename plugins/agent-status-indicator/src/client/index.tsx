@@ -181,8 +181,10 @@ const CSS = `
 }
 .tali-agent-status-badge {
   position: absolute;
-  right: -4px;
-  top: -8px;
+  /* Statically tuned to the macOS emoji ink: the hand's top finger lines up
+   * with the top of the default spanner glyph at 40px. */
+  right: -2px;
+  top: 4px;
   font-size: 20px;
 }
 `
