@@ -41,10 +41,31 @@ function mark(type, sizeClass) {
   return svg
 }
 
-/** The decorator mark at display size. */
-function decoMark(type, sizeClass) {
+/** Framed decoration (self-backgrounded artwork), or a dash. */
+function badgeCell(type, sizeClass) {
+  if (type.badge === undefined) return '<span class="none">\u2014</span>'
+  return `<div class="svgmark ${sizeClass}">${svgText(type.badge)}</div>`
+}
+
+/** Unframed decoration: bare glyph, optionally tinted, on its decoBg chip. */
+function decoCell(type, sizeClass) {
   if (type.deco === undefined) return '<span class="none">\u2014</span>'
-  return `<div class="svgmark ${sizeClass}">${svgText(type.deco)}</div>`
+  let glyph
+  if (type.decoTint !== undefined) {
+    const encoded = encodeURIComponent(svgText(type.deco)).replace(/'/g, '%27')
+    const m = `url('data:image/svg+xml;utf8,${encoded}')`
+    glyph = `<div class="tintmark ${sizeClass}" style="background-color:${type.decoTint};`
+      + `-webkit-mask-image:${m};mask-image:${m}"></div>`
+  } else {
+    glyph = `<div class="svgmark ${sizeClass}">${svgText(type.deco)}</div>`
+  }
+  if (type.decoBg === undefined) return glyph
+  return `<div class="decochip ${sizeClass}" style="background:${type.decoBg}">${glyph}</div>`
+}
+
+/** The document-corner decoration: badge wins, else deco. */
+function cornerCell(type, sizeClass) {
+  return type.badge !== undefined ? badgeCell(type, sizeClass) : decoCell(type, sizeClass)
 }
 
 /** The bg/fg monogram pill (small-size / no-svg fallback); text auto-fits. */
@@ -102,14 +123,15 @@ const PAGE_SVG = `<svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="t
 const rows = DOC_TYPES.map(type => `<tr>
   <td class="cell"><div class="entry">${mark(type, 'base')}</div></td>
   <td class="cell"><div class="entry">${badge(type, 'small')}</div></td>
-  <td class="cell"><div class="entry">${decoMark(type, 'deco')}</div></td>
-  <td class="cell"><div class="entry"><div class="doc">${PAGE_SVG}${type.deco === undefined ? '' : `<div class="corner">${decoMark(type, 'incorner')}</div>`}</div></div></td>
+  <td class="cell"><div class="entry">${badgeCell(type, 'deco')}</div></td>
+  <td class="cell"><div class="entry">${decoCell(type, 'deco')}</div></td>
+  <td class="cell"><div class="entry"><div class="doc">${PAGE_SVG}${type.badge === undefined && type.deco === undefined ? '' : `<div class="corner">${cornerCell(type, 'incorner')}</div>`}</div></div></td>
   <td class="cell">${materialCell(type)}</td>
   <td class="cell">${deviconCell(type)}</td>
   <td class="lang">${escapeHtml(type.name)} <code>${type.id}</code></td>
   <td class="colors">${type.bg !== undefined ? `<span class="swatch" style="background:${type.bg}"></span><code>${type.bg}</code>` : ''}
     ${type.fg !== undefined ? `<span class="swatch" style="background:${type.fg}"></span><code>${type.fg}</code>` : ''}</td>
-  <td class="explain">${type.deco !== undefined ? `<code>${type.deco}</code>` : 'no deco'}${type.tint !== undefined ? ` &middot; brand tint ${type.tint}` : ''}${type.svgBg !== undefined ? ` &middot; brand plate ${type.svgBg}` : ''}
+  <td class="explain">${type.badge !== undefined ? `badge <code>${type.badge}</code>` : type.deco !== undefined ? `deco <code>${type.deco}</code>` : 'no decoration'}${type.decoBg !== undefined ? ` &middot; deco-bg ${type.decoBg}` : ''}${type.decoTint !== undefined ? ` &middot; deco tint ${type.decoTint}` : ''}
     &middot; ${escapeHtml(type.exts.join(' '))}</td>
 </tr>`).join('\n')
 
@@ -163,8 +185,13 @@ const html = `<!doctype html>
   .svgmark.base svg, .tintmark.base { width:36px; height:36px; }
   .svgmark.small svg, .tintmark.small { width:20px; height:20px; }
   .svgmark.indoc svg, .tintmark.indoc { width:17px; height:17px; }
-  .svgmark.deco svg { width:24px; height:24px; }
-  .svgmark.incorner svg { width:20px; height:20px; }
+  .svgmark.deco svg, .tintmark.deco { width:24px; height:24px; }
+  .svgmark.incorner svg, .tintmark.incorner { width:20px; height:20px; }
+  .decochip { display:flex; align-items:center; justify-content:center; border-radius:6px; }
+  .decochip.deco { width:32px; height:32px; }
+  .decochip.deco .svgmark svg, .decochip.deco .tintmark { width:22px; height:22px; }
+  .decochip.incorner { width:22px; height:22px; border-radius:4px; }
+  .decochip.incorner .svgmark svg, .decochip.incorner .tintmark { width:16px; height:16px; }
   .corner { position:absolute; right:-5px; bottom:-3px; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
   .plate { display:flex; align-items:center; justify-content:center; }
   .plate.base { width:38px; height:38px; border-radius:9px; }
@@ -210,12 +237,13 @@ function filterStrip(input) {
 <p class="note">From <code>src/client/docTypes.ts</code>: long/short name, optional standard/small SVG,
 optional <code>tint</code> (silhouette for mono artwork), <code>svgBg</code> (backdrop plate for artwork that
 vanishes on dark), and bg/fg badge colours. Columns: brand mark (reference; mostly unused at runtime) &middot;
-small-size fallback pill &middot; the DECO decorator &middot; the document icon with the decorator composited
+small-size fallback pill &middot; BADGE (framed decoration) &middot; DECO (unframed glyph, on its
+<code>decoBg</code> chip when one is set) &middot; the document icon with badge-else-deco composited
 bottom-right &middot; material/devicon comparisons. Assets: pi-web, devicon (MIT),
 material-icon-theme (MIT) — see <code>src/client/icons/README.md</code>. Generated by
 <code>scripts/gen-doc-icon-gallery.mjs</code>.</p>
 <table>
-<tr><th>brand</th><th>small</th><th>deco</th><th>document</th><th>material</th><th>devicon</th><th>type</th><th>bg / fg</th><th>asset · exts</th></tr>
+<tr><th>brand</th><th>small</th><th>badge</th><th>deco</th><th>document</th><th>material</th><th>devicon</th><th>type</th><th>bg / fg</th><th>asset · exts</th></tr>
 ${rows}
 </table>
 ${browse}
