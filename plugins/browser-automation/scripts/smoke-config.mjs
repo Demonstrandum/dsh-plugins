@@ -43,3 +43,29 @@ listeners['agent/disposed']({ agent: preexisting })
 expected = [...expected, ['pre', '-browser_open'], ['pre', '-browser_close']]
 if (JSON.stringify(registered) !== JSON.stringify(expected)) throw new Error(`after dispose: ${JSON.stringify(registered)}`)
 console.log('smoke ok: lazy tools attached to pre-existing + new top-level agents only; rows validate')
+
+// Missing STP driver: browser_open must reject BEFORE spawning, naming the remedy
+// and stating that classic Safari is not a fallback.
+{
+  const defs = {}
+  const noStp = plugin.Config({ safari: { driver: '/nonexistent/safaridriver' }, chrome: { command: '/nonexistent/chrome-devtools-mcp' } })
+  const ctx2 = {
+    logger: { info() {}, warn() {} },
+    on: () => {},
+    effect: (run) => { run(); return () => {} },
+    tools: { schemas: () => [] },
+    agents: { list: () => [] },
+  }
+  const agent = { id: 'a', session: { header: { cwd: '/tmp', delegationDepth: 0 } }, ctx: { tools: { register: (def) => { defs[def.name] = def; return () => {} } }, plugin: () => { throw new Error('spawned despite missing driver') } } }
+  const created = []
+  const ctx3 = { ...ctx2, on: (event, cb) => { if (event === 'agent/created') created.push(cb) } }
+  plugin.apply(ctx3, noStp)
+  created[0]({ agent })
+  for (const browser of ['safari', 'chrome']) {
+    let message = ''
+    try { await defs.browser_open.execute({ browser }, { agent }) } catch (error) { message = String(error) }
+    if (!message.includes('unavailable')) throw new Error(`preflight did not reject ${browser}: ${message}`)
+    if (browser === 'safari' && !message.includes('classic Safari cannot be used')) throw new Error(`safari message lacks fallback statement: ${message}`)
+  }
+  console.log('smoke ok: missing drivers rejected before spawn with remedies')
+}

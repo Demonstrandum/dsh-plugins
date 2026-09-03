@@ -28,9 +28,13 @@ needs a browser, an idle timer (default 30 min) reclaims it, and
 
 ## Requirements
 
-- **Safari**: Safari Technology Preview 247+ (or Safari 27) running, with
-  Develop ▸ Developer Settings ▸ *Allow Remote Automation* enabled. Stable
-  Safari 26's `/usr/bin/safaridriver` has no `--mcp`.
+- **Safari**: Safari Technology Preview 247+ (or Safari 27) with Develop ▸
+  Developer Settings ▸ *Allow Remote Automation* enabled. The driver launches
+  STP itself if needed and opens its automation tab in a separate STP window
+  **in the background** (not focused) — it never touches the user's regular
+  Safari. There is no classic-Safari fallback: stable Safari 26's
+  `/usr/bin/safaridriver` has no `--mcp` mode, so `browser_open safari`
+  fails with an explanatory error when STP is missing.
 - **Chrome**: `npm i -g chrome-devtools-mcp` (pinned 1.8.0 here) and Google
   Chrome. Always run `--isolated` (temporary profile per instance, deleted on
   close) because Chrome refuses to share a user-data-dir between instances; so

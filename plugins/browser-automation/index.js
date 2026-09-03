@@ -58,7 +58,7 @@
  *   traceFile: ''             # append JSON lifecycle lines here (debugging; '' = off)
  */
 
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, existsSync } from 'node:fs'
 import Schema from '@deepseek-ai/schemastery'
 import * as McpClient from '@deepseek-ai/dsh-mcp-client'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -91,7 +91,7 @@ const PLUGIN_SOURCE = { kind: 'plugin', plugin: 'browser-automation' }
 
 /** Model-facing guidance per server, appended to the browser_open result. */
 const USAGE = {
-  safari: 'Safari tools are now in your tool list as mcp__safari__* (navigate_to_url, get_page_content, evaluate_javascript, screenshot, list_tabs, page_interactions, …). This is a real Safari Technology Preview session: it runs JavaScript and can read pages web_fetch cannot (e.g. YouTube). evaluate_javascript takes `expression` as a FUNCTION BODY — use an explicit `return`. Prefer get_page_content over screenshots for reading.',
+  safari: 'Safari tools are now in your tool list as mcp__safari__* (navigate_to_url, get_page_content, evaluate_javascript, screenshot, list_tabs, page_interactions, …). This is a real Safari Technology Preview session in its own STP window (opened in the background, never the user\'s regular Safari): it runs JavaScript and can read pages web_fetch cannot (e.g. YouTube). evaluate_javascript takes `expression` as a FUNCTION BODY — use an explicit `return`. Prefer get_page_content over screenshots for reading; `screenshot` returns a PNG file path — view it with read_image.',
   chrome: 'Chrome tools are now in your tool list as mcp__chrome__* (new_page, navigate_page, take_snapshot, take_screenshot, evaluate_script, click, fill_form, list_network_requests, lighthouse_audit, …). This is an isolated Chrome profile (no saved logins). Chrome launches on your first navigation. For screenshots omit filePath so the image is returned inline.',
 }
 
@@ -134,11 +134,24 @@ export function resolveServers(config) {
   return servers
 }
 
+/**
+ * Reject before spawning when the server executable is absent, with the exact
+ * remedy. Classic Safari cannot substitute for STP: stable Safari's
+ * /usr/bin/safaridriver has no --mcp mode, so there is no server to fall back to.
+ */
+function preflight(browser, server) {
+  if (existsSync(server.command)) return
+  if (browser === 'safari') {
+    throw new Error(`Safari automation is unavailable: no safaridriver at "${server.command}". Safari MCP (including screenshots) requires Safari Technology Preview 247+ (https://developer.apple.com/safari/technology-preview/); the stable Safari driver has no --mcp mode, so classic Safari cannot be used instead. Use browser_open with "chrome" if a browser is still needed.`)
+  }
+  throw new Error(`Chrome automation is unavailable: no chrome-devtools-mcp at "${server.command}". Install it with \`npm i -g chrome-devtools-mcp\` (and Google Chrome), or use browser_open with "safari".`)
+}
+
 /** Human hint for the most common start failures. */
 function startHint(browser, error) {
   const text = String(error?.cause ?? error)
   if (browser === 'safari') {
-    return `Safari MCP server failed to start (${text}). Check that Safari Technology Preview is installed and running with Develop ▸ Developer Settings ▸ "Allow Remote Automation" enabled.`
+    return `Safari MCP server failed to start (${text}). Safari Technology Preview is installed but did not accept the automation session: enable Develop ▸ Developer Settings ▸ "Allow Remote Automation" in STP, then retry. Classic Safari cannot be used instead (its driver has no --mcp mode).`
   }
   return `Chrome MCP server failed to start (${text}). Check that chrome-devtools-mcp is installed at the configured path (npm i -g chrome-devtools-mcp) and Google Chrome is installed.`
 }
@@ -228,6 +241,7 @@ export function apply(ctx, config) {
       touch(agent)
       return `${browser} is already open in this session. ${USAGE[browser]}`
     }
+    preflight(browser, servers[browser])
     const cwd = agent.session.header?.cwd ?? process.cwd()
     const fiber = agent.ctx.plugin(McpClient, { ...servers[browser], cwd })
     try {
