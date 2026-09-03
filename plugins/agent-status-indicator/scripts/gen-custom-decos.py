@@ -16,9 +16,6 @@ DECOS = {
     'custom-html.svg': square('HTML', '#f16529', '#fff', 63, 0.55),   # devicon html5 lighter orange
     'custom-css.svg':  square('CSS',  '#33a9dc', '#fff', 56, 0.66),   # devicon css3 lighter blue
     'custom-xml.svg':  square('XML',  '#8bc34a', '#323330', 56, 0.66),# material green, JS-style dark text
-    'custom-img.svg':  square('IMG',  '#26a69a', '#fff', 56, 0.66),
-    'custom-pdf.svg':  square('PDF',  '#d32f2f', '#fff', 56, 0.66),
-    'custom-csv.svg':  square('CSV',  '#217346', '#fff', 56, 0.66),
     'custom-diff.svg': square('\u00b1', '#00897b', '#fff', 116, 1.0, y=110.5),
 }
 

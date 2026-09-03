@@ -103,7 +103,7 @@ const rows = DOC_TYPES.map(type => `<tr>
   <td class="cell"><div class="entry">${mark(type, 'base')}</div></td>
   <td class="cell"><div class="entry">${badge(type, 'small')}</div></td>
   <td class="cell"><div class="entry">${decoMark(type, 'deco')}</div></td>
-  <td class="cell"><div class="entry"><div class="doc">${PAGE_SVG}<div class="corner">${decoMark(type, 'incorner')}</div></div></div></td>
+  <td class="cell"><div class="entry"><div class="doc">${PAGE_SVG}${type.deco === undefined ? '' : `<div class="corner">${decoMark(type, 'incorner')}</div>`}</div></div></td>
   <td class="cell">${materialCell(type)}</td>
   <td class="cell">${deviconCell(type)}</td>
   <td class="lang">${escapeHtml(type.name)} <code>${type.id}</code></td>
