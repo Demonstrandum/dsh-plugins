@@ -154,8 +154,15 @@ DECOS = {
     'custom-diff.svg': DIFF_SVG,
 }
 
+def namespace_ids(name, body):
+    """Make internal ids unique per file so several icons can be inlined into
+    one HTML document without mask/gradient references resolving to the wrong
+    element (getElementById is document-global)."""
+    stem = name.removesuffix('.svg')
+    return body.replace('id="m"', f'id="m-{stem}"').replace("url(#m)", f"url(#m-{stem})")
+
 if __name__ == '__main__':
     for name, body in DECOS.items():
         with open(f'src/client/icons/{name}', 'w') as f:
-            f.write(body)
+            f.write(namespace_ids(name, body))
         print('wrote', name)
