@@ -1,13 +1,14 @@
 /**
  * Generate gallery/doc-icon-gallery.html from the document-type registry
- * (src/client/docTypes.ts) and the assets in src/client/icons/. Shows, per
- * type: the standard SVG, the small/badge fallback built from bg/fg, and the
- * composed document icon (page outline + mark). Indicator display constants:
- * chat bg #151517, 48px cell, drop shadow. Gallery-only; the app does not
- * import the registry yet.
+ * (src/client/docTypes.ts) and the assets in src/client/icons/. Section 1
+ * shows, per type: the standard SVG (with tint silhouette or plate backdrop
+ * when the artwork needs it), the small-size fallback pill from bg/fg, and
+ * the composed document icon. Sections 2-3 browse the full material-icon-theme
+ * and devicon sets (lazy remote images; hover for the key). Gallery-only; the
+ * app does not import the registry yet.
  */
 import { build } from 'esbuild'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 
 await build({
   entryPoints: ['src/client/docTypes.ts'],
@@ -22,21 +23,29 @@ const escapeHtml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/
 
 const svgText = file => readFileSync(`src/client/icons/${file}`, 'utf8').replace(/^<\?xml[^>]*\?>\s*/, '')
 
-/** Inline mark: plain svg, or silhouette tint via CSS mask when `tint` set. */
+/**
+ * Inline mark. tint -> silhouette via CSS mask (NOTE: the data URL must use
+ * single quotes inside the double-quoted style attribute, and encodeURIComponent
+ * leaves apostrophes alone, so escape them manually). svgBg -> rounded plate.
+ */
 function mark(type, sizeClass) {
   if (type.svg === undefined) return badge(type, sizeClass)
   if (type.tint !== undefined) {
-    const m = `url("data:image/svg+xml;utf8,${encodeURIComponent(svgText(type.svg))}")`
+    const encoded = encodeURIComponent(svgText(type.svg)).replace(/'/g, '%27')
+    const m = `url('data:image/svg+xml;utf8,${encoded}')`
     return `<div class="tintmark ${sizeClass}" style="background-color:${type.tint};`
       + `-webkit-mask-image:${m};mask-image:${m}"></div>`
   }
-  return `<div class="svgmark ${sizeClass}">${svgText(type.svg)}</div>`
+  const svg = `<div class="svgmark ${sizeClass}">${svgText(type.svg)}</div>`
+  if (type.svgBg !== undefined) return `<div class="plate ${sizeClass}" style="background:${type.svgBg}">${svg}</div>`
+  return svg
 }
 
-/** The bg/fg monogram badge (used as the small-size / no-svg fallback). */
+/** The bg/fg monogram pill (small-size / no-svg fallback); text auto-fits. */
 function badge(type, sizeClass) {
-  return `<div class="badgemark ${sizeClass}" style="background:${type.bg ?? '#55565b'};color:${type.fg ?? '#fff'}">`
-    + `${escapeHtml(type.id)}</div>`
+  const size = type.id.length >= 4 ? 9 : type.id.length === 3 ? 10 : 12
+  return `<div class="badgemark ${sizeClass}" style="background:${type.bg ?? '#55565b'};color:${type.fg ?? '#fff'};`
+    + `font-size:${sizeClass === 'base' ? size + 4 : size}px">${escapeHtml(type.id)}</div>`
 }
 
 const PAGE_SVG = `<svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
@@ -51,9 +60,38 @@ const rows = DOC_TYPES.map(type => `<tr>
   <td class="lang">${escapeHtml(type.name)} <code>${type.id}</code></td>
   <td class="colors">${type.bg !== undefined ? `<span class="swatch" style="background:${type.bg}"></span><code>${type.bg}</code>` : ''}
     ${type.fg !== undefined ? `<span class="swatch" style="background:${type.fg}"></span><code>${type.fg}</code>` : ''}</td>
-  <td class="explain">${type.svg !== undefined ? `<code>${type.svg}</code>` : 'badge only'}${type.tint !== undefined ? ` &middot; tint ${type.tint}` : ''}
+  <td class="explain">${type.svg !== undefined ? `<code>${type.svg}</code>` : 'badge only'}${type.tint !== undefined ? ` &middot; tint ${type.tint}` : ''}${type.svgBg !== undefined ? ` &middot; plate ${type.svgBg}` : ''}
     &middot; ${escapeHtml(type.exts.join(' '))}</td>
 </tr>`).join('\n')
+
+/** Browse strip of one remote icon set (lazy imgs, key in tooltip + status line). */
+function browseSection(title, note, items) {
+  const chips = items.map(({ key, url }) =>
+    `<span class="chip" title="${escapeHtml(key)}"><img loading="lazy" src="${url}" alt="${escapeHtml(key)}"></span>`).join('')
+  return `<h2>${escapeHtml(title)}</h2><p class="note">${note}</p><div class="strip">${chips}</div>`
+}
+
+let browse = ''
+if (existsSync('scripts/data/material-index.json')) {
+  const names = JSON.parse(readFileSync('scripts/data/material-index.json', 'utf8'))
+  browse += browseSection(
+    `material-icon-theme — all file icons (${names.length})`,
+    'MIT; folder-* variants filtered out. Hover an icon for its key; use it as <code>https://raw.githubusercontent.com/material-extensions/vscode-material-icon-theme/main/icons/&lt;key&gt;</code>.',
+    names.map(name => ({
+      key: name.replace(/\.svg$/, ''),
+      url: `https://raw.githubusercontent.com/material-extensions/vscode-material-icon-theme/main/icons/${name}`,
+    })))
+}
+if (existsSync('scripts/data/devicon-index.json')) {
+  const entries = JSON.parse(readFileSync('scripts/data/devicon-index.json', 'utf8'))
+  browse += browseSection(
+    `devicon — all technologies (${entries.length}, preferred variant)`,
+    'MIT; the <code>-original</code> (or first available) SVG variant per technology. Hover for the key.',
+    entries.map(({ name, file }) => ({
+      key: `${name} (${file})`,
+      url: `https://raw.githubusercontent.com/devicons/devicon/master/icons/${name}/${file}`,
+    })))
+}
 
 const html = `<!doctype html>
 <meta charset="utf-8">
@@ -62,6 +100,7 @@ const html = `<!doctype html>
   body { background:#151517; color:#d6d6d8; font:14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
          margin:40px auto; max-width:980px; padding:0 20px; }
   h1 { font-size:18px; font-weight:600; }
+  h2 { font-size:15px; font-weight:600; margin-top:40px; color:#c8c8cc; }
   p.note { color:#8a8a8e; }
   table { border-collapse:collapse; width:100%; }
   td { padding:8px 12px; border-top:1px solid #26262a; vertical-align:middle; }
@@ -73,31 +112,45 @@ const html = `<!doctype html>
   .svgmark.base svg, .tintmark.base { width:36px; height:36px; }
   .svgmark.small svg, .tintmark.small { width:20px; height:20px; }
   .svgmark.indoc svg, .tintmark.indoc { width:17px; height:17px; }
+  .plate { display:flex; align-items:center; justify-content:center; }
+  .plate.base { width:38px; height:38px; border-radius:9px; }
+  .plate.base .svgmark svg { width:30px; height:30px; }
+  .plate.small { width:22px; height:22px; border-radius:5px; }
+  .plate.small .svgmark svg { width:17px; height:17px; }
+  .plate.indoc { width:19px; height:19px; border-radius:4px; }
+  .plate.indoc .svgmark svg { width:15px; height:15px; }
   .tintmark { -webkit-mask-size:contain; mask-size:contain; -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat;
               -webkit-mask-position:center; mask-position:center; }
-  .badgemark { border-radius:6px; display:flex; align-items:center; justify-content:center;
-               font:700 12px/1 'SF Mono', Menlo, monospace; }
-  .badgemark.base { width:36px; height:36px; font-size:15px; border-radius:8px; }
-  .badgemark.small { width:22px; height:22px; }
+  .badgemark { display:inline-flex; align-items:center; justify-content:center;
+               font-family:'SF Mono', Menlo, monospace; font-weight:700; }
+  .badgemark.base { min-width:36px; height:36px; border-radius:8px; padding:0 6px; }
+  .badgemark.small { min-width:22px; height:22px; border-radius:6px; padding:0 5px; }
+  .badgemark.indoc { min-width:18px; height:18px; border-radius:4px; padding:0 3px; }
   .doc { position:relative; width:40px; height:40px; }
   .dochole { position:absolute; left:0; right:0; top:14px; bottom:5px; display:flex; align-items:center; justify-content:center; }
-  td.lang { width:160px; white-space:nowrap; }
+  td.lang { width:150px; white-space:nowrap; }
   td.colors { width:210px; white-space:nowrap; }
   .swatch { display:inline-block; width:12px; height:12px; border-radius:3px; margin:0 4px 0 8px;
             vertical-align:-1px; border:1px solid #3a3a3e; }
   td.explain { color:#a8a8ac; }
   code { color:#b0c8f8; background:#1e1e22; padding:1px 5px; border-radius:5px; }
+  .strip { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px;
+          background:#232327; border-radius:6px; }
+  .chip img { width:22px; height:22px; }
 </style>
 <h1>document-type registry — icon gallery</h1>
-<p class="note">From <code>src/client/docTypes.ts</code>: long/short name, optional standard/small SVG
-(pi-web assets, plus devicon &amp; material-icon-theme, both MIT — see <code>src/client/icons/README.md</code>),
-optional bg/fg badge colours. Columns: standard mark &middot; small-size fallback (bg/fg badge; a
-<code>svgSmall</code> would replace it) &middot; composed document icon. Mono/dark artwork (rust, perl, json,
-markdown) is silhouette-tinted. Generated by <code>scripts/gen-doc-icon-gallery.mjs</code>.</p>
+<p class="note">From <code>src/client/docTypes.ts</code>: long/short name, optional standard/small SVG,
+optional <code>tint</code> (silhouette for mono artwork), <code>svgBg</code> (backdrop plate for artwork that
+vanishes on dark), and bg/fg badge colours. Columns: standard mark &middot; small-size fallback pill
+(a <code>svgSmall</code> would replace it) &middot; composed document icon. Assets: pi-web, devicon (MIT),
+material-icon-theme (MIT) — see <code>src/client/icons/README.md</code>. Generated by
+<code>scripts/gen-doc-icon-gallery.mjs</code>.</p>
 <table>
 <tr><th>standard</th><th>small</th><th>document</th><th>type</th><th>bg / fg</th><th>asset · exts</th></tr>
 ${rows}
 </table>
+${browse}
 `
 writeFileSync('gallery/doc-icon-gallery.html', html)
 console.log('wrote gallery/doc-icon-gallery.html')
