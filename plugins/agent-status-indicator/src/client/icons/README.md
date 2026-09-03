@@ -2,7 +2,7 @@
 
 - `lang-*.svg` — copied from tali's pi-web (`~/github/pi-web/src/client/src/icons/`).
 - `html.svg` `css.svg` `md.svg` `yaml.svg` — [devicon](https://github.com/devicons/devicon) (MIT), `*-original` variants.
-- `toml.svg` `svg.svg` `txt.svg` `xml.svg` `sql.svg` `ini.svg` `csv.svg` — [material-icon-theme](https://github.com/material-extensions/vscode-material-icon-theme) (MIT); txt=document, sql=database, ini=settings, csv=table.
+- `toml.svg` `svg.svg` `txt.svg` `xml.svg` `sql.svg` `ini.svg` `csv.svg` — [material-icon-theme](https://github.com/material-extensions/vscode-material-icon-theme) (MIT); txt=document, sql=database, ini=settings, csv=table; plus `log.svg` `exe.svg` `tex.svg` `image.svg`.
 - `java.svg` `c.svg` `cpp.svg` `kotlin.svg` `swift.svg` `lua.svg` — [devicon](https://github.com/devicons/devicon) (MIT), `*-original`.
 
 Mono/dark marks (`lang-rust`, `lang-perl`, `md`, `json`) are silhouette-tinted at
