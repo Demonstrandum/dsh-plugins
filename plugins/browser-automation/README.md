@@ -77,11 +77,45 @@ Tool names are DSH's fixed MCP convention `mcp__<server>__<tool>`
 (`packages/mcp/mcp-client/src/tools.ts`, `publicToolName`): `__` because both
 halves contain `_`, `mcp` so external tools are addressable as a class.
 
+## Safari Technology Preview: what can be controlled (investigated)
+
+Sources: `strings` over STP's bundled `WebDriver.framework` (which holds the
+`--mcp` server), `Safari.framework`, and live experiments with concurrent
+`safaridriver --mcp` clients. pi-web's bridge (`rho/extensions/mcp.ts`) runs
+plain `safaridriver --mcp` with inherited env, one connection per pi process —
+nothing beyond what this plugin does.
+
+| Lever | Effect | Verdict |
+|---|---|---|
+| `safaridriver --mcp` | MCP server over stdio (STP 247+ / Safari 27 only) | used |
+| `-p/--port`, `-b/--bidi`, `--enable`, `--diagnose` | classic WebDriver mode only | n/a |
+| `SAFARI_MCP_DIAGNOSE` (env, undocumented) | MCP diagnostics logging (`mcpDiagnosticsEnabled`) | debugging only |
+| `SAFARI_MCP_AGENT_NAME` (env, undocumented) | agent name **fallback** when the client sends no `clientInfo`; ignored otherwise | not useful (DSH always sends clientInfo) |
+| MCP `initialize` `clientInfo.name` | Safari's per-window banner: *"This window is controlled by \<name\>."* | **used** — `safari-mcp-shim.mjs` rewrites it per chat |
+| Safari launch switches (`--automation`, `--resetSafari`, `--page-load-test`, …) | internal test hooks; the driver launches STP itself with `--automation` | none applicable |
+| Window position | no MCP tool and automation windows are hidden from AppleScript/Accessibility (only `set_viewport_size` exists) | not controllable |
+
+Observed session/window semantics (STP 251):
+
+- Each `--mcp` process is its own automation session **with its own STP
+  window** — tabs, "active tab", `evaluate_javascript`, and `screenshot` are
+  fully isolated between sessions (verified with two concurrent sessions on
+  different pages). All windows open at the same screen position, so they
+  stack; the banner label is how you tell them apart.
+- A session that ends cleanly (stdin EOF; the driver exits in ~10–20 ms, inside
+  the MCP SDK's 2 s grace before SIGTERM) closes its window. A SIGTERM'd
+  session **leaks its window** until STP quits.
+- The first session launches STP if needed; STP quits when the last session
+  ends. Another session's clean close never disturbs a live one.
+- MCP ("agentic") sessions allow user interaction in the window, unlike
+  WebDriver sessions.
+- There is no classic-Safari path: stable Safari's driver has no `--mcp`.
+
 ## Gotchas learned the hard way
 
 - Safari's `evaluate_javascript` takes `expression` as a **function body**:
-  `return …`. Each `--mcp` process is its own automation session with no tabs
-  until the first `navigate_to_url`.
+  `return …`. A session has no tabs (and no window) until the first
+  `navigate_to_url`.
 - The "Chrome is being controlled by automated test software" bar comes from
   Puppeteer's default `--enable-automation` switch; the server's
   `--ignoreDefaultChromeArg=--enable-automation` removes it (this plugin does so

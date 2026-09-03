@@ -1,4 +1,5 @@
 // Keyless smoke: module loads, Config fills defaults, the derived MCP rows
+import { existsSync } from 'node:fs'
 // validate against dsh-mcp-client's schema, and the agent/created listener
 // registers exactly the two scoped tools (no server is spawned).
 import * as McpClient from '@deepseek-ai/dsh-mcp-client'
@@ -68,4 +69,36 @@ console.log('smoke ok: lazy tools attached to pre-existing + new top-level agent
     if (browser === 'safari' && !message.includes('classic Safari cannot be used')) throw new Error(`safari message lacks fallback statement: ${message}`)
   }
   console.log('smoke ok: missing drivers rejected before spawn with remedies')
+}
+
+// Safari row goes through the shim with a per-chat label; title projection wins over the id.
+{
+  const defs = {}
+  const created = []
+  const mounted = []
+  const cfg = plugin.Config({ chrome: { enabled: false } })
+  const ctx = {
+    logger: { info() {}, warn(m) { throw new Error(m) } },
+    on: (event, cb) => { if (event === 'agent/created') created.push(cb) },
+    effect: (run) => { run(); return () => {} },
+    tools: { schemas: () => [{ name: 'mcp__safari__x' }] },
+    agents: { list: () => [] },
+    get: (name) => name === 'sessionProjections' ? { stateOf: () => 'Loss landscape plots' } : undefined,
+  }
+  plugin.apply(ctx, cfg)
+  const fiber = Object.assign(Promise.resolve(), { dispose: async () => {} })
+  const agent = { id: 'session-abcdef12', session: { header: { cwd: '/tmp', delegationDepth: 0 } }, ctx: { tools: { register: (def) => { defs[def.name] = def; return () => {} } }, plugin: (mod, row) => { mounted.push(row); return fiber } } }
+  created[0]({ agent })
+  // Driver must exist for preflight; use the real STP path only if present, else skip.
+  if (existsSync(cfg.safari.driver)) {
+    await defs.browser_open.execute({ browser: 'safari' }, { agent })
+    const row = McpClient.Config(mounted[0])
+    if (row.command !== process.execPath) throw new Error(`expected node shim, got ${row.command}`)
+    if (!row.args[0].endsWith('safari-mcp-shim.mjs') || row.args[1] !== '--name' || row.args[2] !== 'DSH: Loss landscape plots' || row.args[3] !== '--' || row.args[4] !== cfg.safari.driver || row.args[5] !== '--mcp') {
+      throw new Error(`shim args unexpected: ${JSON.stringify(row.args)}`)
+    }
+    console.log('smoke ok: safari mounts through the shim with label', JSON.stringify(row.args[2]))
+  } else {
+    console.log('smoke skipped: STP driver not installed here')
+  }
 }

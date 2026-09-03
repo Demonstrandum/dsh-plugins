@@ -32,9 +32,15 @@
  * - Safari: Apple's Safari MCP server, `safaridriver --mcp`, shipped with Safari
  *   Technology Preview 247+ / Safari 27 (stable Safari 26's driver has no
  *   `--mcp`). Requires STP running with Develop ▸ Developer Settings ▸ Allow
- *   Remote Automation. Every `--mcp` process is its own automation session;
- *   concurrent instances coexist. Model note: `evaluate_javascript` takes
- *   `expression` as a FUNCTION BODY — use `return`.
+ *   Remote Automation. Every `--mcp` process is its own automation session
+ *   with its OWN STP WINDOW (all opened at the same screen position, so they
+ *   stack); tabs and "active tab" are per session; the window closes when the
+ *   session ends cleanly (stdin EOF — the driver exits in ~20 ms, inside the
+ *   MCP SDK's 2 s grace before SIGTERM, which would leak the window). The first
+ *   session launches STP if needed; STP quits when the last session ends. The
+ *   banner names the session's MCP clientInfo.name, which the shim sets per
+ *   chat. Model note: `evaluate_javascript` takes `expression` as a FUNCTION
+ *   BODY — use `return`.
  * - Chrome: Google's `chrome-devtools-mcp` (npm). Always started with
  *   `--isolated` (a fresh temporary profile per instance, deleted on close),
  *   because Chrome refuses to share one user-data-dir between instances; logins
@@ -46,6 +52,8 @@
  *   safari:
  *     enabled: true
  *     driver: /Applications/Safari Technology Preview.app/Contents/MacOS/safaridriver
+ *     labelWindows: true       # banner "This window is controlled by DSH: <chat title>."
+ *     labelPrefix: 'DSH: '
  *   chrome:
  *     enabled: true
  *     command: /opt/homebrew/bin/chrome-devtools-mcp   # absolute path; npm i -g chrome-devtools-mcp
@@ -59,6 +67,7 @@
  */
 
 import { appendFileSync, existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import Schema from '@deepseek-ai/schemastery'
 import * as McpClient from '@deepseek-ai/dsh-mcp-client'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -71,6 +80,12 @@ export const Config = Schema.object({
   safari: Schema.object({
     enabled: Schema.boolean().default(true),
     driver: Schema.string().default('/Applications/Safari Technology Preview.app/Contents/MacOS/safaridriver'),
+    // Label each chat's STP window banner ("This window is controlled by
+    // <label>.") via safari-mcp-shim.mjs, which rewrites the MCP handshake's
+    // clientInfo.name; false connects the driver directly (banner says
+    // "dsh-mcp-client").
+    labelWindows: Schema.boolean().default(true),
+    labelPrefix: Schema.string().default('DSH: '),
   }).default({}),
   chrome: Schema.object({
     enabled: Schema.boolean().default(true),
@@ -91,7 +106,7 @@ const PLUGIN_SOURCE = { kind: 'plugin', plugin: 'browser-automation' }
 
 /** Model-facing guidance per server, appended to the browser_open result. */
 const USAGE = {
-  safari: 'Safari tools are now in your tool list as mcp__safari__* (navigate_to_url, get_page_content, evaluate_javascript, screenshot, list_tabs, page_interactions, …). This is a real Safari Technology Preview session in its own STP window (opened in the background, never the user\'s regular Safari): it runs JavaScript and can read pages web_fetch cannot (e.g. YouTube). evaluate_javascript takes `expression` as a FUNCTION BODY — use an explicit `return`. Prefer get_page_content over screenshots for reading; `screenshot` returns a PNG file path — view it with read_image.',
+  safari: 'Safari tools are now in your tool list as mcp__safari__* (navigate_to_url, get_page_content, evaluate_javascript, screenshot, list_tabs, page_interactions, …). This is a real Safari Technology Preview session in its own STP window, opened in the background and labeled with this chat in its banner (never the user\'s regular Safari): it runs JavaScript and can read pages web_fetch cannot (e.g. YouTube). evaluate_javascript takes `expression` as a FUNCTION BODY — use an explicit `return`. Prefer get_page_content over screenshots for reading; `screenshot` returns a PNG file path — view it with read_image.',
   chrome: 'Chrome tools are now in your tool list as mcp__chrome__* (new_page, navigate_page, take_snapshot, take_screenshot, evaluate_script, click, fill_form, list_network_requests, lighthouse_audit, …). This is an isolated Chrome profile (no saved logins). Chrome launches on your first navigation. For screenshots omit filePath so the image is returned inline.',
 }
 
@@ -100,12 +115,17 @@ const USAGE = {
  * @param {ReturnType<typeof Config>} config - validated plugin config.
  * @returns {Record<string, object>} server name → stdio config.
  */
+const SHIM = fileURLToPath(new URL('./safari-mcp-shim.mjs', import.meta.url))
+
 export function resolveServers(config) {
   const servers = {}
   if (config.safari.enabled) {
     servers.safari = {
       transport: 'stdio',
       serverName: 'safari',
+      // `command`/`args` here are the bare driver; `open()` wraps them in the
+      // shim with the per-chat label when labelWindows is on. `preflight`
+      // checks the driver path either way.
       command: config.safari.driver,
       args: ['--mcp'],
       toolCallTimeoutMs: config.toolCallTimeoutMs,
@@ -234,6 +254,18 @@ export function apply(ctx, config) {
     state.timer.unref?.()
   }
 
+  /** Banner label for one chat: prefix + session title (when logged) or short id. */
+  function windowLabel(agent) {
+    let title
+    try {
+      title = ctx.get('sessionProjections')?.stateOf(agent.session, 'title')
+    } catch {
+      // Projection absent for this session shape; fall back to the id.
+    }
+    const text = typeof title === 'string' && title.trim() !== '' ? title.trim() : `chat ${agent.id.slice(-8)}`
+    return `${config.safari.labelPrefix}${text}`.replace(/\s+/g, ' ').slice(0, 80)
+  }
+
   /** Mount one server into the agent's scope and wait for tool discovery. */
   async function open(agent, browser) {
     const state = stateOf(agent)
@@ -243,7 +275,15 @@ export function apply(ctx, config) {
     }
     preflight(browser, servers[browser])
     const cwd = agent.session.header?.cwd ?? process.cwd()
-    const fiber = agent.ctx.plugin(McpClient, { ...servers[browser], cwd })
+    let row = { ...servers[browser], cwd }
+    if (browser === 'safari' && config.safari.labelWindows) {
+      row = {
+        ...row,
+        command: process.execPath,
+        args: [SHIM, '--name', windowLabel(agent), '--', servers.safari.command, ...servers.safari.args],
+      }
+    }
+    const fiber = agent.ctx.plugin(McpClient, row)
     try {
       await fiber
     } catch (error) {
