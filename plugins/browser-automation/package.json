@@ -1,0 +1,29 @@
+{
+  "name": "tali-browser-automation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin: per-session browser automation \u2014 mounts the Safari (safaridriver --mcp) and Chrome (chrome-devtools-mcp) MCP servers into each agent's own scope so every chat drives its own browser.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "check": "node --check index.js && node scripts/smoke-config.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-mcp-client": "link:/Users/USER/github/deepseek-harness/packages/mcp/mcp-client",
+    "@deepseek-ai/dsh-tools": "link:/Users/USER/github/deepseek-harness/packages/core/tools",
+    "@deepseek-ai/schemastery": "link:/Users/USER/github/deepseek-harness/vendor/schemastery"
+  }
+}

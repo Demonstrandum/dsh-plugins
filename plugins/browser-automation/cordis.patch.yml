@@ -1,0 +1,7 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# Defaults: Safari (STP driver) + Chrome (/opt/homebrew/bin/chrome-devtools-mcp),
+# top-level sessions only, visible Chrome windows. Override `config` in the
+# profile's cordis.patch.yml (a later layer replaces the whole value).
+- insert:
+    - id: tali-browser-automation
+      name: tali-browser-automation

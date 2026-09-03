@@ -1,0 +1,38 @@
+// Keyless smoke: module loads, Config fills defaults, the derived MCP rows
+// validate against dsh-mcp-client's schema, and the agent/created listener
+// registers exactly the two scoped tools (no server is spawned).
+import * as McpClient from '@deepseek-ai/dsh-mcp-client'
+import * as plugin from '../index.js'
+
+const filled = plugin.Config({})
+if (filled.safari.enabled !== true || filled.chrome.enabled !== true || filled.subagents !== false || filled.idleMinutes !== 30) {
+  throw new Error(`unexpected defaults: ${JSON.stringify(filled)}`)
+}
+const custom = plugin.Config({ chrome: { headless: true }, safari: { enabled: false }, idleMinutes: 0 })
+if (custom.safari.enabled !== false || custom.chrome.headless !== true) throw new Error(`override not applied: ${JSON.stringify(custom)}`)
+
+for (const [browser, row] of Object.entries(plugin.resolveServers(filled))) {
+  const validated = McpClient.Config({ ...row, cwd: '/tmp' })
+  if (validated.serverName !== browser || validated.failOnStartupError !== true) throw new Error(`bad row for ${browser}: ${JSON.stringify(validated)}`)
+  if (browser === 'chrome' && !validated.args.includes('--isolated')) throw new Error('chrome must run --isolated')
+}
+
+const registered = []
+const listeners = {}
+const ctx = {
+  logger: { info() {}, warn(message) { throw new Error(`unexpected warn: ${message}`) } },
+  on: (event, cb) => { listeners[event] = cb },
+  effect: () => {},
+  tools: { schemas: () => [] },
+}
+plugin.apply(ctx, custom)
+const fakeAgent = (id, depth) => ({
+  id,
+  session: { header: { cwd: '/tmp', delegationDepth: depth } },
+  ctx: { tools: { register: (def) => { registered.push([id, def.name]) } }, plugin: () => { throw new Error('must not mount at creation') } },
+})
+listeners['agent/created']({ agent: fakeAgent('top', 0) })
+listeners['agent/created']({ agent: fakeAgent('child', 1) })
+const expected = [['top', 'browser_open'], ['top', 'browser_close']]
+if (JSON.stringify(registered) !== JSON.stringify(expected)) throw new Error(`registrations: ${JSON.stringify(registered)}`)
+console.log('smoke ok: lazy tools registered for top-level agents only; rows validate')

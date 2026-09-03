@@ -5,3 +5,5 @@
 - insert:
     - id: tali-agent-status-indicator
       name: '/Users/USER/github/tali-dash-plugins/plugins/agent-status-indicator/index.js'
+    - id: tali-browser-automation
+      name: '/Users/USER/github/tali-dash-plugins/plugins/browser-automation/index.js'
