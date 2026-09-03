@@ -63,10 +63,6 @@ function decoCell(type, sizeClass) {
   return `<div class="decochip ${sizeClass}" style="background:${type.decoBg}">${glyph}</div>`
 }
 
-/** The document-corner decoration: badge wins, else deco. */
-function cornerCell(type, sizeClass) {
-  return type.badge !== undefined ? badgeCell(type, sizeClass) : decoCell(type, sizeClass)
-}
 
 /** The bg/fg monogram pill (small-size / no-svg fallback); text auto-fits. */
 function badge(type, sizeClass) {
@@ -115,17 +111,41 @@ function deviconCell(type) {
   return `<span class="chip" title="${name}"><img loading="lazy" src="${url}" alt="${name}"></span>`
 }
 
-const PAGE_SVG = `<svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
-  <path d="M9 3 h14 l8 8 v26 h-22 z" fill="#0b0b0d" stroke="#8a8a8e" stroke-width="2" stroke-linejoin="round"/>
-  <path d="M23 3 v8 h8" fill="none" stroke="#8a8a8e" stroke-width="2" stroke-linejoin="round"/>
-</svg>`
+/**
+ * Compose the document icon DYNAMICALLY (no static template asset): a rounded
+ * solid dark-gray rectangle with the type's decoration flush in the
+ * bottom-right corner (badge preferred, else deco on its decoBg chip, else
+ * bare deco). The corner wrapper clips itself to the rectangle's own corner
+ * radius, so a square badge follows the document's rounding. This function is
+ * the reference for what the plugin will do at runtime in React.
+ */
+function documentIcon(type) {
+  let corner = ''
+  if (type.badge !== undefined) {
+    corner = `<div class="svgmark cornerbadge">${svgText(type.badge)}</div>`
+  } else if (type.deco !== undefined) {
+    let glyph
+    if (type.decoTint !== undefined) {
+      const encoded = encodeURIComponent(svgText(type.deco)).replace(/'/g, '%27')
+      const m = `url('data:image/svg+xml;utf8,${encoded}')`
+      glyph = `<div class="tintmark cornerglyph" style="background-color:${type.decoTint};`
+        + `-webkit-mask-image:${m};mask-image:${m}"></div>`
+    } else {
+      glyph = `<div class="svgmark cornerglyph">${svgText(type.deco)}</div>`
+    }
+    corner = type.decoBg !== undefined
+      ? `<div class="cornerchip" style="background:${type.decoBg}">${glyph}</div>`
+      : glyph
+  }
+  return `<div class="doc">${corner === '' ? '' : `<div class="corner">${corner}</div>`}</div>`
+}
 
 const rows = DOC_TYPES.map(type => `<tr>
   <td class="cell"><div class="entry">${mark(type, 'base')}</div></td>
   <td class="cell"><div class="entry">${badge(type, 'small')}</div></td>
   <td class="cell"><div class="entry">${badgeCell(type, 'deco')}</div></td>
   <td class="cell"><div class="entry">${decoCell(type, 'deco')}</div></td>
-  <td class="cell"><div class="entry"><div class="doc">${PAGE_SVG}${type.badge === undefined && type.deco === undefined ? '' : `<div class="corner">${cornerCell(type, 'incorner')}</div>`}</div></div></td>
+  <td class="cell"><div class="entry">${documentIcon(type)}</div></td>
   <td class="cell">${materialCell(type)}</td>
   <td class="cell">${deviconCell(type)}</td>
   <td class="lang">${escapeHtml(type.name)} <code>${type.id}</code></td>
@@ -185,15 +205,20 @@ const html = `<!doctype html>
   .svgmark { display:flex; align-items:center; justify-content:center; }
   .svgmark.base svg, .tintmark.base { width:36px; height:36px; }
   .svgmark.small svg, .tintmark.small { width:20px; height:20px; }
-  .svgmark.indoc svg, .tintmark.indoc { width:17px; height:17px; }
   .svgmark.deco svg, .tintmark.deco { width:24px; height:24px; }
-  .svgmark.incorner svg, .tintmark.incorner { width:20px; height:20px; }
   .decochip { display:flex; align-items:center; justify-content:center; border-radius:6px; }
   .decochip.deco { width:32px; height:32px; }
-  .decochip.deco .svgmark svg, .decochip.deco .tintmark { width:22px; height:22px; }
-  .decochip.incorner { width:22px; height:22px; border-radius:4px; }
-  .decochip.incorner .svgmark svg, .decochip.incorner .tintmark { width:16px; height:16px; }
-  .corner { position:absolute; right:-5px; bottom:-3px; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+  .decochip.deco .svgmark svg, .decochip.deco .tintmark { width:20px; height:20px; }
+  /* document template: rounded solid dark-gray rectangle, decoration flush
+     bottom-right; the corner wrapper clips to the document's own radius */
+  .doc { position:relative; width:34px; height:42px; background:#3a3a3f; border-radius:7px; }
+  .doc .corner { position:absolute; right:0; bottom:0; display:flex;
+                 border-bottom-right-radius:7px; overflow:hidden; }
+  .cornerbadge svg { width:20px; height:20px; display:block; }
+  .cornerchip { display:flex; align-items:center; justify-content:center; width:20px; height:20px; }
+  .cornerchip .svgmark svg, .cornerchip .tintmark { width:14px; height:14px; }
+  .cornerglyph svg, .tintmark.cornerglyph { width:17px; height:17px; }
+  .svgmark.cornerglyph { margin:0 1px 1px 0; }
   .plate { display:flex; align-items:center; justify-content:center; }
   .plate.base { width:38px; height:38px; border-radius:9px; }
   .plate.base .svgmark svg { width:30px; height:30px; }
@@ -208,8 +233,6 @@ const html = `<!doctype html>
   .badgemark.base { height:30px; border-radius:8px; padding:0 7px; }
   .badgemark.small { height:19px; border-radius:5px; padding:0 4px; }
   .badgemark.indoc { height:16px; border-radius:4px; padding:0 3px; }
-  .doc { position:relative; width:40px; height:40px; }
-  .dochole { position:absolute; left:0; right:0; top:14px; bottom:5px; display:flex; align-items:center; justify-content:center; }
   td.lang { width:150px; white-space:nowrap; }
   td.colors { width:210px; white-space:nowrap; }
   .swatch { display:inline-block; width:12px; height:12px; border-radius:3px; margin:0 4px 0 8px;
@@ -239,8 +262,9 @@ function filterStrip(input) {
 optional <code>tint</code> (silhouette for mono artwork), <code>svgBg</code> (backdrop plate for artwork that
 vanishes on dark), and bg/fg badge colours. Columns: brand mark (reference; mostly unused at runtime) &middot;
 small-size fallback pill &middot; BADGE (framed decoration) &middot; DECO (unframed glyph, on its
-<code>decoBg</code> chip when one is set) &middot; the document icon with badge-else-deco composited
-bottom-right &middot; material/devicon comparisons. Assets: pi-web, devicon (MIT),
+<code>decoBg</code> chip when one is set) &middot; the document icon (dynamic composition: rounded dark-gray
+rectangle, decoration flush bottom-right, corner clipped to the document radius) &middot;
+material/devicon comparisons. Assets: pi-web, devicon (MIT),
 material-icon-theme (MIT) — see <code>src/client/icons/README.md</code>. Generated by
 <code>scripts/gen-doc-icon-gallery.mjs</code>.</p>
 <table>
