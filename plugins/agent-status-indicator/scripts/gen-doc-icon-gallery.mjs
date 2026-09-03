@@ -54,7 +54,7 @@ const MATERIAL_KEY = {
   py: 'python', js: 'javascript', ts: 'typescript', go: 'go', html: 'html', css: 'css',
   json: 'json', toml: 'toml', yaml: 'yaml', md: 'markdown', svg: 'svg', sh: 'console',
   txt: 'document', log: 'log', exe: 'exe', tex: 'tex', img: 'image', xml: 'xml',
-  sql: 'database', ini: 'settings', csv: 'table', rb: 'ruby', rs: 'rust', php: 'php',
+  sql: 'database', ini: 'settings', csv: 'table', pdf: 'pdf', diff: 'diff', rb: 'ruby', rs: 'rust', php: 'php',
   java: 'java', c: 'c', cpp: 'cpp', kt: 'kotlin', swift: 'swift', lua: 'lua',
   cs: 'csharp', perl: 'perl', r: 'r', elixir: 'elixir',
 }
