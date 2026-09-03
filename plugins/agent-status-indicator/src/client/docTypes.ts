@@ -60,7 +60,7 @@ export const DOC_TYPES: readonly DocType[] = [
   { id: 'sh', name: 'shell', brand: 'lang-shell.svg', badge: 'material-console.svg', bg: '#4eaa25', fg: '#ffffff', exts: ['sh', 'bash', 'zsh'] },
   { id: 'txt', name: 'text', brand: 'txt.svg', bg: '#6d6d72', fg: '#ffffff', exts: ['txt', 'text'] },
   { id: 'log', name: 'log', brand: 'log.svg', bg: '#afb42b', fg: '#1b1b1d', exts: ['log'] },
-  { id: 'exe', name: 'executable', brand: 'exe.svg', bg: '#e64a19', fg: '#ffffff', exts: ['exe', 'msi'] },
+  { id: 'exe', name: 'executable', brand: 'exe.svg', badge: 'exe.svg', bg: '#e64a19', fg: '#ffffff', exts: ['exe', 'msi'] },
   { id: 'tex', name: 'latex', brand: 'tex.svg', deco: 'tex.svg', bg: '#2196f3', fg: '#ffffff', exts: ['tex', 'bib'] },
   { id: 'img', name: 'image', brand: 'image.svg', bg: '#26a69a', fg: '#ffffff', exts: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif'] },
   { id: 'pdf', name: 'pdf', brand: 'pdf.svg', badge: 'pdf.svg', deco: 'custom-pdf.svg', decoBg: '#ef5350', bg: '#d32f2f', fg: '#ffffff', exts: ['pdf'] },
