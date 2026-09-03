@@ -12,12 +12,15 @@
  * rule; an exact tool beats a prefix; longer prefixes win.
  */
 
-/** Emoji rules: pi-web's table verbatim, plus DSH tool names (marked). */
+/**
+ * Icon rules: pi-web's table, plus DSH tool names (marked). A value is an
+ * emoji glyph, or an `svg:<name>` token the renderer maps to an inline SVG.
+ */
 const TABLE: Readonly<Record<string, string>> = {
   // ── pi-web toolIcons.json ──────────────────────────────────────────────
   default: '\u{1F527}', // 🔧
   thinking: '\u{1F928}', // 🤨
-  bash: '$',
+  bash: 'svg:terminal', // rendered as an inline SVG by the indicator (pi-web used a "$" text glyph)
   edit: '\u270F\uFE0F', // ✏️
   write: '\u270F\uFE0F', // ✏️
   read: '\u{1F441}\uFE0F', // 👁️

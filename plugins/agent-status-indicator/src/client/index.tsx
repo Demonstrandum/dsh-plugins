@@ -1,12 +1,13 @@
 /**
- * Agent status indicator, browser half. A stack of large emoji pinned to the
+ * Agent status indicator, browser half. A stack of large icons pinned to the
  * bottom-right of the chat area: every agent state *transition* appends an
- * entry at the bottom and the older entries animate upward. Only the 4 most
- * recent entries show; historical ones render at half opacity.
+ * entry which rises in from the bottom of the screen while the whole stack
+ * shifts up in lockstep (one container FLIP transition, no per-entry motion).
+ * Only the 4 most recent entries show; historical ones sit at half opacity.
  *
  *   🙂          waiting — no turn running
  *   🤨          thinking — turn running, no tool call in flight (pi-web glyph)
- *   <tool>      a tool call is in flight: its pi-web emoji ($ bash, ✏️ edit,
+ *   <tool>      a tool call is in flight: its pi-web icon ([>] bash, ✏️ edit,
  *               👁️ read, 🔍 search, 🌐 web, 🤖 subagent, ... 🔧 fallback);
  *               each distinct call (by callId) is its own entry
  *   🔧+badge ✋  a pending interaction (approval / question) blocks on you
@@ -21,7 +22,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
+import { useLayoutEffect, useEffect, useRef, useState } from 'react'
 import { resolveToolGlyph, thinkingGlyph } from './toolIcons.ts'
 
 type Props = PropsRuntime<'conversation.input.dock'>
@@ -33,11 +35,34 @@ const BLOCKED_BADGE = '\u270B' // ✋
 /** Most recent entries kept on screen (newest at the bottom). */
 const STACK_SIZE = 4
 /** Vertical distance between stacked entries, px. */
-const STACK_GAP = 52
+const STACK_GAP = 56
+
+/** Terminal icon for shell calls: gray-bordered black square, green prompt chevron. */
+function TerminalIcon() {
+  return (
+    <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+      <rect x="1.5" y="1.5" width="37" height="37" rx="8" fill="#0b0b0d" stroke="#8a8a8e" strokeWidth="2" />
+      <path
+        d="M12 13 L21 20 L12 27"
+        fill="none"
+        stroke="#34d399"
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+/** Map a resolver token (emoji glyph or `svg:<name>`) to its rendering. */
+function renderIcon(token: string): ReactNode {
+  if (token === 'svg:terminal') return <TerminalIcon />
+  return token
+}
 
 interface StackEntry {
   readonly key: number
-  readonly glyph: string
+  readonly token: string
   readonly label: string
   readonly badge: boolean
 }
@@ -45,7 +70,7 @@ interface StackEntry {
 /** One observed status: `identity` changes exactly when a new entry is due. */
 interface Status {
   readonly identity: string
-  readonly glyph: string
+  readonly token: string
   readonly label: string
   readonly badge: boolean
 }
@@ -54,7 +79,7 @@ function AgentStatusIndicator({ useSession, useChat, useSessionPendingInteractio
   const running = useSession(snapshot => snapshot.running)
   const hasError = useSession(snapshot => snapshot.lastAgentError !== null)
   const blocked = useSessionPendingInteraction(pending => pending.has(sessionId))
-  // Selector returns a primitive ("callId|glyph") so re-renders happen only
+  // Selector returns a primitive ("callId|token") so re-renders happen only
   // when the in-flight call changes, not on every streaming publication.
   const runningCall = useChat(chat => {
     const calls = chat.legacy.runningCalls
@@ -64,33 +89,52 @@ function AgentStatusIndicator({ useSession, useChat, useSessionPendingInteractio
 
   let status: Status
   if (blocked) {
-    const glyph = runningCall === null ? resolveToolGlyph('default') : runningCall.split('|')[1]!
-    status = { identity: `blocked:${glyph}`, glyph, label: 'blocked on your input', badge: true }
+    const token = runningCall === null ? resolveToolGlyph('default') : runningCall.split('|')[1]!
+    status = { identity: `blocked:${token}`, token, label: 'blocked on your input', badge: true }
   } else if (runningCall !== null) {
-    const [callId, glyph] = runningCall.split('|') as [string, string]
-    status = { identity: `tool:${callId}`, glyph, label: 'running a tool', badge: false }
+    const [callId, token] = runningCall.split('|') as [string, string]
+    status = { identity: `tool:${callId}`, token, label: 'running a tool', badge: false }
   } else if (running) {
-    status = { identity: 'think', glyph: thinkingGlyph(), label: 'thinking', badge: false }
+    status = { identity: 'think', token: thinkingGlyph(), label: 'thinking', badge: false }
   } else if (hasError) {
-    status = { identity: 'error', glyph: ERROR, label: 'error', badge: false }
+    status = { identity: 'error', token: ERROR, label: 'error', badge: false }
   } else {
-    status = { identity: 'wait', glyph: WAITING, label: 'waiting', badge: false }
+    status = { identity: 'wait', token: WAITING, label: 'waiting', badge: false }
   }
 
   const [entries, setEntries] = useState<readonly StackEntry[]>([])
   const lastIdentity = useRef<string | null>(null)
   const seq = useRef(0)
-  const { identity, glyph, label, badge } = status
+  const { identity, token, label, badge } = status
   useEffect(() => {
     if (identity === lastIdentity.current) return
     lastIdentity.current = identity
     seq.current += 1
-    const entry: StackEntry = { key: seq.current, glyph, label, badge }
+    const entry: StackEntry = { key: seq.current, token, label, badge }
     setEntries(prev => [...prev, entry].slice(-STACK_SIZE))
-  }, [identity, glyph, label, badge])
+  }, [identity, token, label, badge])
+
+  // Lockstep shift: when an entry is appended, every entry's `bottom` moves up
+  // one slot with NO per-entry transition; the container starts one slot down
+  // (putting the new entry at the screen's bottom edge) and transitions to
+  // rest, so the entire stack rises together in a single motion.
+  const stackRef = useRef<HTMLDivElement | null>(null)
+  const newestKey = entries.length > 0 ? entries[entries.length - 1]!.key : 0
+  const animatedKey = useRef(0)
+  useLayoutEffect(() => {
+    if (newestKey === animatedKey.current) return
+    animatedKey.current = newestKey
+    const el = stackRef.current
+    if (el === null) return
+    el.style.transition = 'none'
+    el.style.transform = `translateY(${STACK_GAP}px)`
+    void el.offsetHeight // flush so the jump is committed before the transition
+    el.style.transition = 'transform 300ms ease'
+    el.style.transform = 'translateY(0)'
+  }, [newestKey])
 
   return (
-    <div className="tali-agent-status-stack">
+    <div ref={stackRef} className="tali-agent-status-stack">
       {entries.map((entry, index) => {
         const fromBottom = entries.length - 1 - index
         return (
@@ -101,7 +145,7 @@ function AgentStatusIndicator({ useSession, useChat, useSessionPendingInteractio
             role={fromBottom === 0 ? 'status' : undefined}
             aria-label={fromBottom === 0 ? `agent status: ${entry.label}` : undefined}
           >
-            {entry.glyph}
+            {renderIcon(entry.token)}
             {entry.badge && <span className="tali-agent-status-badge">{BLOCKED_BADGE}</span>}
           </div>
         )
@@ -114,30 +158,32 @@ function AgentStatusIndicator({ useSession, useChat, useSessionPendingInteractio
 const CSS = `
 .tali-agent-status-stack {
   position: fixed;
-  right: 16px;
-  bottom: 10px;
+  right: 14px;
+  bottom: 8px;
+  width: 48px;
   z-index: 60;
   pointer-events: none;
+  will-change: transform;
 }
 .tali-agent-status-entry {
   position: absolute;
   right: 0;
-  font-size: 44px;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40px;
   line-height: 1;
   user-select: none;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3));
-  transition: bottom 300ms ease, opacity 300ms ease;
-  animation: tali-agent-status-in 300ms ease;
+  transition: opacity 300ms ease;
 }
 .tali-agent-status-badge {
   position: absolute;
-  right: -6px;
-  top: -10px;
+  right: -4px;
+  top: -8px;
   font-size: 20px;
-}
-@keyframes tali-agent-status-in {
-  from { opacity: 0; transform: translateY(${STACK_GAP / 2}px); }
-  to { transform: none; }
 }
 `
 
