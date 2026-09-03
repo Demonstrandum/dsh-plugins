@@ -8,8 +8,8 @@
  *   (the devicon js/ts squares, material's console window, pdf chip).
  * - `deco`: UNFRAMED decoration — a bare glyph. `decoTint` silhouettes it;
  *   `decoBg` is the explicit background colour to put behind it when it needs
- *   one (absent = render with no background). A type has `badge` or `deco`
- *   (or neither), not both.
+ *   one (absent = render with no background). A type may carry either field,
+ *   both (consumer picks per context), or neither.
  * - `bg`/`fg`: monogram-pill fallback colours; `badgeText` overrides its label.
  * - `exts`: matching file extensions (superset of DSH's LANG_BY_EXTENSION in
  *   packages/fs/tool-fs/src/read-render.ts).
@@ -50,8 +50,8 @@ export const DOC_TYPES: readonly DocType[] = [
   { id: 'js', name: 'javascript', brand: 'lang-javascript.svg', badge: 'devicon-javascript.svg', bg: '#f7df1e', fg: '#000000', exts: ['js', 'jsx', 'mjs', 'cjs'] },
   { id: 'ts', name: 'typescript', brand: 'lang-typescript.svg', badge: 'devicon-typescript.svg', bg: '#3178c6', fg: '#ffffff', exts: ['ts', 'tsx', 'mts', 'cts'] },
   { id: 'go', name: 'go', brand: 'lang-go.svg', deco: 'material-go.svg', bg: '#00add8', fg: '#ffffff', exts: ['go'] },
-  { id: 'html', name: 'html', brand: 'html.svg', deco: 'custom-html.svg', decoBg: '#e34f26', bg: '#e34f26', fg: '#ffffff', exts: ['html', 'htm'] },
-  { id: 'css', name: 'css', brand: 'css.svg', deco: 'custom-css.svg', decoBg: '#7e57c2', bg: '#7e57c2', fg: '#ffffff', exts: ['css', 'scss', 'less'] },
+  { id: 'html', name: 'html', brand: 'html.svg', badge: 'custom-html-badge.svg', deco: 'custom-html.svg', decoBg: '#e34f26', bg: '#e34f26', fg: '#ffffff', exts: ['html', 'htm'] },
+  { id: 'css', name: 'css', brand: 'css.svg', badge: 'custom-css-badge.svg', deco: 'custom-css.svg', decoBg: '#7e57c2', bg: '#7e57c2', fg: '#ffffff', exts: ['css', 'scss', 'less'] },
   { id: 'json', name: 'json', badgeText: '{}', deco: 'material-json.svg', bg: '#4a4a4f', fg: '#ececef', exts: ['json', 'jsonc'] },
   { id: 'toml', name: 'toml', brand: 'toml.svg', deco: 'toml.svg', bg: '#9c4121', fg: '#ffffff', exts: ['toml'] },
   { id: 'yaml', name: 'yaml', brand: 'yaml.svg', tint: '#cb171e', deco: 'yaml.svg', decoTint: '#cb171e', bg: '#cb171e', fg: '#ffffff', exts: ['yaml', 'yml'] },
@@ -65,7 +65,7 @@ export const DOC_TYPES: readonly DocType[] = [
   { id: 'img', name: 'image', brand: 'image.svg', bg: '#26a69a', fg: '#ffffff', exts: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif'] },
   { id: 'pdf', name: 'pdf', brand: 'pdf.svg', badge: 'pdf.svg', bg: '#d32f2f', fg: '#ffffff', exts: ['pdf'] },
   { id: 'diff', name: 'diff', brand: 'diff.svg', deco: 'custom-diff.svg', bg: '#00897b', fg: '#ffffff', exts: ['diff', 'patch'] },
-  { id: 'xml', name: 'xml', brand: 'xml.svg', deco: 'custom-xml.svg', decoBg: '#8bc34a', bg: '#8bc34a', fg: '#323330', exts: ['xml'] },
+  { id: 'xml', name: 'xml', brand: 'xml.svg', badge: 'custom-xml-badge.svg', deco: 'custom-xml.svg', decoBg: '#8bc34a', bg: '#8bc34a', fg: '#323330', exts: ['xml'] },
   { id: 'sql', name: 'sql', brand: 'sql.svg', deco: 'sql.svg', bg: '#ffca28', fg: '#1b1b1d', exts: ['sql'] },
   { id: 'ini', name: 'ini', brand: 'ini.svg', deco: 'ini.svg', bg: '#42a5f5', fg: '#1b1b1d', exts: ['ini'] },
   { id: 'csv', name: 'csv', brand: 'csv.svg', bg: '#217346', fg: '#ffffff', exts: ['csv', 'tsv'] },

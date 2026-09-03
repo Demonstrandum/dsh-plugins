@@ -57,7 +57,35 @@ def xml_glyph(fill, transform='translate(-59.45,-99.58) scale(10.574)'):
 </svg>
 '''
 
+# ── Badge (framed) variants: the same extracted glyphs seated bottom-right in
+# a devicon-js/ts-geometry box (125x125 inset 1.5). Transforms measured to the
+# JS/TS margins: right margin 10, bottom gap 10; CSS letter height 56 (JS ~58),
+# <> glyph height 46.5.
+def css_badge(box, fill, s=4.674, tx=-4.93, ty=-4.93):
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+<rect x="1.5" y="1.5" width="125" height="125" fill="{box}"/>
+<defs><mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="128" height="128">
+<g transform="translate({tx},{ty}) scale({s})">
+<rect x="7" y="13" width="20" height="14" fill="#fff"/>
+<path d="{CSS_BOX}" fill="#000"/>
+<path d="{CSS_FILLER}" fill="#000"/>
+<rect x="26" y="26" width="2.5" height="2.5" fill="#000"/>
+</g></mask></defs>
+<rect width="128" height="128" fill="{fill}" mask="url(#m)"/>
+</svg>
+'''
+
+def glyph_badge(box, fill, s=6.284, tx=8.66, ty=-3.72):
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+<rect x="1.5" y="1.5" width="125" height="125" fill="{box}"/>
+<g transform="translate({tx},{ty}) scale({s})"><path d="{XML_GLYPH}" fill="{fill}"/></g>
+</svg>
+'''
+
 DECOS = {
+    'custom-css-badge.svg': css_badge('#7e57c2', '#fff'),
+    'custom-html-badge.svg': glyph_badge('#e34f26', '#fff'),
+    'custom-xml-badge.svg': glyph_badge('#8bc34a', '#323330'),
     'custom-css.svg': css_letters('#ffffff'),
     'custom-xml.svg': xml_glyph('#323330'),
     'custom-html.svg': xml_glyph('#ffffff'),
