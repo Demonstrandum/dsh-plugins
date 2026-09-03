@@ -84,7 +84,8 @@ def glyph_badge(box, fill, s=6.284, tx=8.66, ty=-3.72):
 
 DECOS = {
     'custom-css-badge.svg': css_badge('#7e57c2', '#fff'),
-    'custom-html-badge.svg': glyph_badge('#e34f26', '#fff'),
+    # html badge <> enlarged to the css-badge letter height (57 vs 56 measured)
+    'custom-html-badge.svg': glyph_badge('#e34f26', '#fff', s=7.65, tx=-14.77, ty=-29.84),
     'custom-xml-badge.svg': glyph_badge('#8bc34a', '#323330'),
     'custom-css.svg': css_letters('#ffffff'),
     'custom-xml.svg': xml_glyph('#323330'),
