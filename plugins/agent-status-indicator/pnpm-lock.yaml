@@ -11,6 +11,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: link:/Users/USER/github/deepseek-harness/vendor/cordis
         version: link:../../../deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-client-ui-chat':
+        specifier: link:/Users/USER/github/deepseek-harness/packages/client/ui-chat
+        version: link:../../../deepseek-harness/packages/client/ui-chat
       '@deepseek-ai/dsh-client-ui-conversation':
         specifier: link:/Users/USER/github/deepseek-harness/packages/client/ui-conversation
         version: link:../../../deepseek-harness/packages/client/ui-conversation

@@ -17,5 +17,8 @@ pnpm dsh web --patch /Users/USER/github/tali-dash-plugins/cordis.dev.yml
 
 ## Plugins
 
-- `agent-status-indicator` — floating emoji in the chat area showing the agent's
-  state: 🙂 waiting · 😕 thinking · 🔧 blocked on a tool interaction · 😶 error.
+- `agent-status-indicator` — floating emoji at the bottom-right of the chat
+  area showing the agent's state: 🙂 waiting · 🤨 thinking · 😶 error ·
+  per-tool emoji while a tool call runs ($ bash, ✏️ edit/write, 👁️ read,
+  🔍 grep/glob/search, 🌐 web, 🤖 subagent, 🔧 fallback; rule table ported
+  from pi-web's toolIcons system) · ✋ badge when blocked on your input.

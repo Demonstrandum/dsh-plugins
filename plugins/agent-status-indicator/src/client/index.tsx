@@ -1,38 +1,36 @@
 /**
- * Agent status indicator, browser half. Registers a large floating emoji into
- * the conversation input dock (session scope) that reflects the current
- * session's agent state:
+ * Agent status indicator, browser half. A large floating emoji pinned to the
+ * bottom-right of the chat area reflecting the current session's agent state:
  *
- *   🙂 waiting   — no turn running
- *   😕 thinking  — a turn is running
- *   🔧 blocked   — a pending interaction (tool approval / user question) waits on you
- *   😶 error     — the last agent turn reported an error
+ *   🙂          waiting — no turn running
+ *   🤨          thinking — turn running, no tool call in flight (pi-web glyph)
+ *   <tool>      a tool call is in flight: its pi-web emoji ($ bash, ✏️ edit,
+ *               👁️ read, 🔍 search, 🌐 web, 🤖 subagent, ... 🔧 fallback)
+ *   🔧+badge ✋  a pending interaction (approval / question) blocks on you
+ *   😶          error — the last agent turn reported an error
  */
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only imports (erased at build time): they declaration-merge the slots
 // service onto ctx, the 'conversation.input.dock' SlotMap key, and the
-// session-scope standard props (useSession, useSessionPendingInteraction).
+// session-scope standard props (useSession, useChat, useSessionPendingInteraction).
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CSSProperties } from 'react'
+import { resolveToolGlyph, thinkingGlyph } from './toolIcons.ts'
 
 type Props = PropsRuntime<'conversation.input.dock'>
 
-type Mood = 'waiting' | 'thinking' | 'blocked' | 'error'
-
-const FACE: Record<Mood, string> = {
-  waiting: '\u{1F642}', // 🙂
-  thinking: '\u{1F615}', // 😕
-  blocked: '\u{1F527}', // 🔧
-  error: '\u{1F636}', // 😶
-}
+const WAITING = '\u{1F642}' // 🙂
+const ERROR = '\u{1F636}' // 😶
+const BLOCKED_BADGE = '\u270B' // ✋
 
 const floating: CSSProperties = {
   position: 'fixed',
-  right: '28px',
-  bottom: '120px',
+  right: '16px',
+  bottom: '10px',
   fontSize: '44px',
   lineHeight: 1,
   zIndex: 60,
@@ -41,14 +39,36 @@ const floating: CSSProperties = {
   filter: 'drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3))',
 }
 
-function AgentStatusIndicator({ useSession, useSessionPendingInteraction, sessionId }: Props) {
+const badge: CSSProperties = {
+  position: 'absolute',
+  right: '-6px',
+  top: '-10px',
+  fontSize: '20px',
+}
+
+function AgentStatusIndicator({ useSession, useChat, useSessionPendingInteraction, sessionId }: Props) {
   const running = useSession(snapshot => snapshot.running)
   const hasError = useSession(snapshot => snapshot.lastAgentError !== null)
   const blocked = useSessionPendingInteraction(pending => pending.has(sessionId))
-  const mood: Mood = blocked ? 'blocked' : running ? 'thinking' : hasError ? 'error' : 'waiting'
+  // Selector returns the derived glyph (a primitive) so re-renders happen only
+  // when the effective emoji changes, not on every streaming publication.
+  const toolGlyph = useChat(chat => {
+    const calls = chat.legacy.runningCalls
+    const call = calls.length > 0 ? calls[calls.length - 1] : undefined
+    return call === undefined ? null : resolveToolGlyph(call.name, call.argsRaw)
+  })
+  const glyph = blocked
+    ? (toolGlyph ?? resolveToolGlyph('default'))
+    : toolGlyph ?? (running ? thinkingGlyph() : hasError ? ERROR : WAITING)
+  const label = blocked
+    ? 'agent status: blocked on your input'
+    : toolGlyph !== null
+      ? 'agent status: running a tool'
+      : running ? 'agent status: thinking' : hasError ? 'agent status: error' : 'agent status: waiting'
   return (
-    <div style={floating} role="status" aria-label={`agent status: ${mood}`}>
-      {FACE[mood]}
+    <div style={floating} role="status" aria-label={label}>
+      {glyph}
+      {blocked && <span style={badge}>{BLOCKED_BADGE}</span>}
     </div>
   )
 }
