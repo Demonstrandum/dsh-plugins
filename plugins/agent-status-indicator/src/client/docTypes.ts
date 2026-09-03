@@ -20,6 +20,8 @@ export interface DocType {
   readonly id: string
   /** Long name, e.g. 'python'. */
   readonly name: string
+  /** Badge text override; defaults to `id` (e.g. json shows '{}'). */
+  readonly badgeText?: string
   /** Standard-size SVG asset (file name under ./icons). */
   readonly svg?: string
   /** Optional compact-size SVG variant. */
@@ -43,7 +45,7 @@ export const DOC_TYPES: readonly DocType[] = [
   { id: 'go', name: 'go', svg: 'lang-go.svg', bg: '#00add8', fg: '#ffffff', exts: ['go'] },
   { id: 'html', name: 'html', svg: 'html.svg', bg: '#e34f26', fg: '#ffffff', exts: ['html', 'htm'] },
   { id: 'css', name: 'css', svg: 'css.svg', bg: '#264de4', fg: '#ffffff', exts: ['css', 'scss', 'less'] },
-  { id: 'json', name: 'json', svg: 'json.svg', svgBg: '#e9e9ec', bg: '#55565b', fg: '#f5de19', exts: ['json', 'jsonc'] },
+  { id: 'json', name: 'json', badgeText: '{}', bg: '#4a4a4f', fg: '#ececef', exts: ['json', 'jsonc'] },
   { id: 'toml', name: 'toml', svg: 'toml.svg', bg: '#9c4121', fg: '#ffffff', exts: ['toml'] },
   { id: 'yaml', name: 'yaml', svg: 'yaml.svg', tint: '#cb171e', bg: '#cb171e', fg: '#ffffff', exts: ['yaml', 'yml'] },
   { id: 'md', name: 'markdown', svg: 'md.svg', tint: '#519aba', bg: '#519aba', fg: '#ffffff', exts: ['md', 'markdown', 'mdx'] },

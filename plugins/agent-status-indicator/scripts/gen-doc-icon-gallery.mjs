@@ -43,9 +43,10 @@ function mark(type, sizeClass) {
 
 /** The bg/fg monogram pill (small-size / no-svg fallback); text auto-fits. */
 function badge(type, sizeClass) {
-  const size = type.id.length >= 4 ? 9 : type.id.length === 3 ? 10 : 12
+  const text = type.badgeText ?? type.id
+  const size = text.length >= 4 ? 9 : text.length === 3 ? 10 : 12
   return `<div class="badgemark ${sizeClass}" style="background:${type.bg ?? '#55565b'};color:${type.fg ?? '#fff'};`
-    + `font-size:${sizeClass === 'base' ? size + 4 : size}px">${escapeHtml(type.id)}</div>`
+    + `font-size:${sizeClass === 'base' ? size + 5 : size}px">${escapeHtml(text)}</div>`
 }
 
 const PAGE_SVG = `<svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
@@ -64,11 +65,13 @@ const rows = DOC_TYPES.map(type => `<tr>
     &middot; ${escapeHtml(type.exts.join(' '))}</td>
 </tr>`).join('\n')
 
-/** Browse strip of one remote icon set (lazy imgs, key in tooltip + status line). */
+/** Browse strip of one remote icon set: filter input + lazy imgs, key in tooltip. */
 function browseSection(title, note, items) {
   const chips = items.map(({ key, url }) =>
     `<span class="chip" title="${escapeHtml(key)}"><img loading="lazy" src="${url}" alt="${escapeHtml(key)}"></span>`).join('')
-  return `<h2>${escapeHtml(title)}</h2><p class="note">${note}</p><div class="strip">${chips}</div>`
+  return `<section><h2>${escapeHtml(title)}</h2><p class="note">${note}</p>
+<p><input class="filter" type="search" placeholder="filter by key, e.g. python" oninput="filterStrip(this)"></p>
+<div class="strip">${chips}</div></section>`
 }
 
 let browse = ''
@@ -123,9 +126,9 @@ const html = `<!doctype html>
               -webkit-mask-position:center; mask-position:center; }
   .badgemark { display:inline-flex; align-items:center; justify-content:center;
                font-family:'SF Mono', Menlo, monospace; font-weight:700; }
-  .badgemark.base { min-width:36px; height:36px; border-radius:8px; padding:0 6px; }
-  .badgemark.small { min-width:22px; height:22px; border-radius:6px; padding:0 5px; }
-  .badgemark.indoc { min-width:18px; height:18px; border-radius:4px; padding:0 3px; }
+  .badgemark.base { height:30px; border-radius:8px; padding:0 7px; }
+  .badgemark.small { height:19px; border-radius:5px; padding:0 4px; }
+  .badgemark.indoc { height:16px; border-radius:4px; padding:0 3px; }
   .doc { position:relative; width:40px; height:40px; }
   .dochole { position:absolute; left:0; right:0; top:14px; bottom:5px; display:flex; align-items:center; justify-content:center; }
   td.lang { width:150px; white-space:nowrap; }
@@ -138,7 +141,19 @@ const html = `<!doctype html>
   .chip { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px;
           background:#232327; border-radius:6px; }
   .chip img { width:22px; height:22px; }
+  input.filter { background:#1e1e22; color:#d6d6d8; border:1px solid #3a3a3e; border-radius:6px;
+                 padding:5px 10px; font:13px 'SF Mono', Menlo, monospace; width:280px; outline:none; }
+  input.filter:focus { border-color:#4d93f8; }
 </style>
+<script>
+function filterStrip(input) {
+  const strip = input.closest('section').querySelector('.strip')
+  const q = input.value.trim().toLowerCase()
+  for (const chip of strip.children) {
+    chip.style.display = q === '' || chip.title.toLowerCase().includes(q) ? '' : 'none'
+  }
+}
+</script>
 <h1>document-type registry — icon gallery</h1>
 <p class="note">From <code>src/client/docTypes.ts</code>: long/short name, optional standard/small SVG,
 optional <code>tint</code> (silhouette for mono artwork), <code>svgBg</code> (backdrop plate for artwork that
