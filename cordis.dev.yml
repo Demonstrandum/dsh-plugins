@@ -1,0 +1,7 @@
+# Dev overlay: load every plugin in this repo into a dsh boot by absolute path.
+#   cd ~/github/deepseek-harness && pnpm dsh web --patch /Users/USER/github/tali-dash-plugins/cordis.dev.yml
+# Paths MUST be absolute (a patch contributes config; it does not move the
+# loader's module-resolution root). Machine-specific by design.
+- insert:
+    - id: tali-agent-status-indicator
+      name: '/Users/USER/github/tali-dash-plugins/plugins/agent-status-indicator/index.js'
