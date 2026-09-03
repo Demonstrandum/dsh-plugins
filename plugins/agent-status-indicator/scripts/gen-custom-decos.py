@@ -23,12 +23,44 @@ DIFF_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
 </svg>
 '''
 
+# ── Unframed glyph decos ────────────────────────────────────────────────────
+# CSS: the "CSS" letters from material-icon-theme css.svg (the new CSS logo
+# lettering). In the source they are NEGATIVE space in a purple rounded box
+# (plus small positive filler bits), so the letters are recovered by mask
+# subtraction: white letters-region rect minus box path minus filler path,
+# plus a small corner patch where the box's corner radius leaks through the
+# rect. Transform fitted/centred by measuring rendered bboxes (see AGENTS.md
+# iteration notes). Rendered white; the purple is the registry bg colour.
+CSS_FILLER = "M20 18h-2v-2h-2v2c0 .193 0 .703 1.254 1.033A3.345 3.345 0 0 1 20 22h2v2h2v-2c0-.388-.562-.851-1.254-1.034C20.356 20.34 20 18.84 20 18m-3.254 2.966C14.356 20.34 14 18.84 14 18h-2v-2h-2v8h2v-2h4v2h2v-2c0-.388-.562-.851-1.254-1.034"
+CSS_BOX = "M24 4H4v20a4 4 0 0 0 4 4h16.16A3.84 3.84 0 0 0 28 24.16V8a4 4 0 0 0-4-4m2 14h-2v-2h-2v2c0 .193 0 .703 1.254 1.033A3.345 3.345 0 0 1 26 22v2a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2 2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2 2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2 2 2 0 0 1 2-2h2a2 2 0 0 1 2 2 2 2 0 0 1 2-2h2a2 2 0 0 1 2 2Z"
+
+# XML/HTML: the "<>" glyph subpaths extracted from material xml.svg (movetos
+# absolutised). Black for xml, white for html; greens/oranges are bg colours.
+XML_GLYPH = "M6.12 15.5l3.74 3.74 1.42-1.41-2.33-2.33 2.33-2.33-1.42-1.41zM17.28 15.5l-3.74-3.74-1.42 1.41 2.33 2.33-2.33 2.33 1.42 1.41z"
+
+def css_letters(fill, transform='translate(-40.10,-58.51) scale(6.138)'):
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+<defs><mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="128" height="128">
+<g transform="{transform}">
+<rect x="7" y="13" width="20" height="14" fill="#fff"/>
+<path d="{CSS_BOX}" fill="#000"/>
+<path d="{CSS_FILLER}" fill="#000"/>
+<rect x="26" y="26" width="2.5" height="2.5" fill="#000"/>
+</g></mask></defs>
+<rect width="128" height="128" fill="{fill}" mask="url(#m)"/>
+</svg>
+'''
+
+def xml_glyph(fill, transform='translate(-59.45,-99.58) scale(10.574)'):
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+<g transform="{transform}"><path d="{XML_GLYPH}" fill="{fill}"/></g>
+</svg>
+'''
+
 DECOS = {
-    # measured: margin 10 gap 10 height 45.5 (lighter weight + open tracking)
-    'custom-html.svg': square('HTML', '#f16529', '#fff', 63, 0.55, spacing=5, weight=500, x=116.5),
-    # measured: margin 10 gap 9 height 59.5 (TS is 57.5)
-    'custom-css.svg':  square('CSS',  '#33a9dc', '#fff', 80, 0.50, spacing=8, weight=700, x=117.5),
-    'custom-xml.svg':  square('XML',  '#8bc34a', '#323330', 80, 0.50, spacing=8, weight=700, x=117.5), # material green, JS-style dark text
+    'custom-css.svg': css_letters('#ffffff'),
+    'custom-xml.svg': xml_glyph('#323330'),
+    'custom-html.svg': xml_glyph('#ffffff'),
     'custom-diff.svg': DIFF_SVG,
 }
 
