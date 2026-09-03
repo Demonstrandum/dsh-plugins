@@ -16,7 +16,7 @@
  * Icon rules: pi-web's table, plus DSH tool names (marked). A value is an
  * emoji glyph, or an `svg:<name>` token the renderer maps to an inline SVG.
  */
-const TABLE: Readonly<Record<string, string>> = {
+export const TABLE: Readonly<Record<string, string>> = {
   // ── pi-web toolIcons.json ──────────────────────────────────────────────
   default: '\u{1F527}', // 🔧
   thinking: '\u{1F928}', // 🤨
@@ -34,6 +34,16 @@ const TABLE: Readonly<Record<string, string>> = {
   'bash?cmd=ag': '\u{1F50D}',
   'bash?cmd=fd': '\u{1F50D}',
   'bash?cmd=find': '\u{1F50D}',
+  // ── bash command rules mined from real sessions (leading-token match) ───
+  'bash?cmd=sleep': '\u{1F4A4}', // 💤
+  'bash?cmd=pwd': '\u{1F4CD}', // 📍
+  'bash?cmd=ls': '\u{1F4C2}', // 📂
+  'bash?cmd=df': '\u{1F4BE}', // 💾
+  'bash?cmd=echo': '\u{1F5E3}\uFE0F', // 🗣️
+  'bash?cmd=cal': '\u{1F4C5}', // 📅
+  'bash?cmd=shasum': '#\uFE0F\u20E3', // #️⃣
+  'bash?cmd=seq': '\u{1F522}', // 🔢
+  'bash?cmd=sw_vers': '\u{1F34E}', // 🍎
   // ── DSH tool names (same spirit as the pi-web rows above) ──────────────
   read_image: '\u{1F441}\uFE0F', // 👁️  (read)
   glob: '\u{1F50D}', // 🔍 (file search)
