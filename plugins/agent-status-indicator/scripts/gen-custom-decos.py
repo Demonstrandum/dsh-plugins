@@ -122,7 +122,25 @@ PDF_DECO_SVG = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"
 </svg>
 '''
 
+# ── Image mountain+sun from material image.svg ─────────────────────────────
+# Holes inside the teal photo-page path; recovered by mask subtraction with a
+# patch over the fold-notch leak (same failure mode as pdf). Black glyph;
+# decoBg carries the teal. Fit measured: bbox (3.88,5.94)-(11.94,13.50).
+IMG_PAGE_D = 'M8.5 6h4l-4-4zM3.875 1H9.5l4 4v8.6c0 .773-.616 1.4-1.375 1.4h-8.25c-.76 0-1.375-.627-1.375-1.4V2.4c0-.777.612-1.4 1.375-1.4M4 13.6h8V8l-2.625 2.8L8 9.4zm1.25-7.7c-.76 0-1.375.627-1.375 1.4s.616 1.4 1.375 1.4c.76 0 1.375-.627 1.375-1.4S6.009 5.9 5.25 5.9'
+
+IMG_DECO_SVG = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+<defs><mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="128" height="128">
+<g transform="translate(-49.75,-75.83) scale(14.388)">
+<rect x="3.5" y="5.5" width="9.5" height="8.6" fill="#fff"/>
+<path d="{IMG_PAGE_D}" fill="#000"/>
+<rect x="8.3" y="5.3" width="5" height="0.95" fill="#000"/>
+</g></mask></defs>
+<rect width="128" height="128" fill="#323330" mask="url(#m)"/>
+</svg>
+'''
+
 DECOS = {
+    'custom-img.svg': IMG_DECO_SVG,
     'custom-pdf.svg': PDF_DECO_SVG,
     'custom-js.svg': JS_DECO_SVG,
     'custom-ts.svg': TS_DECO_SVG,
