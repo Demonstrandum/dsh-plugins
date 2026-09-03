@@ -1,4 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-<rect x="1.5" y="1.5" width="125" height="125" fill="#00897b"/>
-<g transform="translate(120.5,110.5) scale(1.0,1)"><text x="0" y="0" text-anchor="end" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="700" font-size="116" fill="#fff">±</text></g>
+<g fill="#4caf50"><rect x="26" y="30" width="76" height="20" rx="4"/><rect x="54" y="2" width="20" height="76" rx="4"/></g>
+<rect x="26" y="100" width="76" height="20" rx="4" fill="#ef5350"/>
 </svg>

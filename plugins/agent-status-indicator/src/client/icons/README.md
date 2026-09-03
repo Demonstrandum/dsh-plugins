@@ -11,4 +11,4 @@ render time via the registry's `tint` field (CSS mask), as pi-web does.
 - `material-*.svg` — [material-icon-theme](https://github.com/material-extensions/vscode-material-icon-theme) (MIT) decorators.
 - `devicon-javascript.svg` `devicon-typescript.svg` — devicon (MIT) squares used as js/ts decorators.
 - `custom-*.svg` — generated JS-style solid squares (see gen script / AGENTS.md): html #f16529, css #33a9dc,
-  xml #8bc34a, diff #00897b.
+  xml #8bc34a; diff is a green-plus/red-minus mark with no background.
