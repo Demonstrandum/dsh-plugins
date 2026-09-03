@@ -7,3 +7,8 @@
 
 Mono/dark marks (`lang-rust`, `lang-perl`, `md`, `json`) are silhouette-tinted at
 render time via the registry's `tint` field (CSS mask), as pi-web does.
+
+- `material-*.svg` — [material-icon-theme](https://github.com/material-extensions/vscode-material-icon-theme) (MIT) decorators.
+- `devicon-javascript.svg` `devicon-typescript.svg` — devicon (MIT) squares used as js/ts decorators.
+- `custom-*.svg` — generated JS-style solid squares (see gen script / AGENTS.md): html #f16529, css #33a9dc,
+  xml #8bc34a, img #26a69a, pdf #d32f2f, csv #217346, diff #00897b.
