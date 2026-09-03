@@ -38,8 +38,17 @@ const STACK_SIZE = 4
 /** Vertical distance between stacked entries, px. */
 const STACK_GAP = 56
 
-/** Tools whose file_path argument selects a document-type annotation badge. */
-const FILE_TOOLS = new Set(['edit', 'write', 'read', 'read_image'])
+/**
+ * Tools whose file_path argument selects a document-type icon, mapped to the
+ * activity decoration shown at its bottom-right: pencil for editing, plus for
+ * creating/adding, eyeball for looking.
+ */
+const FILE_TOOL_ACT: Readonly<Record<string, string>> = {
+  edit: '\u270F\uFE0F', // ✏️
+  write: '\u2795', // ➕
+  read: '\u{1F441}\uFE0F', // 👁️
+  read_image: '\u{1F441}\uFE0F', // 👁️
+}
 
 /**
  * Document-type id for one tool call, from its file_path extension.
@@ -48,7 +57,7 @@ const FILE_TOOLS = new Set(['edit', 'write', 'read', 'read_image'])
  * @returns a FINAL_BADGES key, or null when nothing matches.
  */
 function docTypeForCall(name: string, argsRaw: string): string | null {
-  if (!FILE_TOOLS.has(name)) return null
+  if (!Object.hasOwn(FILE_TOOL_ACT, name)) return null
   let path: unknown
   try {
     path = (JSON.parse(argsRaw) as Record<string, unknown>)['file_path']
@@ -91,8 +100,10 @@ interface StackEntry {
   readonly token: string
   readonly label: string
   readonly badge: boolean
-  /** Document-type annotation (FINAL_BADGES key) for file-touching calls. */
+  /** Document-type main icon (FINAL_BADGES key) for file-touching calls. */
   readonly docType: string | null
+  /** Activity decoration (pencil/plus/eyeball) shown on the doc-type icon. */
+  readonly act: string | null
 }
 
 /** One observed status: `identity` changes exactly when a new entry is due. */
@@ -102,49 +113,56 @@ interface Status {
   readonly label: string
   readonly badge: boolean
   readonly docType: string | null
+  readonly act: string | null
 }
 
 function AgentStatusIndicator({ useSession, useChat, useSessionPendingInteraction, sessionId }: Props) {
   const running = useSession(snapshot => snapshot.running)
   const hasError = useSession(snapshot => snapshot.lastAgentError !== null)
   const blocked = useSessionPendingInteraction(pending => pending.has(sessionId))
-  // Selector returns a primitive ("callId|token|docType") so re-renders happen
-  // only when the in-flight call changes, not on every streaming publication.
+  // Selector returns a primitive ("callId|token|docType|act") so re-renders
+  // happen only when the in-flight call changes, not per streaming frame.
   const runningCall = useChat(chat => {
     const calls = chat.legacy.runningCalls
     const call = calls.length > 0 ? calls[calls.length - 1] : undefined
     if (call === undefined) return null
-    return `${call.callId}|${resolveToolGlyph(call.name, call.argsRaw)}|${docTypeForCall(call.name, call.argsRaw) ?? ''}`
+    const doc = docTypeForCall(call.name, call.argsRaw)
+    const act = doc === null ? '' : FILE_TOOL_ACT[call.name] ?? ''
+    return `${call.callId}|${resolveToolGlyph(call.name, call.argsRaw)}|${doc ?? ''}|${act}`
   })
   const parsedCall = runningCall === null
     ? null
-    : (([, token, doc]: string[]) => ({ token: token!, docType: doc === '' ? null : doc! }))(runningCall.split('|'))
+    : (([, token, doc, act]: string[]) => ({
+        token: token!,
+        docType: doc === '' ? null : doc!,
+        act: act === '' ? null : act!,
+      }))(runningCall.split('|'))
 
   let status: Status
   if (blocked) {
     const token = parsedCall === null ? resolveToolGlyph('default') : parsedCall.token
-    status = { identity: `blocked:${token}`, token, label: 'blocked on your input', badge: true, docType: parsedCall?.docType ?? null }
+    status = { identity: `blocked:${token}`, token, label: 'blocked on your input', badge: true, docType: parsedCall?.docType ?? null, act: parsedCall?.act ?? null }
   } else if (runningCall !== null && parsedCall !== null) {
-    status = { identity: `tool:${runningCall.split('|')[0]!}`, token: parsedCall.token, label: 'running a tool', badge: false, docType: parsedCall.docType }
+    status = { identity: `tool:${runningCall.split('|')[0]!}`, token: parsedCall.token, label: 'running a tool', badge: false, docType: parsedCall.docType, act: parsedCall.act }
   } else if (running) {
-    status = { identity: 'think', token: thinkingGlyph(), label: 'thinking', badge: false, docType: null }
+    status = { identity: 'think', token: thinkingGlyph(), label: 'thinking', badge: false, docType: null, act: null }
   } else if (hasError) {
-    status = { identity: 'error', token: ERROR, label: 'error', badge: false, docType: null }
+    status = { identity: 'error', token: ERROR, label: 'error', badge: false, docType: null, act: null }
   } else {
-    status = { identity: 'wait', token: WAITING, label: 'waiting', badge: false, docType: null }
+    status = { identity: 'wait', token: WAITING, label: 'waiting', badge: false, docType: null, act: null }
   }
 
   const [entries, setEntries] = useState<readonly StackEntry[]>([])
   const lastIdentity = useRef<string | null>(null)
   const seq = useRef(0)
-  const { identity, token, label, badge, docType } = status
+  const { identity, token, label, badge, docType, act } = status
   useEffect(() => {
     if (identity === lastIdentity.current) return
     lastIdentity.current = identity
     seq.current += 1
-    const entry: StackEntry = { key: seq.current, token, label, badge, docType }
+    const entry: StackEntry = { key: seq.current, token, label, badge, docType, act }
     setEntries(prev => [...prev, entry].slice(-STACK_SIZE))
-  }, [identity, token, label, badge, docType])
+  }, [identity, token, label, badge, docType, act])
 
   // Lockstep shift: when an entry is appended, every entry's `bottom` moves up
   // one slot with NO per-entry transition; the container starts one slot down
@@ -177,14 +195,18 @@ function AgentStatusIndicator({ useSession, useChat, useSessionPendingInteractio
             role={fromBottom === 0 ? 'status' : undefined}
             aria-label={fromBottom === 0 ? `agent status: ${entry.label}` : undefined}
           >
-            {renderIcon(entry.token)}
-            {entry.docType !== null && FINAL_BADGES[entry.docType] !== undefined && (
-              <span
-                className="tali-agent-status-doc"
-                // eslint-disable-next-line react/no-danger -- generated, trusted markup bundled with the plugin
-                dangerouslySetInnerHTML={{ __html: FINAL_BADGES[entry.docType]! }}
-              />
-            )}
+            {entry.docType !== null && FINAL_BADGES[entry.docType] !== undefined
+              ? (
+                <>
+                  <span
+                    className="tali-agent-status-docmain"
+                    // eslint-disable-next-line react/no-danger -- generated, trusted markup bundled with the plugin
+                    dangerouslySetInnerHTML={{ __html: FINAL_BADGES[entry.docType]! }}
+                  />
+                  {entry.act !== null && <span className="tali-agent-status-act">{entry.act}</span>}
+                </>
+                )
+              : renderIcon(entry.token)}
             {entry.badge && <span className="tali-agent-status-badge">{BLOCKED_BADGE}</span>}
           </div>
         )
@@ -218,18 +240,23 @@ const CSS = `
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3));
   transition: opacity 300ms ease;
 }
-.tali-agent-status-doc {
-  position: absolute;
-  right: -5px;
-  bottom: -3px;
-  width: 20px;
-  height: 20px;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+.tali-agent-status-docmain {
+  width: 40px;
+  height: 40px;
+  display: block;
 }
-.tali-agent-status-doc svg {
+.tali-agent-status-docmain svg {
   width: 100%;
   height: 100%;
   display: block;
+}
+.tali-agent-status-act {
+  position: absolute;
+  right: -6px;
+  bottom: -4px;
+  font-size: 20px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
 }
 .tali-agent-status-badge {
   position: absolute;
