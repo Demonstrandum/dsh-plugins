@@ -23,6 +23,11 @@
  *       the agent's scope and waits for tool discovery; the model sees
  *       `mcp__safari__*` / `mcp__chrome__*` on its next step.
  *   browser_close { browser?: … }                   → disposes the mount(s).
+ *   safari_get_page_content { url, format?, … }      → reads a page in an
+ *       ISOLATED reader (see reader-pool.mjs): never the chat's own browsing
+ *       session, so a page the agent is working on is never changed under it.
+ *       Readers are pooled host-wide: first read spawns one; concurrent reads
+ *       (e.g. subagents) each get their own; one stays warm afterwards.
  *
  * An idle timer (reset on every `mcp__<server>__*` call by that agent) closes
  * a mount after `idleMinutes` and injects a notice so the model knows to call
@@ -54,6 +59,11 @@
  *     driver: /Applications/Safari Technology Preview.app/Contents/MacOS/safaridriver
  *     labelWindows: true       # banner "This window is controlled by DSH: <chat title>."
  *     labelPrefix: 'DSH: '
+ *     reader:                  # safari_get_page_content's isolated reader pool
+ *       enabled: true
+ *       maxIdle: 1             # readers kept warm after a read
+ *       idleMinutes: 30        # close warm readers after this long unused (0 = never)
+ *       maxChars: 120000       # truncate returned content beyond this (full text saved to a file)
  *   chrome:
  *     enabled: true
  *     command: /opt/homebrew/bin/chrome-devtools-mcp   # absolute path; npm i -g chrome-devtools-mcp
@@ -66,11 +76,14 @@
  *   traceFile: ''             # append JSON lifecycle lines here (debugging; '' = off)
  */
 
-import { appendFileSync, existsSync } from 'node:fs'
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Schema from '@deepseek-ai/schemastery'
 import * as McpClient from '@deepseek-ai/dsh-mcp-client'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { createReaderPool, FORMATS } from './reader-pool.mjs'
 
 export const name = 'browser-automation'
 
@@ -86,6 +99,15 @@ export const Config = Schema.object({
     // "dsh-mcp-client").
     labelWindows: Schema.boolean().default(true),
     labelPrefix: Schema.string().default('DSH: '),
+    // safari_get_page_content: isolated page readers (own STP windows), pooled
+    // host-wide. `maxIdle` readers stay warm after use; all are closed after
+    // `idleMinutes` without a read (0 = never).
+    reader: Schema.object({
+      enabled: Schema.boolean().default(true),
+      maxIdle: Schema.number().min(0).default(1),
+      idleMinutes: Schema.number().min(0).default(30),
+      maxChars: Schema.number().min(1000).default(120_000),
+    }).default({}),
   }).default({}),
   chrome: Schema.object({
     enabled: Schema.boolean().default(true),
@@ -167,6 +189,26 @@ function preflight(browser, server) {
   throw new Error(`Chrome automation is unavailable: no chrome-devtools-mcp at "${server.command}". Install it with \`npm i -g chrome-devtools-mcp\` (and Google Chrome), or use browser_open with "safari".`)
 }
 
+/** Truncate a reader result to maxChars, saving the full text to a temp file when cut. */
+function clampRead(result, maxChars) {
+  if (result.content.length <= maxChars) return result
+  const file = join(tmpdir(), `dsh-safari-read-${Date.now()}-${process.pid}.${result.format === 'html' ? 'html' : result.format === 'json' ? 'json' : 'txt'}`)
+  writeFileSync(file, result.content)
+  return { ...result, content: result.content.slice(0, maxChars), truncated: true, totalChars: result.content.length, fullTextPath: file }
+}
+
+/** Model-facing text for a safari_get_page_content result. */
+function renderRead(value) {
+  const head = [
+    value.title !== undefined ? `Title: ${value.title}` : undefined,
+    `URL: ${value.url ?? ''}`,
+    `Format: ${value.format}`,
+    value.truncated ? `NOTE: content truncated to ${value.content.length} of ${value.totalChars} chars; full text saved to ${value.fullTextPath} (use read).` : undefined,
+  ].filter(Boolean).join('\n')
+  const script = 'scriptResult' in value ? `\n\n--- scriptResult ---\n${typeof value.scriptResult === 'string' ? value.scriptResult : JSON.stringify(value.scriptResult, null, 1)}` : ''
+  return `${head}\n\n${value.content}${script}`
+}
+
 /** Human hint for the most common start failures. */
 function startHint(browser, error) {
   const text = String(error?.cause ?? error)
@@ -196,6 +238,19 @@ export function apply(ctx, config) {
       // permission error must never affect the session.
     }
   }
+
+  const readerPool = config.safari.enabled && config.safari.reader.enabled
+    ? createReaderPool({
+      driver: config.safari.driver,
+      shim: SHIM,
+      labelPrefix: config.safari.labelPrefix,
+      maxIdle: config.safari.reader.maxIdle,
+      idleMs: config.safari.reader.idleMinutes * 60_000,
+      readTimeoutMs: config.toolCallTimeoutMs,
+      trace,
+      logger: ctx.logger,
+    })
+    : undefined
 
   /** @type {Map<object, { mounts: Map<string, { dispose(): Promise<void> }>, timer?: ReturnType<typeof setTimeout> }>} */
   const states = new Map()
@@ -348,6 +403,36 @@ export function apply(ctx, config) {
             return closed.length === 0 ? 'No browser was open.' : `Closed ${closed.join(', ')}.`
           },
         })),
+        ...(readerPool === undefined ? [] : [agent.ctx.tools.register(defineTool({
+          name: 'safari_get_page_content',
+          description: `Read one web page with a real Safari (Technology Preview) engine and return its content — use this instead of web_fetch for JavaScript-rendered pages (YouTube, SPAs, dashboards) or when web_fetch returns empty/blocked content. Runs in an ISOLATED reader window shared by no one: it never touches this chat's own browser_open session, so a page you are working on is not changed. No browser_open needed. Formats (extraction is done by WebKit itself): ${FORMATS.join(' | ')}; default markdown. For pages that render lazily set waitMs (2000–5000). For structured data hidden from the rendered text (e.g. YouTube's description lives in the page's ytInitialPlayerResponse script), pass \`script\`: a JS FUNCTION BODY evaluated in the loaded page (use \`return\`); its return value comes back as scriptResult. Reads are pooled host-wide, so concurrent reads (also from subagents) each get their own window and a warm reader is reused.`,
+          parameters: {
+            url: { type: 'string', required: true, description: 'Absolute http(s) URL to read.' },
+            format: { type: 'string', enum: FORMATS, description: 'Extraction format (default markdown). plainText is smallest; textTree/json carry structure and node UIDs; html is the rendered DOM.' },
+            waitMs: { type: 'number', description: 'Extra wait after load completes before extracting, for lazily rendered pages (default 0).' },
+            maxWordsPerParagraph: { type: 'number', description: 'Truncate paragraphs beyond this many words (default 2000, i.e. effectively no truncation).' },
+            includeURLs: { type: 'boolean', description: 'Include link/image URLs (default true).' },
+            script: { type: 'string', description: 'Optional JS function body run in the page after load; use `return`. Returned as scriptResult (JSON-decoded when possible).' },
+          },
+          output: {
+            // Loose object: fields vary (title/url may be absent, scriptResult
+            // optional, truncation metadata when clamped).
+            schema: { type: 'object', additionalProperties: true },
+            render: (_args, value) => [{ type: 'text', text: renderRead(value) }],
+          },
+          async execute(args) {
+            preflight('safari', servers.safari)
+            const result = await readerPool.read({
+              url: args.url,
+              format: args.format ?? 'markdown',
+              waitMs: args.waitMs ?? 0,
+              maxWordsPerParagraph: args.maxWordsPerParagraph ?? 2000,
+              includeURLs: args.includeURLs ?? true,
+              script: args.script,
+            })
+            return clampRead(result, config.safari.reader.maxChars)
+          },
+        }))]),
       ]
       return () => { for (const dispose of disposers) dispose() }
     }, 'browser-automation.tools')
@@ -387,12 +472,14 @@ export function apply(ctx, config) {
     }
   })
 
-  // Plugin unload: close every mount we own (agents outlive this plugin).
+  // Plugin unload: close every mount we own (agents outlive this plugin) and
+  // the reader pool.
   ctx.effect(() => async () => {
     for (const [agent, state] of states) {
       clearTimeout(state.timer)
       await closeMounts(agent, [...state.mounts.keys()], 'unload')
     }
     states.clear()
+    await readerPool?.dispose()
   }, 'browser-automation.mounts')
 }

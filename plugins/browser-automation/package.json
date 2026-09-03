@@ -11,6 +11,8 @@
   },
   "files": [
     "index.js",
+    "reader-pool.mjs",
+    "safari-mcp-shim.mjs",
     "cordis.patch.yml"
   ],
   "dsh": {
@@ -19,11 +21,13 @@
     }
   },
   "scripts": {
-    "check": "node --check index.js && node scripts/smoke-config.mjs"
+    "check": "node --check index.js && node scripts/smoke-config.mjs",
+    "live:reader": "node scripts/live-reader-test.mjs"
   },
   "dependencies": {
     "@deepseek-ai/dsh-mcp-client": "link:/Users/USER/github/deepseek-harness/packages/mcp/mcp-client",
     "@deepseek-ai/dsh-tools": "link:/Users/USER/github/deepseek-harness/packages/core/tools",
-    "@deepseek-ai/schemastery": "link:/Users/USER/github/deepseek-harness/vendor/schemastery"
+    "@deepseek-ai/schemastery": "link:/Users/USER/github/deepseek-harness/vendor/schemastery",
+    "@modelcontextprotocol/sdk": "link:/Users/USER/github/deepseek-harness/node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_zod@4.4.3/node_modules/@modelcontextprotocol/sdk"
   }
 }

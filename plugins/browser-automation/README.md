@@ -62,6 +62,37 @@ Full config surface is documented at the top of `index.js`. Module code changes
 need a host restart (`dsh web` has module HMR disabled; only the patch file is
 live-reloaded). `pnpm run check` runs a keyless smoke test.
 
+## `safari_get_page_content` — isolated page reads
+
+`safari_get_page_content { url, format?, waitMs?, maxWordsPerParagraph?,
+includeURLs?, script? }` reads one page with a real Safari engine and returns
+its content, **without touching the chat's own `browser_open` session** — a
+page the agent is working on is never changed underneath it.
+
+- **Formats** `markdown | plainText | text | textTree | html | json` — the
+  extraction is WebKit's own (`get_page_content` in Apple's MCP server); the
+  plugin only passes options through. It overrides the server's
+  `maxWordsPerParagraph` default of 15, which silently truncates prose, and
+  always extracts `region: entire_page`.
+- **Reader pool** (`reader-pool.mjs`, host-wide, starts empty): a read takes an
+  idle reader or spawns one — its own `safaridriver --mcp` process, hence its
+  own STP window labeled `DSH: page reader #n`, driven by a private MCP SDK
+  client (nothing is registered into any agent). Concurrent reads (e.g.
+  subagents) each get their own reader. Afterwards the reader parks on
+  `about:blank` and returns to the pool; readers beyond `reader.maxIdle`
+  (default 1) are disposed at once, the rest after `reader.idleMinutes`
+  (default 30) unused. Cold start is serialized: two brand-new sessions
+  navigating simultaneously can both launch STP and orphan an instance (seen
+  once); the first reader finishes its navigation before others spawn.
+- **`waitMs`** for lazily rendered pages; **`script`** (a JS function body,
+  `return …`) runs in the loaded page and its value is returned as
+  `scriptResult` — e.g. YouTube's show notes are not in the rendered text (the
+  description is collapsed) but are in the page's `ytInitialPlayerResponse`.
+- Output beyond `reader.maxChars` (120 000) is truncated and the full text
+  saved to a temp file whose path is reported.
+
+Live check (spawns STP): `pnpm run live:reader`.
+
 ## What the model sees
 
 - `browser_open { browser: safari | chrome }` → mounts, waits for MCP tool
@@ -70,6 +101,7 @@ live-reloaded). `pnpm run check` runs a keyless smoke test.
   request time). A failed start (STP not running, server not installed) comes
   back as the tool error with a hint.
 - `browser_close { browser? }` → disposes the mount(s); tools disappear.
+- `safari_get_page_content { url, … }` → isolated read, see above.
 - Idle close injects a `[browser-automation] …` notice so the model knows to
   reopen.
 

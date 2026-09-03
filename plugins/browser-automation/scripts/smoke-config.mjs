@@ -98,6 +98,10 @@ console.log('smoke ok: lazy tools attached to pre-existing + new top-level agent
       throw new Error(`shim args unexpected: ${JSON.stringify(row.args)}`)
     }
     console.log('smoke ok: safari mounts through the shim with label', JSON.stringify(row.args[2]))
+    if (defs.safari_get_page_content === undefined) throw new Error('safari_get_page_content not registered')
+    const schema = defs.safari_get_page_content.parameters
+    if (!schema.properties?.format?.enum?.includes('markdown') || !schema.required?.includes('url')) throw new Error(`reader tool schema unexpected: ${JSON.stringify(schema).slice(0, 300)}`)
+    console.log('smoke ok: safari_get_page_content registered with formats', schema.properties.format.enum.join('/'))
   } else {
     console.log('smoke skipped: STP driver not installed here')
   }
