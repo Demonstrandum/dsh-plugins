@@ -50,26 +50,78 @@ const FILE_TOOL_ACT: Readonly<Record<string, string>> = {
   read_image: '\u{1F441}\uFE0F', // 👁️
 }
 
-/**
- * Document-type id for one tool call, from its file_path extension.
- * @param name - tool name.
- * @param argsRaw - raw JSON argument string.
- * @returns a FINAL_BADGES key, or null when nothing matches.
- */
-function docTypeForCall(name: string, argsRaw: string): string | null {
-  if (!Object.hasOwn(FILE_TOOL_ACT, name)) return null
-  let path: unknown
-  try {
-    path = (JSON.parse(argsRaw) as Record<string, unknown>)['file_path']
-  } catch {
-    return null
-  }
-  if (typeof path !== 'string') return null
+/** Activity decoration for running a script through a shell command. */
+const RUN_ACT = '\u25B6\uFE0F' // ▶️
+
+/** Interpreter/launcher commands whose file argument identifies the script. */
+const RUNNERS = new Set([
+  'node', 'ruby', 'perl', 'php', 'lua', 'rscript', 'swift', 'java',
+  'bash', 'sh', 'zsh', 'tsx', 'ts-node', 'bun', 'deno', 'uv', 'uvx', 'go', 'npx',
+])
+
+/** Document-type id for a path-ish string's extension, or null. */
+function docTypeForPath(path: string): string | null {
   const base = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
   const dot = base.lastIndexOf('.')
   if (dot <= 0) return null // dotfiles have no extension
   const ext = base.slice(dot + 1).toLowerCase()
   return Object.hasOwn(EXT_TO_TYPE, ext) ? EXT_TO_TYPE[ext]! : null
+}
+
+/**
+ * The script a shell command runs, as a document-type id. Splits the command
+ * line on shell connectors, then looks for `<runner> [run] <file.ext>` where
+ * the runner is a known interpreter/launcher (python/node/uv/npx/go/...);
+ * flags and VAR=value assignments are skipped, and the first argument whose
+ * extension maps to a known type wins.
+ * @param command - the bash tool's command string.
+ * @returns a FINAL_BADGES key, or null when no script target is recognized.
+ */
+function scriptTargetType(command: string): string | null {
+  for (const segment of command.split(/&&|\|\||;|\|/)) {
+    const tokens = segment.trim().split(/\s+/).filter(token => token !== '')
+    // Skip leading VAR=value environment assignments.
+    let index = 0
+    while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index]!)) index += 1
+    const head = tokens[index]
+    if (head === undefined) continue
+    const runner = head.slice(head.lastIndexOf('/') + 1).toLowerCase()
+    if (!RUNNERS.has(runner) && !/^python[\d.]*$/.test(runner)) continue
+    for (const raw of tokens.slice(index + 1)) {
+      const token = raw.replace(/^['"]|['"]$/g, '')
+      if (token === 'run' || token === 'exec') continue // uv run / go run / deno run / bun run
+      if (token.startsWith('-')) continue // flags
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) continue
+      const type = docTypeForPath(token)
+      if (type !== null) return type
+      // npx <package> <file>: the package name has no extension; keep scanning.
+      if (runner !== 'npx') break // first real argument was not a known script: give up on this segment
+    }
+  }
+  return null
+}
+
+/** Doc-type icon + activity decoration for one tool call, or null. */
+function fileCallInfo(name: string, argsRaw: string): { doc: string; act: string } | null {
+  let args: Record<string, unknown>
+  try {
+    args = JSON.parse(argsRaw) as Record<string, unknown>
+  } catch {
+    return null
+  }
+  if (Object.hasOwn(FILE_TOOL_ACT, name)) {
+    const path = args['file_path']
+    if (typeof path !== 'string') return null
+    const doc = docTypeForPath(path)
+    return doc === null ? null : { doc, act: FILE_TOOL_ACT[name]! }
+  }
+  if (name === 'bash') {
+    const command = args['command']
+    if (typeof command !== 'string') return null
+    const doc = scriptTargetType(command)
+    return doc === null ? null : { doc, act: RUN_ACT }
+  }
+  return null
 }
 
 /** Terminal icon for shell calls: gray-bordered black square, green prompt chevron. */
@@ -126,9 +178,8 @@ function AgentStatusIndicator({ useSession, useChat, useSessionPendingInteractio
     const calls = chat.legacy.runningCalls
     const call = calls.length > 0 ? calls[calls.length - 1] : undefined
     if (call === undefined) return null
-    const doc = docTypeForCall(call.name, call.argsRaw)
-    const act = doc === null ? '' : FILE_TOOL_ACT[call.name] ?? ''
-    return `${call.callId}|${resolveToolGlyph(call.name, call.argsRaw)}|${doc ?? ''}|${act}`
+    const info = fileCallInfo(call.name, call.argsRaw)
+    return `${call.callId}|${resolveToolGlyph(call.name, call.argsRaw)}|${info?.doc ?? ''}|${info?.act ?? ''}`
   })
   const parsedCall = runningCall === null
     ? null
