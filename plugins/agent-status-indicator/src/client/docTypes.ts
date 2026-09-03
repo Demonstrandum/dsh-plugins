@@ -47,8 +47,8 @@ export interface DocType {
 
 export const DOC_TYPES: readonly DocType[] = [
   { id: 'py', name: 'python', brand: 'lang-python.svg', deco: 'material-python.svg', bg: '#3776ab', fg: '#ffd43b', exts: ['py'] },
-  { id: 'js', name: 'javascript', brand: 'lang-javascript.svg', badge: 'devicon-javascript.svg', bg: '#f7df1e', fg: '#000000', exts: ['js', 'jsx', 'mjs', 'cjs'] },
-  { id: 'ts', name: 'typescript', brand: 'lang-typescript.svg', badge: 'devicon-typescript.svg', bg: '#3178c6', fg: '#ffffff', exts: ['ts', 'tsx', 'mts', 'cts'] },
+  { id: 'js', name: 'javascript', brand: 'lang-javascript.svg', badge: 'devicon-javascript.svg', deco: 'custom-js.svg', decoBg: '#f0db4f', bg: '#f7df1e', fg: '#000000', exts: ['js', 'jsx', 'mjs', 'cjs'] },
+  { id: 'ts', name: 'typescript', brand: 'lang-typescript.svg', badge: 'devicon-typescript.svg', deco: 'custom-ts.svg', decoBg: '#007acc', bg: '#3178c6', fg: '#ffffff', exts: ['ts', 'tsx', 'mts', 'cts'] },
   { id: 'go', name: 'go', brand: 'lang-go.svg', deco: 'material-go.svg', bg: '#00add8', fg: '#ffffff', exts: ['go'] },
   { id: 'html', name: 'html', brand: 'html.svg', badge: 'custom-html-badge.svg', deco: 'custom-html.svg', decoBg: '#e34f26', bg: '#e34f26', fg: '#ffffff', exts: ['html', 'htm'] },
   { id: 'css', name: 'css', brand: 'css.svg', badge: 'custom-css-badge.svg', deco: 'custom-css.svg', decoBg: '#7e57c2', bg: '#7e57c2', fg: '#ffffff', exts: ['css', 'scss', 'less'] },
