@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """Regenerate the custom-*.svg decorators (devicon-JS-style solid squares with
 tall-narrow bottom-right text). Calibrated against renders of the devicon js/ts
-squares (qlmanage previews compared by eye): 3-char text 56/0.66, 4-char 63/0.55,
-baseline y=120.5, right edge x=120.5, box inset 1.5px (devicon-matched). Run from the plugin root."""
+squares (qlmanage previews compared by eye): see per-icon comments; box inset 1.5px, baseline y=116.5 (devicon-measured). Run from the plugin root."""
 
-def square(label, box, text, size, squeeze, y=120.5, x=120.5, weight=700):
+def square(label, box, text, size, squeeze, spacing, weight, x, y=116.5):
     # Box inset 1.5px like the devicon js/ts squares (125x125 on a 128 canvas).
+    # Calibrated against MEASURED devicon js/ts renders (qlmanage + PIL bbox):
+    # right margin 10, bottom gap 10, TS glyph height ~57.5 viewBox units.
+    # letter-spacing is pre-squeeze; WebKit adds trailing spacing before the
+    # end anchor, so x carries a +spacing*squeeze compensation baked into the
+    # measured values below.
     return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
 <rect x="1.5" y="1.5" width="125" height="125" fill="{box}"/>
-<g transform="translate({x},{y}) scale({squeeze},1)"><text x="0" y="0" text-anchor="end" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="{weight}" font-size="{size}" fill="{text}">{label}</text></g>
+<g transform="translate({x},{y}) scale({squeeze},1)"><text x="0" y="0" text-anchor="end" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="{weight}" font-size="{size}" letter-spacing="{spacing}" fill="{text}">{label}</text></g>
 </svg>
 '''
 
@@ -20,9 +24,11 @@ DIFF_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
 '''
 
 DECOS = {
-    'custom-html.svg': square('HTML', '#f16529', '#fff', 63, 0.55),   # devicon html5 lighter orange
-    'custom-css.svg':  square('CSS',  '#33a9dc', '#fff', 56, 0.66),   # devicon css3 lighter blue
-    'custom-xml.svg':  square('XML',  '#8bc34a', '#323330', 56, 0.66),# material green, JS-style dark text
+    # measured: margin 10 gap 10 height 45.5 (lighter weight + open tracking)
+    'custom-html.svg': square('HTML', '#f16529', '#fff', 63, 0.55, spacing=5, weight=500, x=116.5),
+    # measured: margin 10 gap 9 height 59.5 (TS is 57.5)
+    'custom-css.svg':  square('CSS',  '#33a9dc', '#fff', 80, 0.50, spacing=8, weight=700, x=117.5),
+    'custom-xml.svg':  square('XML',  '#8bc34a', '#323330', 80, 0.50, spacing=8, weight=700, x=117.5), # material green, JS-style dark text
     'custom-diff.svg': DIFF_SVG,
 }
 
