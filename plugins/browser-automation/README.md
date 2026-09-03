@@ -55,6 +55,7 @@ profile's patch layer (what the `web` profile uses):
         chrome:
           headless: false       # true = no visible Chrome window
           hideAutomationBanner: true   # drops --enable-automation (no infobar)
+          disableCategories: [performance, emulation]   # fewer mcp__chrome__ tools
         # traceFile: /tmp/browser-automation-trace.log   # JSON lifecycle lines
 ```
 
@@ -93,6 +94,39 @@ page the agent is working on is never changed underneath it.
 
 Live check (spawns STP): `pnpm run live:reader`.
 
+## `safari_get_screenshot` / `safari_save_screenshot` — element-aware captures
+
+Both act on the chat's own Safari session (auto-`browser_open` if needed) and
+are **composite tools**: every MCP call runs through the DSH tool registry as a
+nested execution of the composite (`ctx.tools.execute` with the composite's
+`rootCallId`/`token` as parent, same agent and cancellation — the pattern
+`run_code` uses), so nested calls keep DSH's policy, timeout and transcript
+handling.
+
+- `safari_get_screenshot { querySelector?, scrollTo?, fullPage? }` returns the
+  image **inline** (stored in DSH's attachment store, same admission rule as the
+  MCP bridge: the current model must declare image input, otherwise the PNG is
+  written to a temp file and its path returned).
+- `safari_save_screenshot { path, … }` writes the PNG to disk (relative to the
+  session workspace) and returns path + size.
+- With `querySelector`: an in-page script finds the element, scrolls it into
+  view (`scrollTo`, default true), waits until its rect and the scroll offset are
+  stable for three frames, and reports rect + devicePixelRatio + viewport; the
+  viewport is captured; the rect is re-measured and, if it moved > 2 px, the
+  capture is retaken once; the crop box is computed from the *actual* image
+  size vs. the CSS viewport (exact for fractional DPR) and cut with sharp.
+  Apple's own `screenshot` `node` parameter is a documented no-op, hence this.
+  Verified pixel-exact on iana.org's `h1` (900×350 @2x, 214 ms) and a
+  below-the-fold `footer` (`safari-screenshot.mjs`; live: `pnpm run live:screenshot [url] [selector]`).
+- Cropping uses sharp, not `sips`: `sips --cropOffset 0 0` is treated as unset
+  and center-crops (verified), which would silently break top-left elements.
+
+The raw `mcp__safari__screenshot` stays visible — `ctx.tools.restrict()` masks
+only global tools, and mounted MCP tools are scope-local — so the usage notes
+steer the model to the composite tools instead. Chrome's tool set is trimmed
+server-side via `chrome.disableCategories` (default `performance`, `emulation`
+→ `--no-category-*`).
+
 ## `safari_get_youtube_notes` — show notes for a video
 
 `safari_get_youtube_notes { url }` (watch / `youtu.be` / shorts / embed URL, or
@@ -112,6 +146,7 @@ description. The rendered watch page never contains the full description
   request time). A failed start (STP not running, server not installed) comes
   back as the tool error with a hint.
 - `browser_close { browser? }` → disposes the mount(s); tools disappear.
+- `safari_get_screenshot` / `safari_save_screenshot` → element-aware captures, see above.
 - `safari_get_page_content { url, … }` → isolated read, see above.
 - `safari_get_youtube_notes { url }` → structured show notes, see above.
 - Idle close injects a `[browser-automation] …` notice so the model knows to

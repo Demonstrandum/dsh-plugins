@@ -23,6 +23,10 @@
  *       the agent's scope and waits for tool discovery; the model sees
  *       `mcp__safari__*` / `mcp__chrome__*` on its next step.
  *   browser_close { browser?: … }                   → disposes the mount(s).
+ *   safari_get_screenshot { querySelector?, scrollTo?, fullPage? } → inline
+ *       image of this chat's Safari page (or of one element: scroll into view,
+ *       wait to settle, measure, capture, re-measure, crop). Auto-opens Safari.
+ *   safari_save_screenshot { path, … }              → same, written to disk.
  *   safari_get_youtube_notes { url }                 → title/author/chapters/
  *       description (show notes) of a YouTube video via an isolated reader.
  *   safari_get_page_content { url, format?, … }      → reads a page in an
@@ -71,6 +75,7 @@
  *     command: /opt/homebrew/bin/chrome-devtools-mcp   # absolute path; npm i -g chrome-devtools-mcp
  *     headless: false                                  # true = no visible window
  *     hideAutomationBanner: true                       # no "controlled by automated test software" bar
+ *     disableCategories: [performance, emulation]      # drop chrome-devtools-mcp tool categories
  *     args: []                                         # extra chrome-devtools-mcp flags
  *   subagents: true           # also offer browser_open to delegated child agents (each gets its own browser)
  *   idleMinutes: 30           # close a browser after this long without an mcp__ call (0 = never)
@@ -79,14 +84,16 @@
  */
 
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Schema from '@deepseek-ai/schemastery'
 import * as McpClient from '@deepseek-ai/dsh-mcp-client'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createReaderPool, FORMATS } from './reader-pool.mjs'
 import { canonicalWatchUrl, EXTRACT_SCRIPT, renderNotes, shapeNotes } from './youtube-notes.mjs'
+import { cropBox, cropImage, imageSize, measureScript, parseMeasurement, readPng, rectMoved } from './safari-screenshot.mjs'
 
 export const name = 'browser-automation'
 
@@ -119,6 +126,10 @@ export const Config = Schema.object({
     // Drops Puppeteer's --enable-automation switch, which is what makes Chrome
     // show the "Chrome is being controlled by automated test software" bar.
     hideAutomationBanner: Schema.boolean().default(true),
+    // chrome-devtools-mcp tool categories to leave out (--no-category-<name>):
+    // performance | emulation | network | pwa | extensions. Fewer tools = fewer
+    // schema tokens per request.
+    disableCategories: Schema.array(String).default(['performance', 'emulation']),
     args: Schema.array(String).default([]),
   }).default({}),
   subagents: Schema.boolean().default(true),
@@ -131,7 +142,7 @@ const PLUGIN_SOURCE = { kind: 'plugin', plugin: 'browser-automation' }
 
 /** Model-facing guidance per server, appended to the browser_open result. */
 const USAGE = {
-  safari: 'Safari tools are now in your tool list as mcp__safari__* (navigate_to_url, get_page_content, evaluate_javascript, screenshot, list_tabs, page_interactions, …). This is a real Safari Technology Preview session in its own STP window, opened in the background and labeled with this chat in its banner (never the user\'s regular Safari): it runs JavaScript and can read pages web_fetch cannot (e.g. YouTube). evaluate_javascript takes `expression` as a FUNCTION BODY — use an explicit `return`. Prefer get_page_content over screenshots for reading; `screenshot` returns a PNG file path — view it with read_image.',
+  safari: 'Safari tools are now in your tool list as mcp__safari__* (navigate_to_url, get_page_content, evaluate_javascript, screenshot, list_tabs, page_interactions, …). This is a real Safari Technology Preview session in its own STP window, opened in the background and labeled with this chat in its banner (never the user\'s regular Safari): it runs JavaScript and can read pages web_fetch cannot (e.g. YouTube). evaluate_javascript takes `expression` as a FUNCTION BODY — use an explicit `return`. Prefer get_page_content over screenshots for reading. For screenshots use safari_get_screenshot (inline image, optional querySelector crop) or safari_save_screenshot rather than the raw mcp__safari__screenshot (whole viewport, file path only).',
   chrome: 'Chrome tools are now in your tool list as mcp__chrome__* (new_page, navigate_page, take_snapshot, take_screenshot, evaluate_script, click, fill_form, list_network_requests, lighthouse_audit, …). This is an isolated Chrome profile (no saved logins). Chrome launches on your first navigation. For screenshots omit filePath so the image is returned inline.',
 }
 
@@ -169,6 +180,7 @@ export function resolveServers(config) {
         '--no-usage-statistics',
         ...(config.chrome.headless ? ['--headless'] : []),
         ...(config.chrome.hideAutomationBanner ? ['--ignoreDefaultChromeArg=--enable-automation'] : []),
+        ...config.chrome.disableCategories.map(category => `--no-category-${category}`),
         ...config.chrome.args,
       ],
       toolCallTimeoutMs: config.toolCallTimeoutMs,
@@ -257,6 +269,8 @@ export function apply(ctx, config) {
 
   /** @type {Map<object, { mounts: Map<string, { dispose(): Promise<void> }>, timer?: ReturnType<typeof setTimeout> }>} */
   const states = new Map()
+  /** Admitted inline screenshots awaiting finalizeContent, keyed by execution. */
+  const inlineImages = new WeakMap()
 
   const stateOf = (agent) => {
     let state = states.get(agent)
@@ -364,6 +378,109 @@ export function apply(ctx, config) {
     description: `Which browser: ${available.join(' | ')}.`,
   })
 
+  /**
+   * Dispatch one MCP tool of the agent's mounted server as a NESTED execution
+   * of the composite tool: same root call, this call as parent, same agent and
+   * cancellation — the pattern run_code uses for its sub-calls. Returns the
+   * result's text.
+   */
+  let nestedCalls = 0
+  async function nested(exec, name, args) {
+    const result = await ctx.tools.execute({
+      callId: `${String(exec.callId)}:ba:${++nestedCalls}`,
+      rootCallId: exec.rootCallId,
+      name,
+      arguments: args,
+      ...(exec.agent ? { agent: exec.agent } : {}),
+      parent: exec.token,
+      signal: exec.signal,
+    })
+    const blocks = (result.value && typeof result.value === 'object' && Array.isArray(result.value.content))
+      ? result.value.content
+      : (result.content ?? [])
+    const text = blocks.filter(block => block.type === 'text').map(block => block.text).join('\n')
+    if (result.isError) throw new Error(`${name}: ${text || 'failed'}`)
+    return text
+  }
+
+  /**
+   * Take a screenshot of the agent's Safari page; with `querySelector`, crop to
+   * that element. Returns PNG bytes plus geometry; `viewportPath` is the
+   * uncropped capture file.
+   */
+  async function captureSafari(agent, exec, { querySelector, scrollTo, fullPage }) {
+    await open(agent, 'safari')
+    const viewportPath = join(tmpdir(), `dsh-safari-shot-${Date.now()}-${process.pid}-${++nestedCalls}.png`)
+    if (querySelector === undefined || querySelector === '') {
+      await nested(exec, 'mcp__safari__screenshot', { savePath: viewportPath, full_page: fullPage === true })
+      const size = await imageSize(viewportPath)
+      return { bytes: await readPng(viewportPath), width: size.width, height: size.height, fullPage: fullPage === true, viewportPath }
+    }
+    const measure = async (scroll) => parseMeasurement(await nested(exec, 'mcp__safari__evaluate_javascript', { expression: measureScript(querySelector, scroll) }))
+    const before = await measure(scrollTo !== false)
+    await nested(exec, 'mcp__safari__screenshot', { savePath: viewportPath })
+    let after = await measure(false)
+    let unstable = false
+    if (rectMoved(before.rect, after.rect)) {
+      // The element moved between measurement and capture (animation, lazy
+      // layout): retake once against the new position.
+      await nested(exec, 'mcp__safari__screenshot', { savePath: viewportPath })
+      const again = await measure(false)
+      unstable = rectMoved(after.rect, again.rect)
+      after = again
+    }
+    const size = await imageSize(viewportPath)
+    const box = cropBox(after.rect, after.viewport, size)
+    return {
+      bytes: await cropImage(viewportPath, box),
+      width: box.width,
+      height: box.height,
+      querySelector,
+      rect: { x: Math.round(after.rect.x), y: Math.round(after.rect.y), width: Math.round(after.rect.width), height: Math.round(after.rect.height) },
+      viewport: after.viewport,
+      scale: Number(box.scale.toFixed(3)),
+      clipped: box.clipped,
+      settled: before.settled,
+      unstable,
+      viewportPath,
+    }
+  }
+
+  /** Same admission rule as dsh-mcp-client: store the image only when the current model declares image input. */
+  async function admitImage(exec, bytes, name) {
+    const attachments = ctx.get('attachments')
+    if (attachments === undefined) return { reason: 'no attachment store is mounted' }
+    const routed = exec.agent?.session.requestHeader?.()?.config
+    const provider = routed?.provider ?? exec.agent?.options?.provider
+    const model = routed?.model ?? exec.agent?.options?.model
+    const llm = ctx.get('llm')
+    if (provider === undefined || model === undefined || llm === undefined) return { reason: 'the current model route could not be resolved' }
+    let info
+    try { info = await llm.resolveModelInfo(provider, model, exec.signal) } catch { return { reason: 'the current model route could not be verified' } }
+    if (!info.inputModalities?.includes('image')) return { reason: `model "${model}" does not declare image input` }
+    const [ref] = await attachments.saveImages([{ data: bytes, mediaType: 'image/png', name }])
+    return { ref }
+  }
+
+  /** Text summary of a capture's geometry. */
+  function describeCapture(shot) {
+    const parts = [`${shot.width}×${shot.height} px`]
+    if (shot.querySelector !== undefined) {
+      parts.push(`element ${JSON.stringify(shot.querySelector)} at CSS rect x=${shot.rect.x} y=${shot.rect.y} ${shot.rect.width}×${shot.rect.height} (viewport ${shot.viewport.width}×${shot.viewport.height}, scale ${shot.scale})`)
+      if (shot.clipped) parts.push('NOTE: element extends beyond the viewport; crop is clipped to the visible part')
+      if (shot.unstable) parts.push('NOTE: element kept moving during capture; crop may be off')
+      if (!shot.settled) parts.push('NOTE: scrolling had not fully settled before capture')
+    } else if (shot.fullPage) parts.push('full page')
+    else parts.push('viewport')
+    return parts.join('; ')
+  }
+
+  const screenshotParams = {
+    querySelector: { type: 'string', description: 'CSS selector of one element to capture (document.querySelector). Omit for the whole viewport.' },
+    scrollTo: { type: 'boolean', description: 'With querySelector: scroll the element into view (centered) and wait for scrolling to settle before capturing (default true).' },
+    fullPage: { type: 'boolean', description: 'Without querySelector: capture the entire scrollable page instead of the viewport (default false).' },
+  }
+
   /** Plugin-owned disposer of each attached agent's scoped tool registrations. */
   const attached = new Map()
 
@@ -406,6 +523,59 @@ export function apply(ctx, config) {
             return closed.length === 0 ? 'No browser was open.' : `Closed ${closed.join(', ')}.`
           },
         })),
+        ...(servers.safari === undefined ? [] : [
+          agent.ctx.tools.register(defineTool({
+            name: 'safari_get_screenshot',
+            description: 'Screenshot of this chat\'s Safari page, returned INLINE as an image (opens Safari via browser_open if needed). With querySelector, captures just that element: it is scrolled into view (scrollTo, default true), the page is allowed to settle, its client rect is measured, the viewport is captured, the rect is re-measured (re-capturing once if the element moved), and the element\'s sub-rectangle is cropped at device-pixel precision. Without querySelector: the viewport, or the whole page with fullPage. Use this instead of mcp__safari__screenshot.',
+            parameters: screenshotParams,
+            output: {
+              schema: { type: 'object', additionalProperties: true },
+              render: (_args, value) => [{ type: 'text', text: value.fallbackPath !== undefined
+                ? `Screenshot saved to ${value.fallbackPath} (${describeCapture(value)}); not shown inline: ${value.inlineUnavailable}. View it with read_image.`
+                : `Screenshot: ${describeCapture(value)}.` }],
+            },
+            async execute(args, exec) {
+              const shot = await captureSafari(exec.agent ?? agent, exec, args)
+              const { bytes, ...meta } = shot
+              const admitted = await admitImage(exec, bytes, `safari-${Date.now()}.png`)
+              if (admitted.ref === undefined) {
+                const fallbackPath = join(tmpdir(), `dsh-safari-screenshot-${Date.now()}.png`)
+                await writeFile(fallbackPath, bytes)
+                return { ...meta, fallbackPath, inlineUnavailable: admitted.reason }
+              }
+              inlineImages.set(exec, admitted.ref)
+              return meta
+            },
+            finalizeContent(exec, result) {
+              const ref = inlineImages.get(exec)
+              if (ref === undefined) return undefined
+              inlineImages.delete(exec)
+              if (result.isError) return undefined
+              return [{ type: 'image', attachment: ref }, ...result.content]
+            },
+          })),
+          agent.ctx.tools.register(defineTool({
+            name: 'safari_save_screenshot',
+            description: 'Screenshot of this chat\'s Safari page written to a PNG file (opens Safari via browser_open if needed). Same element capture as safari_get_screenshot (querySelector, scrollTo, fullPage). Returns the path and pixel size; nothing is shown inline.',
+            parameters: {
+              path: { type: 'string', required: true, description: 'Destination .png path (absolute, or relative to the session workspace). Parent directories are created.' },
+              ...screenshotParams,
+            },
+            output: {
+              schema: { type: 'object', additionalProperties: true },
+              render: (_args, value) => [{ type: 'text', text: `Saved ${value.path} (${describeCapture(value)}).` }],
+            },
+            async execute(args, exec) {
+              const target = exec.agent ?? agent
+              const shot = await captureSafari(target, exec, args)
+              const { bytes, ...meta } = shot
+              const path = resolvePath(target.session.header?.cwd ?? process.cwd(), args.path)
+              await mkdir(dirname(path), { recursive: true })
+              await writeFile(path, bytes)
+              return { ...meta, path }
+            },
+          })),
+        ]),
         ...(readerPool === undefined ? [] : [agent.ctx.tools.register(defineTool({
           name: 'safari_get_page_content',
           description: `Read one web page with a real Safari (Technology Preview) engine and return its content — use this instead of web_fetch for JavaScript-rendered pages (SPAs, dashboards) or when web_fetch returns empty/blocked content. Runs in an ISOLATED reader window shared by no one: it never touches this chat's own browser_open session, so a page you are working on is not changed. No browser_open needed. Formats (extraction is done by WebKit itself): ${FORMATS.join(' | ')}; default markdown. For pages that render lazily set waitMs (2000–5000). For structured data that is not in the rendered text, pass \`script\`: a JS FUNCTION BODY evaluated in the loaded page (use \`return\`); its return value comes back as scriptResult. For YouTube videos use safari_get_youtube_notes instead. Reads are pooled host-wide, so concurrent reads (also from subagents) each get their own window and a warm reader is reused.`,

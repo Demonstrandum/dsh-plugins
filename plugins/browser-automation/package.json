@@ -12,6 +12,7 @@
   "files": [
     "index.js",
     "youtube-notes.mjs",
+    "safari-screenshot.mjs",
     "reader-pool.mjs",
     "safari-mcp-shim.mjs",
     "cordis.patch.yml"
@@ -24,12 +25,14 @@
   "scripts": {
     "check": "node --check index.js && node scripts/smoke-config.mjs",
     "live:reader": "node scripts/live-reader-test.mjs",
-    "live:youtube": "node scripts/live-youtube-test.mjs"
+    "live:youtube": "node scripts/live-youtube-test.mjs",
+    "live:screenshot": "node scripts/live-screenshot-test.mjs"
   },
   "dependencies": {
     "@deepseek-ai/dsh-mcp-client": "link:/Users/USER/github/deepseek-harness/packages/mcp/mcp-client",
     "@deepseek-ai/dsh-tools": "link:/Users/USER/github/deepseek-harness/packages/core/tools",
     "@deepseek-ai/schemastery": "link:/Users/USER/github/deepseek-harness/vendor/schemastery",
-    "@modelcontextprotocol/sdk": "link:/Users/USER/github/deepseek-harness/node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_zod@4.4.3/node_modules/@modelcontextprotocol/sdk"
+    "@modelcontextprotocol/sdk": "link:/Users/USER/github/deepseek-harness/node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_zod@4.4.3/node_modules/@modelcontextprotocol/sdk",
+    "sharp": "link:/Users/USER/github/deepseek-harness/node_modules/.pnpm/sharp@0.35.3_@types+node@22.20.0/node_modules/sharp"
   }
 }

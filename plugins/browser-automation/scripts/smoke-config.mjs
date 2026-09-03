@@ -102,6 +102,9 @@ console.log('smoke ok: lazy tools attached to pre-existing + new top-level agent
     const schema = defs.safari_get_page_content.parameters
     if (!schema.properties?.format?.enum?.includes('markdown') || !schema.required?.includes('url')) throw new Error(`reader tool schema unexpected: ${JSON.stringify(schema).slice(0, 300)}`)
     console.log('smoke ok: safari_get_page_content registered with formats', schema.properties.format.enum.join('/'))
+    for (const name of ['safari_get_screenshot', 'safari_save_screenshot', 'safari_get_youtube_notes']) if (defs[name] === undefined) throw new Error(`${name} not registered`)
+    if (typeof defs.safari_get_screenshot.finalizeContent !== 'function') throw new Error('safari_get_screenshot lacks finalizeContent')
+    console.log('smoke ok: screenshot + youtube composite tools registered')
   } else {
     console.log('smoke skipped: STP driver not installed here')
   }
@@ -126,4 +129,25 @@ console.log('smoke ok: lazy tools attached to pre-existing + new top-level agent
   try { shapeNotes(null, 'u') } catch { threw = true }
   if (!threw) throw new Error('null extraction accepted')
   console.log('smoke ok: youtube notes canonicalization, chapter/link parsing, render')
+}
+
+// Screenshot geometry helpers (pure) + composite tool registration.
+{
+  const { cropBox, rectMoved, parseMeasurement, measureScript } = await import('../safari-screenshot.mjs')
+  const box = cropBox({ x: 10.4, y: 20.6, width: 100.2, height: 50 }, { width: 1024, height: 768 }, { width: 2048, height: 1536 })
+  if (box.scale !== 2 || box.x !== 20 || box.y !== 41 || box.width !== 202 || box.height !== 101 || box.clipped) throw new Error(`cropBox: ${JSON.stringify(box)}`)
+  const clipped = cropBox({ x: -5, y: 700, width: 100, height: 100 }, { width: 1024, height: 768 }, { width: 2048, height: 1536 })
+  if (!clipped.clipped || clipped.x !== 0 || clipped.y + clipped.height !== 1536) throw new Error(`clipped: ${JSON.stringify(clipped)}`)
+  let outside = false
+  try { cropBox({ x: 2000, y: 0, width: 10, height: 10 }, { width: 1024, height: 768 }, { width: 2048, height: 1536 }) } catch { outside = true }
+  if (!outside) throw new Error('offscreen rect accepted')
+  if (rectMoved({ x: 0, y: 0, width: 10, height: 10 }, { x: 1, y: 1, width: 10, height: 10 })) throw new Error('1px jitter counted as movement')
+  if (!rectMoved({ x: 0, y: 0, width: 10, height: 10 }, { x: 0, y: 5, width: 10, height: 10 })) throw new Error('5px movement missed')
+  const measured = parseMeasurement(JSON.stringify(JSON.stringify({ rect: { x: 1, y: 2, width: 3, height: 4 }, dpr: 2, viewport: { width: 10, height: 10 }, settled: true })))
+  if (measured.rect.width !== 3) throw new Error('double-encoded measurement not parsed')
+  let errored = false
+  try { parseMeasurement(JSON.stringify({ error: 'no element matches h9' })) } catch (e) { errored = /no element/.test(String(e)) }
+  if (!errored) throw new Error('measurement error not surfaced')
+  if (!measureScript('h1 > a', true).includes('"h1 > a"') || !measureScript('h1', false).includes('if (false)')) throw new Error('measureScript embedding')
+  console.log('smoke ok: screenshot geometry helpers')
 }
