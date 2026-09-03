@@ -25,6 +25,7 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ReactNode } from 'react'
 import { useLayoutEffect, useEffect, useRef, useState } from 'react'
 import { resolveToolGlyph, thinkingGlyph } from './toolIcons.ts'
+import { EXT_TO_TYPE, FINAL_BADGES } from './finalBadges.ts'
 
 type Props = PropsRuntime<'conversation.input.dock'>
 
@@ -36,6 +37,31 @@ const BLOCKED_BADGE = '\u270B' // ✋
 const STACK_SIZE = 4
 /** Vertical distance between stacked entries, px. */
 const STACK_GAP = 56
+
+/** Tools whose file_path argument selects a document-type annotation badge. */
+const FILE_TOOLS = new Set(['edit', 'write', 'read', 'read_image'])
+
+/**
+ * Document-type id for one tool call, from its file_path extension.
+ * @param name - tool name.
+ * @param argsRaw - raw JSON argument string.
+ * @returns a FINAL_BADGES key, or null when nothing matches.
+ */
+function docTypeForCall(name: string, argsRaw: string): string | null {
+  if (!FILE_TOOLS.has(name)) return null
+  let path: unknown
+  try {
+    path = (JSON.parse(argsRaw) as Record<string, unknown>)['file_path']
+  } catch {
+    return null
+  }
+  if (typeof path !== 'string') return null
+  const base = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
+  const dot = base.lastIndexOf('.')
+  if (dot <= 0) return null // dotfiles have no extension
+  const ext = base.slice(dot + 1).toLowerCase()
+  return Object.hasOwn(EXT_TO_TYPE, ext) ? EXT_TO_TYPE[ext]! : null
+}
 
 /** Terminal icon for shell calls: gray-bordered black square, green prompt chevron. */
 function TerminalIcon() {
@@ -65,6 +91,8 @@ interface StackEntry {
   readonly token: string
   readonly label: string
   readonly badge: boolean
+  /** Document-type annotation (FINAL_BADGES key) for file-touching calls. */
+  readonly docType: string | null
 }
 
 /** One observed status: `identity` changes exactly when a new entry is due. */
@@ -73,46 +101,50 @@ interface Status {
   readonly token: string
   readonly label: string
   readonly badge: boolean
+  readonly docType: string | null
 }
 
 function AgentStatusIndicator({ useSession, useChat, useSessionPendingInteraction, sessionId }: Props) {
   const running = useSession(snapshot => snapshot.running)
   const hasError = useSession(snapshot => snapshot.lastAgentError !== null)
   const blocked = useSessionPendingInteraction(pending => pending.has(sessionId))
-  // Selector returns a primitive ("callId|token") so re-renders happen only
-  // when the in-flight call changes, not on every streaming publication.
+  // Selector returns a primitive ("callId|token|docType") so re-renders happen
+  // only when the in-flight call changes, not on every streaming publication.
   const runningCall = useChat(chat => {
     const calls = chat.legacy.runningCalls
     const call = calls.length > 0 ? calls[calls.length - 1] : undefined
-    return call === undefined ? null : `${call.callId}|${resolveToolGlyph(call.name, call.argsRaw)}`
+    if (call === undefined) return null
+    return `${call.callId}|${resolveToolGlyph(call.name, call.argsRaw)}|${docTypeForCall(call.name, call.argsRaw) ?? ''}`
   })
+  const parsedCall = runningCall === null
+    ? null
+    : (([, token, doc]: string[]) => ({ token: token!, docType: doc === '' ? null : doc! }))(runningCall.split('|'))
 
   let status: Status
   if (blocked) {
-    const token = runningCall === null ? resolveToolGlyph('default') : runningCall.split('|')[1]!
-    status = { identity: `blocked:${token}`, token, label: 'blocked on your input', badge: true }
-  } else if (runningCall !== null) {
-    const [callId, token] = runningCall.split('|') as [string, string]
-    status = { identity: `tool:${callId}`, token, label: 'running a tool', badge: false }
+    const token = parsedCall === null ? resolveToolGlyph('default') : parsedCall.token
+    status = { identity: `blocked:${token}`, token, label: 'blocked on your input', badge: true, docType: parsedCall?.docType ?? null }
+  } else if (runningCall !== null && parsedCall !== null) {
+    status = { identity: `tool:${runningCall.split('|')[0]!}`, token: parsedCall.token, label: 'running a tool', badge: false, docType: parsedCall.docType }
   } else if (running) {
-    status = { identity: 'think', token: thinkingGlyph(), label: 'thinking', badge: false }
+    status = { identity: 'think', token: thinkingGlyph(), label: 'thinking', badge: false, docType: null }
   } else if (hasError) {
-    status = { identity: 'error', token: ERROR, label: 'error', badge: false }
+    status = { identity: 'error', token: ERROR, label: 'error', badge: false, docType: null }
   } else {
-    status = { identity: 'wait', token: WAITING, label: 'waiting', badge: false }
+    status = { identity: 'wait', token: WAITING, label: 'waiting', badge: false, docType: null }
   }
 
   const [entries, setEntries] = useState<readonly StackEntry[]>([])
   const lastIdentity = useRef<string | null>(null)
   const seq = useRef(0)
-  const { identity, token, label, badge } = status
+  const { identity, token, label, badge, docType } = status
   useEffect(() => {
     if (identity === lastIdentity.current) return
     lastIdentity.current = identity
     seq.current += 1
-    const entry: StackEntry = { key: seq.current, token, label, badge }
+    const entry: StackEntry = { key: seq.current, token, label, badge, docType }
     setEntries(prev => [...prev, entry].slice(-STACK_SIZE))
-  }, [identity, token, label, badge])
+  }, [identity, token, label, badge, docType])
 
   // Lockstep shift: when an entry is appended, every entry's `bottom` moves up
   // one slot with NO per-entry transition; the container starts one slot down
@@ -146,6 +178,13 @@ function AgentStatusIndicator({ useSession, useChat, useSessionPendingInteractio
             aria-label={fromBottom === 0 ? `agent status: ${entry.label}` : undefined}
           >
             {renderIcon(entry.token)}
+            {entry.docType !== null && FINAL_BADGES[entry.docType] !== undefined && (
+              <span
+                className="tali-agent-status-doc"
+                // eslint-disable-next-line react/no-danger -- generated, trusted markup bundled with the plugin
+                dangerouslySetInnerHTML={{ __html: FINAL_BADGES[entry.docType]! }}
+              />
+            )}
             {entry.badge && <span className="tali-agent-status-badge">{BLOCKED_BADGE}</span>}
           </div>
         )
@@ -178,6 +217,19 @@ const CSS = `
   user-select: none;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3));
   transition: opacity 300ms ease;
+}
+.tali-agent-status-doc {
+  position: absolute;
+  right: -5px;
+  bottom: -3px;
+  width: 20px;
+  height: 20px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+}
+.tali-agent-status-doc svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 .tali-agent-status-badge {
   position: absolute;
