@@ -106,3 +106,24 @@ console.log('smoke ok: lazy tools attached to pre-existing + new top-level agent
     console.log('smoke skipped: STP driver not installed here')
   }
 }
+
+// YouTube notes: URL canonicalization and description shaping (pure, offline).
+{
+  const { canonicalWatchUrl, shapeNotes, renderNotes } = await import('../youtube-notes.mjs')
+  for (const input of ['https://www.youtube.com/watch?v=QgH9sr7G13Q&t=12s', 'https://youtu.be/QgH9sr7G13Q', 'youtube.com/shorts/QgH9sr7G13Q', 'QgH9sr7G13Q']) {
+    const { url, videoId } = canonicalWatchUrl(input)
+    if (videoId !== 'QgH9sr7G13Q' || url !== 'https://www.youtube.com/watch?v=QgH9sr7G13Q') throw new Error(`canonicalWatchUrl(${input}) → ${url}`)
+  }
+  let rejected = false
+  try { canonicalWatchUrl('https://example.com/') } catch { rejected = true }
+  if (!rejected) throw new Error('non-YouTube URL accepted')
+  const notes = shapeNotes({ videoId: 'x', title: 'T', author: 'A', lengthSeconds: 2118, viewCount: 1234, keywords: [], description: 'Sponsor: https://a.example/x\n\nSECTIONS\n0:00 - Intro\n1:04 - When Deep Learning Stopped Working\n(13:20) Loss Landscapes\n1:02:03 – Late chapter\nnot a chapter 12:34 in text\nhttps://b.example/y' }, 'https://www.youtube.com/watch?v=x')
+  if (notes.chapters.length !== 4 || notes.chapters[2].title !== 'Loss Landscapes' || notes.chapters[3].time !== '1:02:03') throw new Error(`chapters: ${JSON.stringify(notes.chapters)}`)
+  if (notes.links.length !== 2) throw new Error(`links: ${JSON.stringify(notes.links)}`)
+  const text = renderNotes(notes)
+  if (!text.includes('# T') || !text.includes('35:18') || !text.includes('## Chapters (4)')) throw new Error(`render: ${text.slice(0, 200)}`)
+  let threw = false
+  try { shapeNotes(null, 'u') } catch { threw = true }
+  if (!threw) throw new Error('null extraction accepted')
+  console.log('smoke ok: youtube notes canonicalization, chapter/link parsing, render')
+}

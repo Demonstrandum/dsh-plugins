@@ -78,20 +78,31 @@ page the agent is working on is never changed underneath it.
   idle reader or spawns one — its own `safaridriver --mcp` process, hence its
   own STP window labeled `DSH: page reader #n`, driven by a private MCP SDK
   client (nothing is registered into any agent). Concurrent reads (e.g.
-  subagents) each get their own reader. Afterwards the reader parks on
-  `about:blank` and returns to the pool; readers beyond `reader.maxIdle`
+  subagents) each get their own reader. Afterwards the reader closes its tab
+  (window included; the driver session and STP stay warm, the next read opens
+  a fresh tab) and returns to the pool; readers beyond `reader.maxIdle`
   (default 1) are disposed at once, the rest after `reader.idleMinutes`
   (default 30) unused. Cold start is serialized: two brand-new sessions
   navigating simultaneously can both launch STP and orphan an instance (seen
   once); the first reader finishes its navigation before others spawn.
 - **`waitMs`** for lazily rendered pages; **`script`** (a JS function body,
   `return …`) runs in the loaded page and its value is returned as
-  `scriptResult` — e.g. YouTube's show notes are not in the rendered text (the
-  description is collapsed) but are in the page's `ytInitialPlayerResponse`.
+  `scriptResult`, for structured data that is not in the rendered text.
 - Output beyond `reader.maxChars` (120 000) is truncated and the full text
   saved to a temp file whose path is reported.
 
 Live check (spawns STP): `pnpm run live:reader`.
+
+## `safari_get_youtube_notes` — show notes for a video
+
+`safari_get_youtube_notes { url }` (watch / `youtu.be` / shorts / embed URL, or
+a bare 11-character id) returns title, channel, duration, view count, publish
+date, keywords, **chapters** parsed from timestamp lines, links, and the full
+description. The rendered watch page never contains the full description
+(collapsed behind "…more"), so the tool reads `videoDetails` out of the inline
+`ytInitialPlayerResponse` script through an isolated reader
+(`youtube-notes.mjs`; ~4–10 s depending on YouTube). Live check:
+`pnpm run live:youtube [url]`.
 
 ## What the model sees
 
@@ -102,6 +113,7 @@ Live check (spawns STP): `pnpm run live:reader`.
   back as the tool error with a hint.
 - `browser_close { browser? }` → disposes the mount(s); tools disappear.
 - `safari_get_page_content { url, … }` → isolated read, see above.
+- `safari_get_youtube_notes { url }` → structured show notes, see above.
 - Idle close injects a `[browser-automation] …` notice so the model knows to
   reopen.
 

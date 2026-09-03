@@ -23,6 +23,8 @@
  *       the agent's scope and waits for tool discovery; the model sees
  *       `mcp__safari__*` / `mcp__chrome__*` on its next step.
  *   browser_close { browser?: … }                   → disposes the mount(s).
+ *   safari_get_youtube_notes { url }                 → title/author/chapters/
+ *       description (show notes) of a YouTube video via an isolated reader.
  *   safari_get_page_content { url, format?, … }      → reads a page in an
  *       ISOLATED reader (see reader-pool.mjs): never the chat's own browsing
  *       session, so a page the agent is working on is never changed under it.
@@ -84,6 +86,7 @@ import Schema from '@deepseek-ai/schemastery'
 import * as McpClient from '@deepseek-ai/dsh-mcp-client'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createReaderPool, FORMATS } from './reader-pool.mjs'
+import { canonicalWatchUrl, EXTRACT_SCRIPT, renderNotes, shapeNotes } from './youtube-notes.mjs'
 
 export const name = 'browser-automation'
 
@@ -405,7 +408,7 @@ export function apply(ctx, config) {
         })),
         ...(readerPool === undefined ? [] : [agent.ctx.tools.register(defineTool({
           name: 'safari_get_page_content',
-          description: `Read one web page with a real Safari (Technology Preview) engine and return its content — use this instead of web_fetch for JavaScript-rendered pages (YouTube, SPAs, dashboards) or when web_fetch returns empty/blocked content. Runs in an ISOLATED reader window shared by no one: it never touches this chat's own browser_open session, so a page you are working on is not changed. No browser_open needed. Formats (extraction is done by WebKit itself): ${FORMATS.join(' | ')}; default markdown. For pages that render lazily set waitMs (2000–5000). For structured data hidden from the rendered text (e.g. YouTube's description lives in the page's ytInitialPlayerResponse script), pass \`script\`: a JS FUNCTION BODY evaluated in the loaded page (use \`return\`); its return value comes back as scriptResult. Reads are pooled host-wide, so concurrent reads (also from subagents) each get their own window and a warm reader is reused.`,
+          description: `Read one web page with a real Safari (Technology Preview) engine and return its content — use this instead of web_fetch for JavaScript-rendered pages (SPAs, dashboards) or when web_fetch returns empty/blocked content. Runs in an ISOLATED reader window shared by no one: it never touches this chat's own browser_open session, so a page you are working on is not changed. No browser_open needed. Formats (extraction is done by WebKit itself): ${FORMATS.join(' | ')}; default markdown. For pages that render lazily set waitMs (2000–5000). For structured data that is not in the rendered text, pass \`script\`: a JS FUNCTION BODY evaluated in the loaded page (use \`return\`); its return value comes back as scriptResult. For YouTube videos use safari_get_youtube_notes instead. Reads are pooled host-wide, so concurrent reads (also from subagents) each get their own window and a warm reader is reused.`,
           parameters: {
             url: { type: 'string', required: true, description: 'Absolute http(s) URL to read.' },
             format: { type: 'string', enum: FORMATS, description: 'Extraction format (default markdown). plainText is smallest; textTree/json carry structure and node UIDs; html is the rendered DOM.' },
@@ -431,6 +434,30 @@ export function apply(ctx, config) {
               script: args.script,
             })
             return clampRead(result, config.safari.reader.maxChars)
+          },
+        })), agent.ctx.tools.register(defineTool({
+          name: 'safari_get_youtube_notes',
+          description: 'Get a YouTube video\'s show notes: title, channel, duration, publish date, chapters (parsed from timestamps), links, and the FULL description — which is never in the rendered page text (YouTube collapses it). Reads the watch page in an isolated Safari reader; no browser_open needed and this chat\'s own browser session is untouched. Accepts watch/youtu.be/shorts/embed URLs or a bare 11-character video id.',
+          parameters: {
+            url: { type: 'string', required: true, description: 'YouTube video URL (any form) or video id.' },
+          },
+          output: {
+            schema: { type: 'object', additionalProperties: true },
+            render: (_args, value) => [{ type: 'text', text: renderNotes(value) }],
+          },
+          async execute(args) {
+            preflight('safari', servers.safari)
+            const { url } = canonicalWatchUrl(args.url)
+            const result = await readerPool.read({
+              url,
+              format: 'plainText',
+              waitMs: 0,
+              maxWordsPerParagraph: 0,
+              includeURLs: false,
+              script: EXTRACT_SCRIPT,
+              skipContent: true,
+            })
+            return shapeNotes(result.scriptResult, url)
           },
         }))]),
       ]

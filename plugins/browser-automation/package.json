@@ -11,6 +11,7 @@
   },
   "files": [
     "index.js",
+    "youtube-notes.mjs",
     "reader-pool.mjs",
     "safari-mcp-shim.mjs",
     "cordis.patch.yml"
@@ -22,7 +23,8 @@
   },
   "scripts": {
     "check": "node --check index.js && node scripts/smoke-config.mjs",
-    "live:reader": "node scripts/live-reader-test.mjs"
+    "live:reader": "node scripts/live-reader-test.mjs",
+    "live:youtube": "node scripts/live-youtube-test.mjs"
   },
   "dependencies": {
     "@deepseek-ai/dsh-mcp-client": "link:/Users/USER/github/deepseek-harness/packages/mcp/mcp-client",

@@ -33,9 +33,10 @@ export const FORMATS = ['markdown', 'plainText', 'text', 'textTree', 'html', 'js
  * @param {number} options.readTimeoutMs - per MCP call timeout.
  * @param {(record: object) => void} options.trace - lifecycle trace sink.
  * @param {{ warn(message: string): void }} options.logger
+ * @param {'close_tab' | 'about:blank'} [options.park] - how a reader releases its page after a read.
  */
 export function createReaderPool(options) {
-  const { driver, shim, labelPrefix, maxIdle, idleMs, readTimeoutMs, trace, logger } = options
+  const { driver, shim, labelPrefix, maxIdle, idleMs, readTimeoutMs, trace, logger, park = 'close_tab' } = options
   /** @type {Array<{ id: number, client: Client, transport: StdioClientTransport, busy: boolean, dead: boolean }>} */
   const readers = []
   let nextId = 1
@@ -124,7 +125,7 @@ export function createReaderPool(options) {
 
   /**
    * Read one page in an isolated reader.
-   * @param {{ url: string, format: string, maxWordsPerParagraph: number, includeURLs: boolean, waitMs: number, script?: string }} request
+   * @param {{ url: string, format: string, maxWordsPerParagraph: number, includeURLs: boolean, waitMs: number, script?: string, skipContent?: boolean }} request
    * @returns {Promise<{ url: string, title: string | undefined, format: string, content: string, scriptResult?: unknown }>}
    */
   async function read(request) {
@@ -142,15 +143,16 @@ export function createReaderPool(options) {
         if (releaseWarm !== undefined) releaseWarm()
       }
       if (request.waitMs > 0) await new Promise(resolve => setTimeout(resolve, request.waitMs))
-      const raw = await call(reader, 'get_page_content', {
-        format: request.format,
-        region: 'entire_page',
-        maxWordsPerParagraph: request.maxWordsPerParagraph,
-        includeURLs: request.includeURLs,
-        shortenURLs: false,
-        nodeIds: 'none',
-      })
-      const unwrapped = await unwrap(raw)
+      const unwrapped = request.skipContent
+        ? { url: request.url, title: undefined, content: '' }
+        : await unwrap(await call(reader, 'get_page_content', {
+          format: request.format,
+          region: 'entire_page',
+          maxWordsPerParagraph: request.maxWordsPerParagraph,
+          includeURLs: request.includeURLs,
+          shortenURLs: false,
+          nodeIds: 'none',
+        }))
       let scriptResult
       if (request.script !== undefined && request.script.trim() !== '') {
         // Function body semantics (the server's evaluate_javascript contract): use `return`.
@@ -160,10 +162,22 @@ export function createReaderPool(options) {
       trace({ event: 'read', reader: reader.id, url: request.url, format: request.format, chars: unwrapped.content.length, script: request.script !== undefined })
       return { format: request.format, ...unwrapped, ...(request.script !== undefined ? { scriptResult } : {}) }
     } finally {
-      // Park the reader on a blank page so the read page is released but the
-      // window (and warm STP instance) stays for the next request.
+      // Release the page. Default: close the tab (its window goes with it; the
+      // driver session and STP stay warm, the next read opens a fresh tab).
+      // Parking on about:blank keeps the window but was observed to leave an
+      // orphaned STP instance with a lone about:blank window when a session
+      // ended right after the navigation.
       if (!reader.dead) {
-        try { await call(reader, 'navigate_to_url', { url: 'about:blank' }) } catch { /* reader may have died mid-read; release() drops it */ }
+        try {
+          if (park === 'about:blank') {
+            await call(reader, 'navigate_to_url', { url: 'about:blank' })
+          } else {
+            const tabs = JSON.parse(await call(reader, 'list_tabs', {}))
+            for (const tab of tabs) await call(reader, 'close_tab', { handle: tab.handle })
+          }
+        } catch {
+          // The reader may have died mid-read; release() drops it.
+        }
       }
       await release(reader)
     }
