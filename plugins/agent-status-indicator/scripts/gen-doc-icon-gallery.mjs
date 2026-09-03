@@ -44,6 +44,12 @@ function mark(type, sizeClass) {
 /** Framed decoration (self-backgrounded artwork), or a dash. */
 function badgeCell(type, sizeClass) {
   if (type.badge === undefined) return '<span class="none">\u2014</span>'
+  if (type.badgeTint !== undefined) {
+    const encoded = encodeURIComponent(svgText(type.badge)).replace(/'/g, '%27')
+    const m = `url('data:image/svg+xml;utf8,${encoded}')`
+    return `<div class="tintmark ${sizeClass}" style="background-color:${type.badgeTint};`
+      + `-webkit-mask-image:${m};mask-image:${m}"></div>`
+  }
   return `<div class="svgmark ${sizeClass}">${svgText(type.badge)}</div>`
 }
 
@@ -135,7 +141,14 @@ function documentIcon(type) {
     }
     corner = glyph
   } else if (type.badge !== undefined) {
-    corner = `<div class="svgmark cornerbadge">${svgText(type.badge)}</div>`
+    if (type.badgeTint !== undefined) {
+      const encoded = encodeURIComponent(svgText(type.badge)).replace(/'/g, '%27')
+      const m = `url('data:image/svg+xml;utf8,${encoded}')`
+      corner = `<div class="tintmark cornerbadge" style="background-color:${type.badgeTint};`
+        + `-webkit-mask-image:${m};mask-image:${m}"></div>`
+    } else {
+      corner = `<div class="svgmark cornerbadge">${svgText(type.badge)}</div>`
+    }
   }
   return `<div class="doc" style="background:${body}">${corner === '' ? '' : `<div class="corner">${corner}</div>`}</div>`
 }
@@ -215,6 +228,7 @@ const html = `<!doctype html>
   .doc .corner { position:absolute; right:0; bottom:0; display:flex;
                  border-bottom-right-radius:7px; overflow:hidden; }
   .cornerbadge svg { width:20px; height:20px; display:block; }
+  .tintmark.cornerbadge { width:20px; height:20px; }
   .cornerchip { display:flex; align-items:center; justify-content:center; width:20px; height:20px; }
   .cornerchip .svgmark svg, .cornerchip .tintmark { width:14px; height:14px; }
   .cornerglyph svg, .tintmark.cornerglyph { width:17px; height:17px; }

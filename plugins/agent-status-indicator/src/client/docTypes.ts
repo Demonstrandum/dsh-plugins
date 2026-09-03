@@ -31,6 +31,8 @@ export interface DocType {
   readonly svgBg?: string
   /** Framed decoration (artwork with its own background/frame). */
   readonly badge?: string
+  /** Silhouette tint for mono/dark badge artwork. */
+  readonly badgeTint?: string
   /** Unframed decoration (bare glyph). */
   readonly deco?: string
   /** Silhouette tint for the unframed decoration. */
@@ -55,11 +57,11 @@ export const DOC_TYPES: readonly DocType[] = [
   { id: 'json', name: 'json', badgeText: '{}', deco: 'material-json.svg', bg: '#4a4a4f', fg: '#ececef', exts: ['json', 'jsonc'] },
   { id: 'toml', name: 'toml', brand: 'toml.svg', deco: 'toml.svg', bg: '#9c4121', fg: '#ffffff', exts: ['toml'] },
   { id: 'yaml', name: 'yaml', brand: 'yaml.svg', tint: '#cb171e', deco: 'yaml.svg', decoTint: '#cb171e', bg: '#cb171e', fg: '#ffffff', exts: ['yaml', 'yml'] },
-  { id: 'md', name: 'markdown', brand: 'md.svg', tint: '#519aba', deco: 'md.svg', decoTint: '#519aba', bg: '#519aba', fg: '#ffffff', exts: ['md', 'markdown', 'mdx'] },
+  { id: 'md', name: 'markdown', brand: 'md.svg', tint: '#519aba', badge: 'md.svg', badgeTint: '#519aba', deco: 'material-markdown.svg', bg: '#519aba', fg: '#ffffff', exts: ['md', 'markdown', 'mdx'] },
   { id: 'svg', name: 'svg', brand: 'svg.svg', deco: 'svg.svg', bg: '#ffb13b', fg: '#1b1b1d', exts: ['svg'] },
   { id: 'sh', name: 'shell', brand: 'lang-shell.svg', badge: 'material-console.svg', bg: '#4eaa25', fg: '#ffffff', exts: ['sh', 'bash', 'zsh'] },
-  { id: 'txt', name: 'text', brand: 'txt.svg', deco: 'txt.svg', bg: '#6d6d72', fg: '#ffffff', exts: ['txt', 'text'] },
-  { id: 'log', name: 'log', brand: 'log.svg', deco: 'log.svg', bg: '#afb42b', fg: '#1b1b1d', exts: ['log'] },
+  { id: 'txt', name: 'text', brand: 'txt.svg', badge: 'txt.svg', bg: '#6d6d72', fg: '#ffffff', exts: ['txt', 'text'] },
+  { id: 'log', name: 'log', brand: 'log.svg', badge: 'log.svg', bg: '#afb42b', fg: '#1b1b1d', exts: ['log'] },
   { id: 'exe', name: 'executable', brand: 'exe.svg', badge: 'exe.svg', bg: '#e64a19', fg: '#ffffff', exts: ['exe', 'msi'] },
   { id: 'tex', name: 'latex', brand: 'tex.svg', deco: 'tex.svg', bg: '#2196f3', fg: '#ffffff', exts: ['tex', 'bib'] },
   { id: 'img', name: 'image', brand: 'image.svg', deco: 'custom-img.svg', decoBg: '#26a69a', bg: '#26a69a', fg: '#ffffff', exts: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif'] },
@@ -68,7 +70,7 @@ export const DOC_TYPES: readonly DocType[] = [
   { id: 'xml', name: 'xml', brand: 'xml.svg', badge: 'custom-xml-badge.svg', deco: 'custom-xml.svg', decoBg: '#8bc34a', bg: '#8bc34a', fg: '#323330', exts: ['xml'] },
   { id: 'sql', name: 'sql', brand: 'sql.svg', deco: 'sql.svg', bg: '#ffca28', fg: '#1b1b1d', exts: ['sql'] },
   { id: 'ini', name: 'ini', brand: 'ini.svg', deco: 'ini.svg', bg: '#42a5f5', fg: '#1b1b1d', exts: ['ini'] },
-  { id: 'csv', name: 'csv', brand: 'csv.svg', deco: 'csv.svg', bg: '#217346', fg: '#ffffff', exts: ['csv', 'tsv'] },
+  { id: 'csv', name: 'csv', brand: 'csv.svg', badge: 'csv.svg', bg: '#217346', fg: '#ffffff', exts: ['csv', 'tsv'] },
   { id: 'rb', name: 'ruby', brand: 'lang-ruby.svg', deco: 'material-ruby.svg', bg: '#cc342d', fg: '#ffffff', exts: ['rb'] },
   { id: 'rs', name: 'rust', brand: 'lang-rust.svg', tint: '#f0863b', deco: 'material-rust.svg', bg: '#f0863b', fg: '#000000', exts: ['rs'] },
   { id: 'php', name: 'php', brand: 'lang-php.svg', deco: 'material-php.svg', bg: '#777bb4', fg: '#ffffff', exts: ['php'] },
