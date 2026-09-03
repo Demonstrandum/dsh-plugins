@@ -63,7 +63,7 @@ export const DOC_TYPES: readonly DocType[] = [
   { id: 'exe', name: 'executable', brand: 'exe.svg', bg: '#e64a19', fg: '#ffffff', exts: ['exe', 'msi'] },
   { id: 'tex', name: 'latex', brand: 'tex.svg', deco: 'tex.svg', bg: '#2196f3', fg: '#ffffff', exts: ['tex', 'bib'] },
   { id: 'img', name: 'image', brand: 'image.svg', bg: '#26a69a', fg: '#ffffff', exts: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif'] },
-  { id: 'pdf', name: 'pdf', brand: 'pdf.svg', badge: 'pdf.svg', bg: '#d32f2f', fg: '#ffffff', exts: ['pdf'] },
+  { id: 'pdf', name: 'pdf', brand: 'pdf.svg', badge: 'pdf.svg', deco: 'custom-pdf.svg', decoBg: '#ef5350', bg: '#d32f2f', fg: '#ffffff', exts: ['pdf'] },
   { id: 'diff', name: 'diff', brand: 'diff.svg', deco: 'custom-diff.svg', bg: '#00897b', fg: '#ffffff', exts: ['diff', 'patch'] },
   { id: 'xml', name: 'xml', brand: 'xml.svg', badge: 'custom-xml-badge.svg', deco: 'custom-xml.svg', decoBg: '#8bc34a', bg: '#8bc34a', fg: '#323330', exts: ['xml'] },
   { id: 'sql', name: 'sql', brand: 'sql.svg', deco: 'sql.svg', bg: '#ffca28', fg: '#1b1b1d', exts: ['sql'] },
