@@ -5,10 +5,10 @@ import * as McpClient from '@deepseek-ai/dsh-mcp-client'
 import * as plugin from '../index.js'
 
 const filled = plugin.Config({})
-if (filled.safari.enabled !== true || filled.chrome.enabled !== true || filled.subagents !== false || filled.idleMinutes !== 30) {
+if (filled.safari.enabled !== true || filled.chrome.enabled !== true || filled.subagents !== true || filled.idleMinutes !== 30) {
   throw new Error(`unexpected defaults: ${JSON.stringify(filled)}`)
 }
-const custom = plugin.Config({ chrome: { headless: true }, safari: { enabled: false }, idleMinutes: 0 })
+const custom = plugin.Config({ chrome: { headless: true }, safari: { enabled: false }, idleMinutes: 0, subagents: false })
 if (custom.safari.enabled !== false || custom.chrome.headless !== true) throw new Error(`override not applied: ${JSON.stringify(custom)}`)
 
 for (const [browser, row] of Object.entries(plugin.resolveServers(filled))) {
@@ -19,20 +19,27 @@ for (const [browser, row] of Object.entries(plugin.resolveServers(filled))) {
 
 const registered = []
 const listeners = {}
-const ctx = {
-  logger: { info() {}, warn(message) { throw new Error(`unexpected warn: ${message}`) } },
-  on: (event, cb) => { listeners[event] = cb },
-  effect: () => {},
-  tools: { schemas: () => [] },
-}
-plugin.apply(ctx, custom)
+const effects = []
 const fakeAgent = (id, depth) => ({
   id,
   session: { header: { cwd: '/tmp', delegationDepth: depth } },
-  ctx: { tools: { register: (def) => { registered.push([id, def.name]) } }, plugin: () => { throw new Error('must not mount at creation') } },
+  ctx: { tools: { register: (def) => { registered.push([id, def.name]); return () => { registered.push([id, `-${def.name}`]) } } }, plugin: () => { throw new Error('must not mount at creation') } },
 })
+const preexisting = fakeAgent('pre', 0)
+const ctx = {
+  logger: { info() {}, warn(message) { throw new Error(`unexpected warn: ${message}`) } },
+  on: (event, cb) => { listeners[event] = cb },
+  effect: (run) => { const dispose = run(); effects.push(dispose); let done = false; return () => { if (!done) { done = true; dispose() } } },
+  tools: { schemas: () => [] },
+  agents: { list: () => [preexisting] },
+}
+plugin.apply(ctx, custom)
 listeners['agent/created']({ agent: fakeAgent('top', 0) })
 listeners['agent/created']({ agent: fakeAgent('child', 1) })
-const expected = [['top', 'browser_open'], ['top', 'browser_close']]
+let expected = [['pre', 'browser_open'], ['pre', 'browser_close'], ['top', 'browser_open'], ['top', 'browser_close']]
 if (JSON.stringify(registered) !== JSON.stringify(expected)) throw new Error(`registrations: ${JSON.stringify(registered)}`)
-console.log('smoke ok: lazy tools registered for top-level agents only; rows validate')
+// Agent disposal releases the plugin-owned wrapper (idempotent with the scope unwind).
+listeners['agent/disposed']({ agent: preexisting })
+expected = [...expected, ['pre', '-browser_open'], ['pre', '-browser_close']]
+if (JSON.stringify(registered) !== JSON.stringify(expected)) throw new Error(`after dispose: ${JSON.stringify(registered)}`)
+console.log('smoke ok: lazy tools attached to pre-existing + new top-level agents only; rows validate')

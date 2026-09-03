@@ -46,7 +46,7 @@ profile's patch layer (what the `web` profile uses):
     - id: tali-browser-automation
       name: '/Users/USER/github/tali-dash-plugins/plugins/browser-automation/index.js'
       config:
-        subagents: false        # also offer browser_open to child agents
+        subagents: true         # child agents get browser_open too (each its own browser)
         idleMinutes: 30         # 0 = never auto-close
         chrome:
           headless: false       # true = no visible Chrome window

@@ -51,7 +51,7 @@
  *     command: /opt/homebrew/bin/chrome-devtools-mcp   # absolute path; npm i -g chrome-devtools-mcp
  *     headless: false                                  # true = no visible window
  *     args: []                                         # extra chrome-devtools-mcp flags
- *   subagents: false          # also offer browser_open to delegated child agents
+ *   subagents: true           # also offer browser_open to delegated child agents (each gets its own browser)
  *   idleMinutes: 30           # close a browser after this long without an mcp__ call (0 = never)
  *   toolCallTimeoutMs: 60000  # per MCP tool call
  *   traceFile: ''             # append JSON lifecycle lines here (debugging; '' = off)
@@ -77,7 +77,7 @@ export const Config = Schema.object({
     headless: Schema.boolean().default(false),
     args: Schema.array(String).default([]),
   }).default({}),
-  subagents: Schema.boolean().default(false),
+  subagents: Schema.boolean().default(true),
   idleMinutes: Schema.number().min(0).default(30),
   toolCallTimeoutMs: Schema.number().default(60_000),
   traceFile: Schema.string().default(''),
@@ -247,46 +247,69 @@ export function apply(ctx, config) {
     description: `Which browser: ${available.join(' | ')}.`,
   })
 
-  ctx.on('agent/created', ({ agent }) => {
+  /** Plugin-owned disposer of each attached agent's scoped tool registrations. */
+  const attached = new Map()
+
+  /**
+   * Register browser_open / browser_close into one agent's scope. The
+   * registrations are owned by BOTH lifetimes: they unwind with the agent's
+   * scope, and this plugin's own effect removes them on plugin unload/reload
+   * (effect disposers are idempotent, so whichever side goes first is fine).
+   */
+  function attach(agent) {
+    if (attached.has(agent)) return
     const depth = agent.session.header?.delegationDepth ?? 0
     if (depth > 0 && !config.subagents) return
-    trace({ event: 'agent/created', id: agent.id, depth })
+    const dispose = ctx.effect(() => {
+      const disposers = [
+        agent.ctx.tools.register(defineTool({
+          name: 'browser_open',
+          description: `Start a browser automation session private to this chat (${available.join(' or ')}). On success the browser's MCP tools appear in your tool list on your NEXT step as mcp__safari__* / mcp__chrome__*. Use a browser when a page needs JavaScript or a real browser (YouTube, SPAs, login walls, screenshots, DOM inspection, DevTools/network/performance, driving the DSH web GUI); web_fetch is cheaper for plain pages. Safari is a real Safari Technology Preview session with WebKit text extraction; Chrome is an isolated Chrome with the DevTools tool set (snapshots, screenshots, network, Lighthouse). Idempotent: calling it again for an open browser just returns the usage notes.`,
+          parameters: { browser: browserParam(true) },
+          output: {
+            schema: { type: 'string' },
+            render: (_args, value) => [{ type: 'text', text: value }],
+          },
+          async execute(args, exec) {
+            return open(exec.agent ?? agent, args.browser)
+          },
+        })),
+        agent.ctx.tools.register(defineTool({
+          name: 'browser_close',
+          description: 'Close this chat\'s browser automation session(s) opened with browser_open, freeing the browser process; the matching mcp__ tools disappear from your tool list. Omit `browser` to close all. Call it when you are done browsing.',
+          parameters: { browser: browserParam(false) },
+          output: {
+            schema: { type: 'string' },
+            render: (_args, value) => [{ type: 'text', text: value }],
+          },
+          async execute(args, exec) {
+            const target = exec.agent ?? agent
+            const browsers = args.browser === undefined ? available : [args.browser]
+            const closed = await closeMounts(target, browsers, 'tool')
+            return closed.length === 0 ? 'No browser was open.' : `Closed ${closed.join(', ')}.`
+          },
+        })),
+      ]
+      return () => { for (const dispose of disposers) dispose() }
+    }, 'browser-automation.tools')
+    attached.set(agent, dispose)
+    trace({ event: 'attach', id: agent.id, depth })
+  }
 
-    // Scoped registrations: visible to this agent only, unwound with its scope.
-    agent.ctx.tools.register(defineTool({
-      name: 'browser_open',
-      description: `Start a browser automation session private to this chat (${available.join(' or ')}). On success the browser's MCP tools appear in your tool list on your NEXT step as mcp__safari__* / mcp__chrome__*. Use a browser when a page needs JavaScript or a real browser (YouTube, SPAs, login walls, screenshots, DOM inspection, DevTools/network/performance, driving the DSH web GUI); web_fetch is cheaper for plain pages. Safari is a real Safari Technology Preview session with WebKit text extraction; Chrome is an isolated Chrome with the DevTools tool set (snapshots, screenshots, network, Lighthouse). Idempotent: calling it again for an open browser just returns the usage notes.`,
-      parameters: { browser: browserParam(true) },
-      output: {
-        schema: { type: 'string' },
-        render: (_args, value) => [{ type: 'text', text: value }],
-      },
-      async execute(args, exec) {
-        return open(exec.agent ?? agent, args.browser)
-      },
-    }))
-
-    agent.ctx.tools.register(defineTool({
-      name: 'browser_close',
-      description: 'Close this chat\'s browser automation session(s) opened with browser_open, freeing the browser process; the matching mcp__ tools disappear from your tool list. Omit `browser` to close all. Call it when you are done browsing.',
-      parameters: { browser: browserParam(false) },
-      output: {
-        schema: { type: 'string' },
-        render: (_args, value) => [{ type: 'text', text: value }],
-      },
-      async execute(args, exec) {
-        const target = exec.agent ?? agent
-        const browsers = args.browser === undefined ? available : [args.browser]
-        const closed = await closeMounts(target, browsers, 'tool')
-        return closed.length === 0 ? 'No browser was open.' : `Closed ${closed.join(', ')}.`
-      },
-    }))
-  })
+  // Agents that already exist when this plugin (re)loads, then every new one.
+  for (const agent of ctx.agents.list()) attach(agent)
+  ctx.on('agent/created', ({ agent }) => { attach(agent) })
 
   ctx.on('agent/disposed', ({ agent }) => {
+    // The scope unwind already disposed the mounts and tool registrations;
+    // release our wrapper effect and bookkeeping.
+    const dispose = attached.get(agent)
+    if (dispose !== undefined) {
+      attached.delete(agent)
+      void dispose()
+    }
     const state = states.get(agent)
     if (state === undefined) return
-    // The scope unwind already disposed the mounts; just drop bookkeeping.
     clearTimeout(state.timer)
     states.delete(agent)
     trace({ event: 'agent/disposed', id: agent.id, hadMounts: state.mounts.size })
