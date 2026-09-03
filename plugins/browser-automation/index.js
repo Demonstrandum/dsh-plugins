@@ -50,6 +50,7 @@
  *     enabled: true
  *     command: /opt/homebrew/bin/chrome-devtools-mcp   # absolute path; npm i -g chrome-devtools-mcp
  *     headless: false                                  # true = no visible window
+ *     hideAutomationBanner: true                       # no "controlled by automated test software" bar
  *     args: []                                         # extra chrome-devtools-mcp flags
  *   subagents: true           # also offer browser_open to delegated child agents (each gets its own browser)
  *   idleMinutes: 30           # close a browser after this long without an mcp__ call (0 = never)
@@ -75,6 +76,9 @@ export const Config = Schema.object({
     enabled: Schema.boolean().default(true),
     command: Schema.string().default('/opt/homebrew/bin/chrome-devtools-mcp'),
     headless: Schema.boolean().default(false),
+    // Drops Puppeteer's --enable-automation switch, which is what makes Chrome
+    // show the "Chrome is being controlled by automated test software" bar.
+    hideAutomationBanner: Schema.boolean().default(true),
     args: Schema.array(String).default([]),
   }).default({}),
   subagents: Schema.boolean().default(true),
@@ -119,6 +123,7 @@ export function resolveServers(config) {
         '--isolated',
         '--no-usage-statistics',
         ...(config.chrome.headless ? ['--headless'] : []),
+        ...(config.chrome.hideAutomationBanner ? ['--ignoreDefaultChromeArg=--enable-automation'] : []),
         ...config.chrome.args,
       ],
       toolCallTimeoutMs: config.toolCallTimeoutMs,

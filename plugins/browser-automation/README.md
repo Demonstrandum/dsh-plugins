@@ -50,6 +50,7 @@ profile's patch layer (what the `web` profile uses):
         idleMinutes: 30         # 0 = never auto-close
         chrome:
           headless: false       # true = no visible Chrome window
+          hideAutomationBanner: true   # drops --enable-automation (no infobar)
         # traceFile: /tmp/browser-automation-trace.log   # JSON lifecycle lines
 ```
 
@@ -77,6 +78,10 @@ halves contain `_`, `mcp` so external tools are addressable as a class.
 - Safari's `evaluate_javascript` takes `expression` as a **function body**:
   `return …`. Each `--mcp` process is its own automation session with no tabs
   until the first `navigate_to_url`.
+- The "Chrome is being controlled by automated test software" bar comes from
+  Puppeteer's default `--enable-automation` switch; the server's
+  `--ignoreDefaultChromeArg=--enable-automation` removes it (this plugin does so
+  by default). Side effect: `navigator.webdriver` reads false.
 - Chrome's `take_screenshot`: omit `filePath` — the image returns inline via
   DSH's attachment store; the server only writes under its cwd / temp dir.
 - `ctx.logger` output of host plugins does not reach `/tmp/dsh-web.log` (only

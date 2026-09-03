@@ -14,7 +14,7 @@ if (custom.safari.enabled !== false || custom.chrome.headless !== true) throw ne
 for (const [browser, row] of Object.entries(plugin.resolveServers(filled))) {
   const validated = McpClient.Config({ ...row, cwd: '/tmp' })
   if (validated.serverName !== browser || validated.failOnStartupError !== true) throw new Error(`bad row for ${browser}: ${JSON.stringify(validated)}`)
-  if (browser === 'chrome' && !validated.args.includes('--isolated')) throw new Error('chrome must run --isolated')
+  if (browser === 'chrome' && (!validated.args.includes('--isolated') || !validated.args.includes('--ignoreDefaultChromeArg=--enable-automation'))) throw new Error(`chrome args: ${validated.args}`)
 }
 
 const registered = []
