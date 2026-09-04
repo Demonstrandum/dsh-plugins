@@ -1,0 +1,115 @@
+// Generate docs/tools.md from the registered tool definitions (names,
+// descriptions, parameter schemas) so the reference cannot drift from the code.
+//   node scripts/gen-tool-docs.mjs          # write
+//   node scripts/gen-tool-docs.mjs --check  # exit 1 when docs/tools.md is stale
+import { readFileSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { createTools } from '../curated-tools.mjs'
+
+const out = fileURLToPath(new URL('../docs/tools.md', import.meta.url))
+const tools = createTools({ sessions: {}, readerPool: {}, admitImage: async () => ({}), inlineImages: new WeakMap(), preflight: () => {}, limits: { maxChars: 1 } }, {})
+
+const GROUPS = [
+  { title: 'Windows', match: /^(safari|chrome)_(open|close)$/ },
+  { title: 'Navigation and reading', match: /^(safari|chrome)_(navigate|get_page_content|snapshot|get_youtube_notes|wait_for)$/ },
+  { title: 'JavaScript', match: /_evaluate_/ },
+  { title: 'Interaction', match: /^(safari|chrome)_(interact|click|hover|press_key|type_text|fill|fill_form)$/ },
+  { title: 'Screenshots', match: /_screenshot$/ },
+  { title: 'Diagnostics and viewport', match: /_(console_messages|network_requests|set_viewport_size)$/ },
+]
+
+const NOTES = {
+  safari_open: 'Each Safari window is a separate `safaridriver --mcp` process: its own automation session, cookies and JS state, in its own STP window whose banner reads `This window is controlled by DSH: ‹chat› · s:0:1.` Nothing is shared between windows.',
+  chrome_open: 'All Chrome windows of a session are pages of one isolated Chrome instance (fresh temporary profile; cookies shared between the session\'s windows). Chrome launches with the first page and quits with the last.',
+  safari_get_page_content: 'Two modes: `url` without `windowId` reads in an isolated pooled reader (never a chat window); `windowId`, or no `url`, reads the chat\'s window. The server\'s `maxWordsPerParagraph` default of 15 truncates prose, so the tool defaults it to 2000 and always extracts `region: entire_page`. Output beyond `safari.reader.maxChars` is truncated and the full text saved to a temp file.',
+  safari_get_youtube_notes: 'The rendered watch page never contains the full description (collapsed behind "…more"); the tool reads `videoDetails` from the inline `ytInitialPlayerResponse` script in an isolated reader and parses chapters from timestamp lines.',
+  safari_wait_for: 'No server counterpart: an in-page polling script (100 ms) run in 20 s slices, because Apple\'s script timeout is 30 s.',
+  safari_evaluate_function: 'Wrapped as `return await (fn)($uid(a), $uid(b))`, so `args` are node UIDs from `safari_get_page_content`.',
+  chrome_evaluate_expression: 'Wrapped as `async () => { … }` for the server\'s `evaluate_script`.',
+  chrome_evaluate_function: 'Server-native `evaluate_script`; `args` are snapshot uids only (plain values must be inlined into the function source).',
+  safari_interact: 'Direct forward of Apple\'s `page_interactions`. Prefer one batched call over several single-step calls.',
+  chrome_interact: 'Mirrors `safari_interact`\'s batch format on Chrome: click/hover/keyPress/type/scroll/selectMenuItem map onto `click`/`hover`/`press_key`/`fill`+`press_key`/`type_text`/`evaluate_script`/`fill`. `node` = snapshot uid (native); `text` targets use an in-page finder (deepest visible element containing the text). `selectText`, `highlightText` and `point` targets are reported as failed steps; the batch continues and each step\'s outcome is listed.',
+  safari_click: 'Single-step convenience over `safari_interact` (`scrollToVisible` defaults to true). Waits for a navigation the click triggers.',
+  safari_hover: 'Single-step convenience over `safari_interact`.',
+  safari_press_key: 'Single-step convenience over `safari_interact` (`keyPress`).',
+  safari_type_text: 'Single-step convenience over `safari_interact` (`type`, with `replaceAll` / `pressReturn`).',
+  safari_get_screenshot: 'With `querySelector`: scroll into view (`scrollTo`), wait until rect and scroll offset are stable for three samples (setTimeout polling — rAF does not fire in occluded windows), capture the viewport, re-measure (retake once if it moved > 2 px), crop with sharp at device-pixel precision. Inline images go through DSH\'s attachment store when the current model declares image input; otherwise a temp-file path is returned.',
+  safari_save_screenshot: 'Same capture as `safari_get_screenshot`, written to `path` (relative paths resolve against the session workspace; parents are created).',
+  chrome_get_screenshot: 'Server-native capture (viewport, `fullPage`, or element `uid`); inline via the attachment store under the same admission rule as `safari_get_screenshot`.',
+  chrome_save_screenshot: 'Same capture as `chrome_get_screenshot`, written to `path`.',
+}
+
+const RETURNS = {
+  safari_open: '`{ windowId, url?, title? }`', chrome_open: '`{ windowId, url? }`',
+  safari_close: 'text: which ids were closed', chrome_close: 'text: which ids were closed',
+  safari_navigate: '`{ windowId, url, title? }`', chrome_navigate: 'text from the server, prefixed `[windowId]`',
+  safari_get_page_content: '`{ mode, windowId?, url, title?, format, content, scriptResult?, truncated?, fullTextPath? }` rendered with a header',
+  safari_get_youtube_notes: '`{ url, videoId, title, author, channelId, publishDate, category, lengthSeconds, viewCount, isLive, keywords[], chapters[{time,title}], links[], description }`',
+  safari_get_screenshot: 'inline image + `{ windowId, width, height, rect?, viewport?, scale?, clipped?, settled?, unstable? }`',
+  chrome_get_screenshot: 'inline image + `{ windowId, width?, height?, uid?, fullPage }`',
+  safari_save_screenshot: '`{ path, width, height, … }`', chrome_save_screenshot: '`{ path, … }`',
+  safari_wait_for: 'text: `Found "…"` or a timeout notice', chrome_interact: 'text: one line per step (`ok` / `FAILED: reason`), optional snapshot',
+}
+
+const esc = (text) => String(text).replace(/\|/g, '\\|').replace(/\n/g, ' ')
+const typeOf = (schema) => {
+  if (schema.enum) return schema.enum.map(v => `\`${v}\``).join(' \\| ')
+  if (schema.type === 'array') return `array of ${schema.items?.type === 'object' ? 'objects' : (schema.items?.enum ? schema.items.enum.map(v => `\`${v}\``).join(' \\| ') : (schema.items?.type ?? 'any'))}`
+  return schema.type ?? 'any'
+}
+
+function paramRows(schema, prefix = '') {
+  const required = new Set(schema.required ?? [])
+  const rows = []
+  for (const [name, prop] of Object.entries(schema.properties ?? {})) {
+    rows.push(`| \`${prefix}${name}\` | ${typeOf(prop)} | ${required.has(name) ? 'yes' : ''} | ${esc(prop.description ?? '')} |`)
+    const nested = prop.type === 'array' && prop.items?.type === 'object' ? prop.items : (prop.type === 'object' ? prop : undefined)
+    if (nested?.properties) rows.push(...paramRows(nested, `${prefix}${name}${prop.type === 'array' ? '[].' : '.'}`))
+  }
+  return rows
+}
+
+const lines = [
+  '# Tool reference',
+  '',
+  '<!-- GENERATED by scripts/gen-tool-docs.mjs from curated-tools.mjs — do not edit by hand. -->',
+  '',
+  `${tools.length} tools, registered into every eligible chat and subagent. Window-bound tools take an optional \`windowId\` (\`s:<session>:<window>\` for Safari, \`c:<session>:<window>\` for Chrome); when omitted the browser must have zero or one window open in the calling session — zero opens one (the result says \`opened\`), one is used, more is an error listing the open ids. Ids are validated against the caller's session. Nothing is spawned until a tool needs it; a session's windows close after \`idleMinutes\` without a tool call, on agent disposal, and on plugin unload.`,
+  '',
+  '## Index',
+  '',
+]
+for (const group of GROUPS) {
+  const names = tools.filter(t => group.match.test(t.name)).map(t => `[\`${t.name}\`](#${t.name})`)
+  lines.push(`- **${group.title}**: ${names.join(', ')}`)
+}
+const grouped = new Set(GROUPS.flatMap(g => tools.filter(t => g.match.test(t.name)).map(t => t.name)))
+const ungrouped = tools.filter(t => !grouped.has(t.name))
+if (ungrouped.length > 0) throw new Error(`ungrouped tools: ${ungrouped.map(t => t.name).join(', ')}`)
+
+for (const group of GROUPS) {
+  lines.push('', `## ${group.title}`)
+  for (const tool of tools.filter(t => group.match.test(t.name))) {
+    lines.push('', `### \`${tool.name}\``, '', tool.description, '')
+    const rows = paramRows(tool.parameters)
+    if (rows.length === 0) lines.push('_No parameters._')
+    else lines.push('| Parameter | Type | Required | Description |', '|---|---|---|---|', ...rows)
+    lines.push('', `**Returns:** ${RETURNS[tool.name] ?? 'text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)'}`)
+    if (NOTES[tool.name]) lines.push('', `**Notes:** ${NOTES[tool.name]}`)
+  }
+}
+lines.push('')
+const content = lines.join('\n')
+
+if (process.argv.includes('--check')) {
+  let current = ''
+  try { current = readFileSync(out, 'utf8') } catch { /* missing → stale */ }
+  if (current !== content) {
+    console.error('docs/tools.md is stale: run `pnpm run docs`')
+    process.exit(1)
+  }
+  console.log('docs ok: docs/tools.md is current')
+} else {
+  writeFileSync(out, content)
+  console.log(`wrote docs/tools.md (${tools.length} tools)`)
+}
