@@ -4,13 +4,13 @@
  * The plugin owns the MCP forwarding: it holds private MCP SDK connections to
  * Apple's Safari MCP server (`safaridriver --mcp`, Safari Technology Preview)
  * and Google's `chrome-devtools-mcp`, and registers exactly the tools in
- * curated-tools.mjs (`mcp__safari__*`, `mcp__chrome__*`) into each eligible agent's scope.
+ * curated-tools.mjs (`safari_*`, `chrome_*`) into each eligible agent's scope.
  * Nothing else reaches the model: no `mcp__server__tool` names, no raw tools,
  * no dsh-mcp-client. Per-session behavior needs no dynamic registration — the
  * tool set is static and every call reads `exec.agent` to find the caller's
  * windows (windows.mjs).
  *
- * WINDOWS. `mcp__safari__open` / `mcp__chrome__open` return ids like `s:0:2` / `c:0:0`
+ * WINDOWS. `safari_open` / `chrome_open` return ids like `s:0:2` / `c:0:0`
  * (session index, then window index within that session). Every window tool
  * takes an optional `windowId`; omitted, the browser must have zero or one
  * window in the session (zero opens one). A Safari window is its own
@@ -23,8 +23,8 @@
  * and injects a notice; agent disposal and plugin unload close everything.
  * Web sessions are never disposed by DSH itself, hence the timer.
  *
- * READERS. `mcp__safari__get_page_content` with a url (and no windowId) and
- * `mcp__safari__get_youtube_notes` read in a host-wide pool of isolated Safari
+ * READERS. `safari_get_page_content` with a url (and no windowId) and
+ * `safari_get_youtube_notes` read in a host-wide pool of isolated Safari
  * readers (reader-pool.mjs), never in a chat's own window.
  *
  * Config (all optional):
@@ -109,13 +109,13 @@ export function preflightFor(config) {
     if (browser === 'safari') {
       if (!config.safari.enabled) throw new Error('Safari automation is disabled in this deployment (safari.enabled=false).')
       if (!existsSync(config.safari.driver)) {
-        throw new Error(`Safari automation is unavailable: no safaridriver at "${config.safari.driver}". Safari tools (including screenshots) require Safari Technology Preview 247+ (https://developer.apple.com/safari/technology-preview/) with Develop ▸ Developer Settings ▸ "Allow Remote Automation"; the stable Safari driver has no --mcp mode, so classic Safari cannot be used instead. Use the mcp__chrome__* tools if a browser is still needed.`)
+        throw new Error(`Safari automation is unavailable: no safaridriver at "${config.safari.driver}". Safari tools (including screenshots) require Safari Technology Preview 247+ (https://developer.apple.com/safari/technology-preview/) with Develop ▸ Developer Settings ▸ "Allow Remote Automation"; the stable Safari driver has no --mcp mode, so classic Safari cannot be used instead. Use the chrome_* tools if a browser is still needed.`)
       }
       return
     }
     if (!config.chrome.enabled) throw new Error('Chrome automation is disabled in this deployment (chrome.enabled=false).')
     if (!existsSync(config.chrome.command)) {
-      throw new Error(`Chrome automation is unavailable: no chrome-devtools-mcp at "${config.chrome.command}". Install it with \`npm i -g chrome-devtools-mcp\` (and Google Chrome), or use the mcp__safari__* tools.`)
+      throw new Error(`Chrome automation is unavailable: no chrome-devtools-mcp at "${config.chrome.command}". Install it with \`npm i -g chrome-devtools-mcp\` (and Google Chrome), or use the safari_* tools.`)
     }
   }
 }
@@ -169,7 +169,7 @@ export function apply(ctx, config) {
     onIdleClose: (agent, closed) => {
       try {
         agent.inject({
-          content: `[browser-automation] Closed idle browser window(s) ${closed.join(', ')} after ${config.idleMinutes} min without use. Any mcp__safari__*/mcp__chrome__* call opens a fresh window.`,
+          content: `[browser-automation] Closed idle browser window(s) ${closed.join(', ')} after ${config.idleMinutes} min without use. Any safari_*/chrome_* call opens a fresh window.`,
           source: PLUGIN_SOURCE,
         })
       } catch {
@@ -226,7 +226,7 @@ export function apply(ctx, config) {
     if (depth > 0 && !config.subagents) return
     const dispose = ctx.effect(() => {
       const disposers = createTools(deps, agent)
-        .filter(tool => (tool.name.startsWith('mcp__safari__') ? config.safari.enabled : config.chrome.enabled))
+        .filter(tool => (tool.name.startsWith('safari_') ? config.safari.enabled : config.chrome.enabled))
         .map(tool => agent.ctx.tools.register(tool))
       return () => { for (const dispose of disposers) dispose() }
     }, 'browser-automation.tools')

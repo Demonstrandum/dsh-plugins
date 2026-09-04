@@ -1,4 +1,4 @@
-// LIVE (spawns STP): mcp__safari__get_youtube_notes through the plugin's real tool execute.
+// LIVE (spawns STP): safari_get_youtube_notes through the plugin's real tool execute.
 import * as plugin from '../index.js'
 const defs = {}; const created = []; let unload
 const cfg = plugin.Config({ chrome: { enabled: false }, safari: { reader: { idleMinutes: 0 } } })

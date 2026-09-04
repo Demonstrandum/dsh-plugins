@@ -1,7 +1,7 @@
 # tali-browser-automation
 
 Per-chat Safari (Technology Preview) and Chrome automation for DSH with a
-**curated tool set**: `mcp__safari__*` and `mcp__chrome__*` tools, per-session windows
+**curated tool set**: `safari_*` and `chrome_*` tools, per-session windows
 addressed by id, isolated page readers, and element-aware screenshots. The
 plugin owns the MCP forwarding itself — it holds private MCP SDK connections to
 Apple's Safari MCP server (`safaridriver --mcp`) and Google's
@@ -13,22 +13,22 @@ reaches the model: no `mcp__server__tool` names, no raw server tools, no
 
 | Tool | Purpose |
 |---|---|
-| `mcp__safari__open { url? }` | New independent Safari window → `windowId` (`s:<session>:<window>`) |
-| `mcp__safari__close { windowId? }` | Close one window, or all of the chat's |
-| `mcp__safari__navigate { url, windowId? }` | Load a URL, wait, return title/URL |
-| `mcp__safari__get_page_content { url?, windowId?, format?, waitMs?, script?, … }` | **url without windowId** → isolated pooled reader; **windowId / no url** → the chat's window. Formats: markdown, plainText, text, textTree, json, html (WebKit's own extraction) |
-| `mcp__safari__evaluate { expression, windowId?, frameId? }` | JS function body (`return …`, `await` ok, `$uid(N)`) |
-| `mcp__safari__interact { interactions[], fullText?, windowId? }` | Batched click/type/keyPress/scroll/… by node UID, find-in-page text, or point |
-| `mcp__safari__get_screenshot { windowId?, querySelector?, scrollTo?, fullPage? }` | Inline image; element capture via selector |
-| `mcp__safari__save_screenshot { path, … }` | Same, to a PNG file |
-| `mcp__safari__console_messages`, `mcp__safari__network_requests`, `mcp__safari__set_viewport_size` | Diagnostics / viewport |
-| `mcp__safari__get_youtube_notes { url }` | Title, channel, chapters, links, full description via an isolated reader |
-| `mcp__chrome__open { url? }` | New Chrome page → `windowId` (`c:<session>:<window>`) |
-| `mcp__chrome__close { windowId? }` | Close one / all; Chrome quits with the chat's last window |
-| `mcp__chrome__navigate`, `mcp__chrome__snapshot`, `mcp__chrome__evaluate` | Load/back/forward/reload; a11y-tree snapshot with `uid`s; JS function |
-| `mcp__chrome__click`, `mcp__chrome__fill`, `mcp__chrome__fill_form`, `mcp__chrome__hover`, `mcp__chrome__press_key`, `mcp__chrome__type_text`, `mcp__chrome__wait_for` | Interaction by snapshot `uid` |
-| `mcp__chrome__get_screenshot { windowId?, uid?, fullPage?, format?, quality? }` / `mcp__chrome__save_screenshot { path, … }` | Inline image / file |
-| `mcp__chrome__console_messages`, `mcp__chrome__network_requests` | Diagnostics |
+| `safari_open { url? }` | New independent Safari window → `windowId` (`s:<session>:<window>`) |
+| `safari_close { windowId? }` | Close one window, or all of the chat's |
+| `safari_navigate { url, windowId? }` | Load a URL, wait, return title/URL |
+| `safari_get_page_content { url?, windowId?, format?, waitMs?, script?, … }` | **url without windowId** → isolated pooled reader; **windowId / no url** → the chat's window. Formats: markdown, plainText, text, textTree, json, html (WebKit's own extraction) |
+| `safari_evaluate { expression, windowId?, frameId? }` | JS function body (`return …`, `await` ok, `$uid(N)`) |
+| `safari_interact { interactions[], fullText?, windowId? }` | Batched click/type/keyPress/scroll/… by node UID, find-in-page text, or point |
+| `safari_get_screenshot { windowId?, querySelector?, scrollTo?, fullPage? }` | Inline image; element capture via selector |
+| `safari_save_screenshot { path, … }` | Same, to a PNG file |
+| `safari_console_messages`, `safari_network_requests`, `safari_set_viewport_size` | Diagnostics / viewport |
+| `safari_get_youtube_notes { url }` | Title, channel, chapters, links, full description via an isolated reader |
+| `chrome_open { url? }` | New Chrome page → `windowId` (`c:<session>:<window>`) |
+| `chrome_close { windowId? }` | Close one / all; Chrome quits with the chat's last window |
+| `chrome_navigate`, `chrome_snapshot`, `chrome_evaluate` | Load/back/forward/reload; a11y-tree snapshot with `uid`s; JS function |
+| `chrome_click`, `chrome_fill`, `chrome_fill_form`, `chrome_hover`, `chrome_press_key`, `chrome_type_text`, `chrome_wait_for` | Interaction by snapshot `uid` |
+| `chrome_get_screenshot { windowId?, uid?, fullPage?, format?, quality? }` / `chrome_save_screenshot { path, … }` | Inline image / file |
+| `chrome_console_messages`, `chrome_network_requests` | Diagnostics |
 
 Raw server names and schemas these forward to: `docs/server-tools.json`
 (`pnpm run dump:tools` regenerates it).
@@ -71,8 +71,8 @@ Raw server names and schemas these forward to: `docs/server-tools.json`
   (osascript `quit`, then SIGTERM). A connection ending cleanly (stdin EOF —
   the driver exits in ~20 ms, inside the MCP SDK's 2 s grace before SIGTERM)
   closes its window; SIGTERM'd drivers leak windows.
-- **Reader pool** (`reader-pool.mjs`): `mcp__safari__get_page_content` with a url and
-  `mcp__safari__get_youtube_notes` read in isolated readers (own STP windows labeled
+- **Reader pool** (`reader-pool.mjs`): `safari_get_page_content` with a url and
+  `safari_get_youtube_notes` read in isolated readers (own STP windows labeled
   `DSH: page reader #n`), never in a chat's window. Concurrent reads each get a
   reader; `reader.maxIdle` (1) stay warm (a warm read is ~1.5–2 s vs ~4 s
   cold); the rest close after `reader.idleMinutes`. Cold start is serialized
