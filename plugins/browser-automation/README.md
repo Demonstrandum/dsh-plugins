@@ -17,16 +17,21 @@ reaches the model: no `mcp__server__tool` names, no raw server tools, no
 | `safari_close { windowId? }` | Close one window, or all of the chat's |
 | `safari_navigate { url, windowId? }` | Load a URL, wait, return title/URL |
 | `safari_get_page_content { url?, windowId?, format?, waitMs?, script?, … }` | **url without windowId** → isolated pooled reader; **windowId / no url** → the chat's window. Formats: markdown, plainText, text, textTree, json, html (WebKit's own extraction) |
-| `safari_evaluate { expression, windowId?, frameId? }` | JS function body (`return …`, `await` ok, `$uid(N)`) |
+| `safari_evaluate_expression { expression, windowId?, frameId? }` | JS function body (`return …`, `await` ok, `$uid(N)`) |
+| `safari_evaluate_function { function, args?, windowId?, frameId? }` | Call a function; `args` are node UIDs resolved to elements |
 | `safari_interact { interactions[], fullText?, windowId? }` | Batched click/type/keyPress/scroll/… by node UID, find-in-page text, or point |
+| `safari_click`, `safari_hover`, `safari_press_key`, `safari_type_text` | Single-step conveniences built on `safari_interact` (`page_interactions`) |
+| `safari_wait_for { text[], timeout?, windowId? }` | Poll the page text until any string appears (in-page script, 20 s slices) |
 | `safari_get_screenshot { windowId?, querySelector?, scrollTo?, fullPage? }` | Inline image; element capture via selector |
 | `safari_save_screenshot { path, … }` | Same, to a PNG file |
 | `safari_console_messages`, `safari_network_requests`, `safari_set_viewport_size` | Diagnostics / viewport |
 | `safari_get_youtube_notes { url }` | Title, channel, chapters, links, full description via an isolated reader |
 | `chrome_open { url? }` | New Chrome page → `windowId` (`c:<session>:<window>`) |
 | `chrome_close { windowId? }` | Close one / all; Chrome quits with the chat's last window |
-| `chrome_navigate`, `chrome_snapshot`, `chrome_evaluate` | Load/back/forward/reload; a11y-tree snapshot with `uid`s; JS function |
+| `chrome_navigate`, `chrome_snapshot` | Load/back/forward/reload; a11y-tree snapshot with `uid`s |
+| `chrome_evaluate_function { function, args? }` / `chrome_evaluate_expression { expression }` | Function with uid args (server-native) / statements with `return` (wrapped as `async () => { … }`) |
 | `chrome_click`, `chrome_fill`, `chrome_fill_form`, `chrome_hover`, `chrome_press_key`, `chrome_type_text`, `chrome_wait_for` | Interaction by snapshot `uid` |
+| `chrome_interact { interactions[], includeSnapshot?, windowId? }` | safari_interact's batch format mapped step by step onto Chrome tools (click/type/keyPress/scroll/hover/selectMenuItem; text targets via an in-page finder; unsupported kinds and point targets are reported as failed steps, the batch continues) |
 | `chrome_get_screenshot { windowId?, uid?, fullPage?, format?, quality? }` / `chrome_save_screenshot { path, … }` | Inline image / file |
 | `chrome_console_messages`, `chrome_network_requests` | Diagnostics |
 
@@ -129,7 +134,7 @@ live-reloaded).
 
 ## Checks
 
-- `pnpm run check` — offline smoke: config, preflight messages, the 28
+- `pnpm run check` — offline smoke: config, preflight messages, the 36
   registered tools per agent (child filter, disposal), window-id rules
   (numbering, ambiguity, cross-session, browser mismatch), YouTube and
   geometry helpers.

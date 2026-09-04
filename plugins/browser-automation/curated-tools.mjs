@@ -137,8 +137,8 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'safari_evaluate',
-    description: 'Run JavaScript in this chat\'s Safari window. `expression` is a FUNCTION BODY: use an explicit `return` for a value (await is allowed). `$uid(N)` references a node UID from safari_get_page_content. Returns the JSON-encoded result.',
+    name: 'safari_evaluate_expression',
+    description: 'Run JavaScript statements in this chat\'s Safari window. `expression` is a FUNCTION BODY: use an explicit `return` for a value (await is allowed). `$uid(N)` references a node UID from safari_get_page_content. Returns the JSON-encoded result. (safari_evaluate_function takes a function + args instead.)',
     parameters: {
       expression: { type: 'string', required: true, description: 'JavaScript function body; `return` the value you want.' },
       windowId: WINDOW_ID('safari'),
@@ -148,6 +148,24 @@ export function createTools(deps, fallbackAgent) {
     async execute(args, exec) {
       const { id, conn, opened } = await safari(exec, args.windowId)
       return tagged(id, opened, await conn.callText('evaluate_javascript', { expression: args.expression, ...(args.frameId ? { frameId: args.frameId } : {}) }))
+    },
+  }))
+
+  tools.push(defineTool({
+    name: 'safari_evaluate_function',
+    description: 'Call a JavaScript FUNCTION in this chat\'s Safari window, e.g. `() => document.title` or `(el) => el.innerText` with args naming node UIDs from safari_get_page_content (each resolves to that element). Async functions are awaited. Returns the JSON-encoded result.',
+    parameters: {
+      function: { type: 'string', required: true, description: 'A function expression (arrow or function), called with args.' },
+      args: { type: 'array', description: 'Node UIDs (strings) passed as element arguments, in order.', items: { type: 'string' } },
+      windowId: WINDOW_ID('safari'),
+      frameId: { type: 'string', description: 'Node UID of an iframe to run in that subframe.' },
+    },
+    output: textOutput,
+    async execute(args, exec) {
+      const { id, conn, opened } = await safari(exec, args.windowId)
+      const refs = (args.args ?? []).map(uid => `$uid(${/^\d+$/.test(uid) ? uid : JSON.stringify(uid)})`)
+      const expression = `return await (${args.function})(${refs.join(', ')});`
+      return tagged(id, opened, await conn.callText('evaluate_javascript', { expression, ...(args.frameId ? { frameId: args.frameId } : {}) }))
     },
   }))
 
@@ -181,6 +199,99 @@ export function createTools(deps, fallbackAgent) {
     async execute(args, exec) {
       const { id, conn, opened } = await safari(exec, args.windowId)
       return tagged(id, opened, await conn.callText('page_interactions', { interactions: args.interactions, ...(args.fullText ? { fullText: true } : {}) }))
+    },
+  }))
+
+  /** One page_interactions step from the simple-tool arguments. */
+  function step(type, purpose, args, extra = {}) {
+    if (!args.node && !args.text && !args.point) throw new Error(`${purpose}: give node (UID from safari_get_page_content), text (find-in-page), or point`)
+    return {
+      type, purpose,
+      ...(args.node ? { node: args.node } : {}),
+      ...(args.text ? { text: args.text } : {}),
+      ...(args.point ? { point: args.point } : {}),
+      ...(args.scrollToVisible !== undefined ? { scrollToVisible: args.scrollToVisible } : { scrollToVisible: true }),
+      ...extra,
+    }
+  }
+  const TARGET = {
+    node: { type: 'string', description: 'Node UID from safari_get_page_content (preferred).' },
+    text: { type: 'string', description: 'Find-in-page text identifying the element when no node is known.' },
+    point: { type: 'object', additionalProperties: false, description: 'Viewport coordinates, last resort.', properties: { x: { type: 'number', required: true }, y: { type: 'number', required: true } } },
+    scrollToVisible: { type: 'boolean', description: 'Scroll the target into view first (default true).' },
+  }
+  async function interactOnce(exec, args, interaction) {
+    const { id, conn, opened } = await safari(exec, args.windowId)
+    return tagged(id, opened, await conn.callText('page_interactions', { interactions: [interaction] }))
+  }
+
+  tools.push(defineTool({
+    name: 'safari_click',
+    description: 'Click an element in this chat\'s Safari window (by node UID, find-in-page text, or point). Waits for a triggered navigation. Returns the page diff. For several steps use safari_interact.',
+    parameters: { ...TARGET, windowId: WINDOW_ID('safari') },
+    output: textOutput,
+    async execute(args, exec) { return interactOnce(exec, args, step('click', 'click', args)) },
+  }))
+
+  tools.push(defineTool({
+    name: 'safari_hover',
+    description: 'Hover an element in this chat\'s Safari window (by node UID, text, or point). Returns the page diff.',
+    parameters: { ...TARGET, windowId: WINDOW_ID('safari') },
+    output: textOutput,
+    async execute(args, exec) { return interactOnce(exec, args, step('hover', 'hover', args)) },
+  }))
+
+  tools.push(defineTool({
+    name: 'safari_press_key',
+    description: 'Press a key in this chat\'s Safari window (e.g. "Enter", "Escape", "Tab", "ArrowDown"), optionally on a target element. Returns the page diff.',
+    parameters: { key: { type: 'string', required: true, description: 'Key name.' }, ...TARGET, windowId: WINDOW_ID('safari') },
+    output: textOutput,
+    async execute(args, exec) {
+      const interaction = { type: 'keyPress', purpose: `press ${args.key}`, value: args.key, ...(args.node ? { node: args.node } : {}), ...(args.text ? { text: args.text } : {}), ...(args.point ? { point: args.point } : {}) }
+      return interactOnce(exec, args, interaction)
+    },
+  }))
+
+  tools.push(defineTool({
+    name: 'safari_type_text',
+    description: 'Type text into a field in this chat\'s Safari window (target by node UID or find-in-page text), optionally replacing existing text and/or pressing Return to submit. Returns the page diff.',
+    parameters: {
+      text: { type: 'string', required: true, description: 'Text to type.' },
+      node: TARGET.node,
+      target: { type: 'string', description: 'Find-in-page text identifying the field when no node is known.' },
+      replaceAll: { type: 'boolean', description: 'Replace existing field text (default false).' },
+      pressReturn: { type: 'boolean', description: 'Press Return after typing (default false).' },
+      windowId: WINDOW_ID('safari'),
+    },
+    output: textOutput,
+    async execute(args, exec) {
+      const targetArgs = { node: args.node, text: args.target }
+      const interaction = step('type', 'type text', targetArgs, { value: args.text, ...(args.replaceAll ? { replaceAll: true } : {}), ...(args.pressReturn ? { pressReturn: true } : {}) })
+      return interactOnce(exec, args, interaction)
+    },
+  }))
+
+  tools.push(defineTool({
+    name: 'safari_wait_for',
+    description: 'Wait until any of the given texts appears in this chat\'s Safari page (polls the page text). Returns which text matched, or a timeout notice.',
+    parameters: {
+      text: { type: 'array', required: true, description: 'Texts; resolves when any appears.', items: { type: 'string' } },
+      timeout: { type: 'number', description: 'Milliseconds to wait (default 10000).' },
+      windowId: WINDOW_ID('safari'),
+    },
+    output: textOutput,
+    async execute(args, exec) {
+      const { id, conn, opened } = await safari(exec, args.windowId)
+      const total = Math.max(0, args.timeout ?? 10_000)
+      const deadline = Date.now() + total
+      do {
+        const slice = Math.min(20_000, Math.max(50, deadline - Date.now()))
+        const expression = `const texts = ${JSON.stringify(args.text)}; const deadline = Date.now() + ${slice};
+while (true) { const t = document.body ? document.body.innerText : ''; const hit = texts.find(x => t.includes(x)); if (hit !== undefined) return { found: hit }; if (Date.now() >= deadline) return { found: null }; await new Promise(r => setTimeout(r, 100)); }`
+        const result = parseJsonText(await conn.callText('evaluate_javascript', { expression }))
+        if (result && result.found) return tagged(id, opened, `Found ${JSON.stringify(result.found)}.`)
+      } while (Date.now() < deadline)
+      return tagged(id, opened, `Timed out after ${total} ms waiting for ${args.text.map(t => JSON.stringify(t)).join(' / ')}.`)
     },
   }))
 
@@ -410,15 +521,29 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'chrome_evaluate',
-    description: 'Evaluate a JavaScript FUNCTION in this chat\'s Chrome page, e.g. `() => document.title` or `(el) => el.innerText` with args referencing snapshot uids. The return value must be JSON-serializable.',
+    name: 'chrome_evaluate_function',
+    description: 'Call a JavaScript FUNCTION in this chat\'s Chrome page, e.g. `() => document.title` or `(el) => el.innerText` with args naming snapshot uids (each resolves to that element). Async functions are awaited. The return value must be JSON-serializable.',
     parameters: {
-      function: { type: 'string', required: true, description: 'A JavaScript function expression (arrow or function), called with args.' },
-      args: { type: 'array', description: 'Arguments: each { uid } resolves to that snapshot element.', items: { type: 'object', additionalProperties: false, properties: { uid: { type: 'string', required: true } } } },
+      function: { type: 'string', required: true, description: 'A function expression (arrow or function), called with args.' },
+      args: { type: 'array', description: 'Snapshot uids (strings) passed as element arguments, in order.', items: { type: 'string' } },
       windowId: WINDOW_ID('chrome'),
     },
     output: textOutput,
     execute: forwardChrome('evaluate_script'),
+  }))
+
+  tools.push(defineTool({
+    name: 'chrome_evaluate_expression',
+    description: 'Run JavaScript statements in this chat\'s Chrome page. `expression` is a FUNCTION BODY: use an explicit `return` for a value (await is allowed). Returns the JSON-encoded result. (chrome_evaluate_function takes a function + uid args instead.)',
+    parameters: {
+      expression: { type: 'string', required: true, description: 'JavaScript function body; `return` the value you want.' },
+      windowId: WINDOW_ID('chrome'),
+    },
+    output: textOutput,
+    async execute(args, exec) {
+      const { id, opened, text } = await chromeCall(exec, { windowId: args.windowId }, 'evaluate_script', () => ({ function: `async () => { ${args.expression}\n }` }))
+      return tagged(id, opened, text)
+    },
   }))
 
   tools.push(defineTool({
@@ -479,6 +604,95 @@ export function createTools(deps, fallbackAgent) {
     parameters: { text: { type: 'array', required: true, description: 'Texts; resolves when any appears.', items: { type: 'string' } }, timeout: { type: 'number', description: 'Milliseconds (0 = no timeout).' }, windowId: WINDOW_ID('chrome') },
     output: textOutput,
     execute: forwardChrome('wait_for'),
+  }))
+
+  /** JS (inlined text) that returns the deepest visible element whose text contains `needle`. */
+  const FIND_BY_TEXT = (needle) => `(() => { const needle = ${JSON.stringify(needle)}; let best = null; const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT); while (walk.nextNode()) { const el = walk.currentNode; if (!(el.innerText || '').includes(needle)) continue; const r = el.getBoundingClientRect(); if (r.width === 0 || r.height === 0) continue; best = el; } return best; })()`
+
+  tools.push(defineTool({
+    name: 'chrome_interact',
+    description: 'Perform DOM interactions in this chat\'s Chrome page in sequence, mirroring safari_interact: click, type, keyPress, scroll, hover, selectMenuItem (selectText/highlightText and point targets are not supported in Chrome and are reported as failed steps). Target by snapshot uid (`node`) or by page text (`text`). Steps continue after a failed step; the result reports each step\'s outcome.',
+    parameters: {
+      interactions: {
+        type: 'array', required: true, description: 'Steps, executed in order.',
+        items: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            type: { type: 'string', required: true, enum: ['click', 'type', 'keyPress', 'scroll', 'selectText', 'selectMenuItem', 'hover', 'highlightText'], description: 'Interaction kind.' },
+            purpose: { type: 'string', required: true, description: 'Short description of the intended outcome.' },
+            node: { type: 'string', description: 'Snapshot uid of the target.' },
+            text: { type: 'string', description: 'Page text identifying the target (for selectMenuItem: the option label).' },
+            value: { type: 'string', description: 'For type: text to type; for keyPress: key or combination.' },
+            pressReturn: { type: 'boolean', description: 'For type: press Enter afterwards.' },
+            replaceAll: { type: 'boolean', description: 'For type: replace the field\'s existing text (default: fill replaces when a uid is given).' },
+            scrollToVisible: { type: 'boolean', description: 'Scroll the target into view first.' },
+            scrollDelta: { type: 'object', additionalProperties: false, description: 'For scroll: pixel delta.', properties: { x: { type: 'number' }, y: { type: 'number' } } },
+          },
+        },
+      },
+      includeSnapshot: { type: 'boolean', description: 'Append a fresh snapshot after the batch (default false).' },
+      windowId: WINDOW_ID('chrome'),
+    },
+    output: textOutput,
+    async execute(args, exec) {
+      const { id, pageId, conn, opened } = await chrome(exec, args.windowId)
+      const call = (name, a) => conn.callText(name, { ...a, pageId })
+      const js = (fn) => call('evaluate_script', { function: fn })
+      const byText = (needle, action) => js(`() => { const el = ${FIND_BY_TEXT(needle)}; if (!el) throw new Error('no element with text ' + ${JSON.stringify(needle)}); ${action} return 'ok'; }`)
+      const report = []
+      for (const [index, stepArgs] of args.interactions.entries()) {
+        const label = `#${index + 1} ${stepArgs.type} (${stepArgs.purpose})`
+        try {
+          if (stepArgs.scrollToVisible && stepArgs.node) await call('evaluate_script', { function: '(el) => el.scrollIntoView({ block: "center", inline: "center" })', args: [stepArgs.node] })
+          switch (stepArgs.type) {
+            case 'click':
+              if (stepArgs.node) await call('click', { uid: stepArgs.node })
+              else if (stepArgs.text) await byText(stepArgs.text, 'el.scrollIntoView({ block: "center" }); el.click();')
+              else throw new Error('click needs node or text')
+              break
+            case 'hover':
+              if (stepArgs.node) await call('hover', { uid: stepArgs.node })
+              else if (stepArgs.text) await byText(stepArgs.text, 'el.scrollIntoView({ block: "center" }); el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })); el.dispatchEvent(new MouseEvent("mouseenter"));')
+              else throw new Error('hover needs node or text')
+              break
+            case 'type':
+              if (stepArgs.value === undefined) throw new Error('type needs value')
+              if (stepArgs.node) {
+                await call('fill', { uid: stepArgs.node, value: stepArgs.value })
+                if (stepArgs.pressReturn) await call('press_key', { key: 'Enter' })
+              } else {
+                if (stepArgs.text) await byText(stepArgs.text, 'el.scrollIntoView({ block: "center" }); el.click(); el.focus && el.focus();')
+                if (stepArgs.replaceAll) await call('press_key', { key: 'Meta+a' })
+                await call('type_text', { text: stepArgs.value, ...(stepArgs.pressReturn ? { submitKey: 'Enter' } : {}) })
+              }
+              break
+            case 'keyPress':
+              if (!stepArgs.value) throw new Error('keyPress needs value (key name)')
+              if (stepArgs.node) await call('click', { uid: stepArgs.node })
+              await call('press_key', { key: stepArgs.value })
+              break
+            case 'scroll':
+              if (stepArgs.scrollDelta) await js(`() => { window.scrollBy(${Number(stepArgs.scrollDelta.x) || 0}, ${Number(stepArgs.scrollDelta.y) || 0}); return 'ok'; }`)
+              else if (stepArgs.node) await call('evaluate_script', { function: '(el) => { el.scrollIntoView({ block: "center", inline: "center" }); return "ok"; }', args: [stepArgs.node] })
+              else if (stepArgs.text) await byText(stepArgs.text, 'el.scrollIntoView({ block: "center" });')
+              else throw new Error('scroll needs scrollDelta, node, or text')
+              break
+            case 'selectMenuItem':
+              if (stepArgs.node && (stepArgs.text || stepArgs.value)) await call('fill', { uid: stepArgs.node, value: stepArgs.text ?? stepArgs.value })
+              else throw new Error('selectMenuItem needs node (the <select>) and text (the option label)')
+              break
+            default:
+              throw new Error(`${stepArgs.type} is not supported in Chrome`)
+          }
+          report.push(`${label} → ok`)
+        } catch (error) {
+          report.push(`${label} → FAILED: ${String(error).replace(/^Error: /, '')}`)
+        }
+      }
+      let text = report.join('\n')
+      if (args.includeSnapshot) text += `\n\n${await call('take_snapshot', {})}`
+      return tagged(id, opened, text)
+    },
   }))
 
   tools.push(defineTool({
