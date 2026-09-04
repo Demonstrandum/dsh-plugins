@@ -61,8 +61,8 @@ export function createTools(deps, fallbackAgent) {
   }
 
   tools.push(defineTool({
-    name: 'safari_open',
-    description: 'Open a NEW Safari (Technology Preview) window private to this chat and return its windowId (s:<session>:<window>). Each window is an independent automation session (own tabs, cookies, JS state) in its own STP window, labeled with this chat in its banner; the user\'s regular Safari is never touched. Call again for additional independent windows. Optionally navigate to url immediately. Other safari_* tools auto-open a window when this session has none, so this is only needed for a second window or to get the id explicitly.',
+    name: 'mcp__safari__open',
+    description: 'Open a NEW Safari (Technology Preview) window private to this chat and return its windowId (s:<session>:<window>). Each window is an independent automation session (own tabs, cookies, JS state) in its own STP window, labeled with this chat in its banner; the user\'s regular Safari is never touched. Call again for additional independent windows. Optionally navigate to url immediately. Other mcp__safari__* tools auto-open a window when this session has none, so this is only needed for a second window or to get the id explicitly.',
     parameters: { url: { type: 'string', description: 'Optional URL to load in the new window.' } },
     output: objectOutput(value => `Opened Safari window ${value.windowId}${value.url ? ` at ${value.url}${value.title ? ` — "${value.title}"` : ''}` : ''}.`),
     async execute(args, exec) {
@@ -75,7 +75,7 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'safari_close',
+    name: 'mcp__safari__close',
     description: 'Close one Safari window of this chat (windowId) or all of them (omit). Frees the STP window and its process.',
     parameters: { windowId: WINDOW_ID('safari') },
     output: textOutput,
@@ -86,8 +86,8 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'safari_navigate',
-    description: 'Load a URL in this chat\'s Safari window and wait for the navigation to finish. Returns the loaded page\'s title and URL; read the page with safari_get_page_content.',
+    name: 'mcp__safari__navigate',
+    description: 'Load a URL in this chat\'s Safari window and wait for the navigation to finish. Returns the loaded page\'s title and URL; read the page with mcp__safari__get_page_content.',
     parameters: { url: { type: 'string', required: true, description: 'URL to load.' }, windowId: WINDOW_ID('safari') },
     output: objectOutput(value => `[${value.windowId}] Loaded ${value.url}${value.title ? ` — "${value.title}"` : ''}.`),
     async execute(args, exec) {
@@ -98,8 +98,8 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'safari_get_page_content',
-    description: `Read a web page with Safari's engine and return its content. TWO MODES. (1) With url and no windowId: reads in an ISOLATED pooled reader window, never this chat's own window, so a page you are working on is not disturbed — the default for "read this URL" (use instead of web_fetch for JavaScript-rendered pages or when web_fetch returns nothing). (2) With windowId, or with no url: reads the current page of this chat's Safari window (url, if also given, is loaded there first); node UIDs in the result can be used with safari_interact. Formats (WebKit's own extraction): ${FORMATS.join(' | ')}, default markdown. waitMs helps lazily rendered pages; script (a JS FUNCTION BODY, use \`return\`) runs in the page and its value is returned as scriptResult. For YouTube videos use safari_get_youtube_notes.`,
+    name: 'mcp__safari__get_page_content',
+    description: `Read a web page with Safari's engine and return its content. TWO MODES. (1) With url and no windowId: reads in an ISOLATED pooled reader window, never this chat's own window, so a page you are working on is not disturbed — the default for "read this URL" (use instead of web_fetch for JavaScript-rendered pages or when web_fetch returns nothing). (2) With windowId, or with no url: reads the current page of this chat's Safari window (url, if also given, is loaded there first); node UIDs in the result can be used with mcp__safari__interact. Formats (WebKit's own extraction): ${FORMATS.join(' | ')}, default markdown. waitMs helps lazily rendered pages; script (a JS FUNCTION BODY, use \`return\`) runs in the page and its value is returned as scriptResult. For YouTube videos use mcp__safari__get_youtube_notes.`,
     parameters: {
       url: { type: 'string', description: 'URL to read. Without windowId this uses an isolated reader.' },
       windowId: { type: 'string', description: 'Read this chat\'s Safari window (s:<session>:<window>) instead of an isolated reader. Omit windowId AND url to read this session\'s single open window.' },
@@ -107,7 +107,7 @@ export function createTools(deps, fallbackAgent) {
       waitMs: { type: 'number', description: 'Extra wait after load before extracting, for lazily rendered pages (default 0).' },
       maxWordsPerParagraph: { type: 'number', description: 'Truncate paragraphs beyond this many words (default 2000 = effectively none).' },
       includeURLs: { type: 'boolean', description: 'Include link/image URLs (default true).' },
-      nodeIds: { type: 'string', enum: ['none', 'editable', 'interactive', 'allContainers'], description: 'Which nodes get UIDs for safari_interact (window mode; default interactive).' },
+      nodeIds: { type: 'string', enum: ['none', 'editable', 'interactive', 'allContainers'], description: 'Which nodes get UIDs for mcp__safari__interact (window mode; default interactive).' },
       script: { type: 'string', description: 'Optional JS function body run in the page after load; use `return`. Returned as scriptResult.' },
     },
     output: objectOutput(renderRead),
@@ -137,8 +137,8 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'safari_evaluate',
-    description: 'Run JavaScript in this chat\'s Safari window. `expression` is a FUNCTION BODY: use an explicit `return` for a value (await is allowed). `$uid(N)` references a node UID from safari_get_page_content. Returns the JSON-encoded result.',
+    name: 'mcp__safari__evaluate',
+    description: 'Run JavaScript in this chat\'s Safari window. `expression` is a FUNCTION BODY: use an explicit `return` for a value (await is allowed). `$uid(N)` references a node UID from mcp__safari__get_page_content. Returns the JSON-encoded result.',
     parameters: {
       expression: { type: 'string', required: true, description: 'JavaScript function body; `return` the value you want.' },
       windowId: WINDOW_ID('safari'),
@@ -152,8 +152,8 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'safari_interact',
-    description: 'Perform DOM interactions in this chat\'s Safari window, in sequence (400 ms settle between each): click, type, keyPress, scroll, selectText, selectMenuItem, hover, highlightText. Target by node UID (from safari_get_page_content), by find-in-page text, or by viewport point. Batch related steps in ONE call. Returns a diff of the page text (or the full loaded page if a click navigated).',
+    name: 'mcp__safari__interact',
+    description: 'Perform DOM interactions in this chat\'s Safari window, in sequence (400 ms settle between each): click, type, keyPress, scroll, selectText, selectMenuItem, hover, highlightText. Target by node UID (from mcp__safari__get_page_content), by find-in-page text, or by viewport point. Batch related steps in ONE call. Returns a diff of the page text (or the full loaded page if a click navigated).',
     parameters: {
       interactions: {
         type: 'array', required: true, description: 'Steps, executed in order.',
@@ -185,7 +185,7 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'safari_console_messages',
+    name: 'mcp__safari__console_messages',
     description: 'Console messages (log/info/warn/error) captured in this chat\'s Safari window.',
     parameters: {
       windowId: WINDOW_ID('safari'),
@@ -202,7 +202,7 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'safari_network_requests',
+    name: 'mcp__safari__network_requests',
     description: 'Network requests recorded in this chat\'s Safari window (method, URL, status, type, timing).',
     parameters: {
       windowId: WINDOW_ID('safari'),
@@ -218,7 +218,7 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'safari_set_viewport_size',
+    name: 'mcp__safari__set_viewport_size',
     description: 'Resize this chat\'s Safari window viewport (CSS pixels).',
     parameters: {
       width: { type: 'number', required: true, description: 'Viewport width in CSS px.' },
@@ -270,7 +270,7 @@ export function createTools(deps, fallbackAgent) {
   }
 
   tools.push(defineTool({
-    name: 'safari_get_screenshot',
+    name: 'mcp__safari__get_screenshot',
     description: 'Screenshot of this chat\'s Safari window, returned INLINE as an image. With querySelector, only that element: scrolled into view (scrollTo), settled, measured, captured, re-measured (re-captured once if it moved) and cropped at device-pixel precision. Without: the viewport, or the whole page with fullPage.',
     parameters: safariShotParams,
     output: objectOutput(describeShot),
@@ -282,8 +282,8 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'safari_save_screenshot',
-    description: 'Screenshot of this chat\'s Safari window written to a PNG file (same element capture options as safari_get_screenshot). Returns path and pixel size.',
+    name: 'mcp__safari__save_screenshot',
+    description: 'Screenshot of this chat\'s Safari window written to a PNG file (same element capture options as mcp__safari__get_screenshot). Returns path and pixel size.',
     parameters: { path: { type: 'string', required: true, description: 'Destination .png path (absolute, or relative to the session workspace).' }, ...safariShotParams },
     output: objectOutput(value => `Saved ${value.path} (${describeShot(value)})`),
     async execute(args, exec) {
@@ -294,7 +294,7 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'safari_get_youtube_notes',
+    name: 'mcp__safari__get_youtube_notes',
     description: 'Show notes of a YouTube video: title, channel, duration, views, publish date, chapters (parsed from timestamps), links and the FULL description (which the rendered page never shows). Reads the watch page in an isolated Safari reader; this chat\'s windows are untouched. Accepts watch / youtu.be / shorts / embed URLs or a bare 11-character id.',
     parameters: { url: { type: 'string', required: true, description: 'YouTube video URL (any form) or video id.' } },
     output: objectOutput(renderNotes),
@@ -325,8 +325,8 @@ export function createTools(deps, fallbackAgent) {
   }
 
   tools.push(defineTool({
-    name: 'chrome_open',
-    description: 'Open a NEW Chrome page (window) private to this chat and return its windowId (c:<session>:<window>). All Chrome windows of this chat share one isolated Chrome instance (fresh temporary profile: no saved logins; cookies shared between this chat\'s windows). Other chrome_* tools auto-open a window when this session has none.',
+    name: 'mcp__chrome__open',
+    description: 'Open a NEW Chrome page (window) private to this chat and return its windowId (c:<session>:<window>). All Chrome windows of this chat share one isolated Chrome instance (fresh temporary profile: no saved logins; cookies shared between this chat\'s windows). Other mcp__chrome__* tools auto-open a window when this session has none.',
     parameters: { url: { type: 'string', description: 'URL to load (default about:blank).' } },
     output: objectOutput(value => `Opened Chrome window ${value.windowId}${value.url ? ` at ${value.url}` : ''}.`),
     async execute(args, exec) {
@@ -337,7 +337,7 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'chrome_close',
+    name: 'mcp__chrome__close',
     description: 'Close one Chrome window of this chat (windowId) or all of them (omit). Chrome itself quits when the chat\'s last window closes.',
     parameters: { windowId: WINDOW_ID('chrome') },
     output: textOutput,
@@ -348,7 +348,7 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'chrome_navigate',
+    name: 'mcp__chrome__navigate',
     description: 'Navigate this chat\'s Chrome window: load a url, or go back / forward / reload. Waits for the navigation to complete.',
     parameters: {
       url: { type: 'string', description: 'URL to load (type url).' },
@@ -362,8 +362,8 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'chrome_snapshot',
-    description: 'Text snapshot of this chat\'s Chrome page from the accessibility tree, listing elements with their uid. Prefer this over screenshots for reading and for finding elements; use the uids with chrome_click / chrome_fill / chrome_hover / chrome_get_screenshot. Always take a fresh snapshot after the page changes.',
+    name: 'mcp__chrome__snapshot',
+    description: 'Text snapshot of this chat\'s Chrome page from the accessibility tree, listing elements with their uid. Prefer this over screenshots for reading and for finding elements; use the uids with mcp__chrome__click / mcp__chrome__fill / mcp__chrome__hover / mcp__chrome__get_screenshot. Always take a fresh snapshot after the page changes.',
     parameters: { verbose: { type: 'boolean', description: 'Include all accessibility properties (default false).' }, windowId: WINDOW_ID('chrome') },
     output: textOutput,
     execute: forwardChrome('take_snapshot'),
@@ -371,7 +371,7 @@ export function createTools(deps, fallbackAgent) {
 
   const chromeShotParams = {
     windowId: WINDOW_ID('chrome'),
-    uid: { type: 'string', description: 'Element uid from chrome_snapshot to capture just that element.' },
+    uid: { type: 'string', description: 'Element uid from mcp__chrome__snapshot to capture just that element.' },
     fullPage: { type: 'boolean', description: 'Capture the whole scrollable page (default false).' },
     format: { type: 'string', enum: ['png', 'jpeg', 'webp'], description: 'Image format (default png).' },
     quality: { type: 'number', description: 'jpeg/webp quality 0–100.' },
@@ -386,8 +386,8 @@ export function createTools(deps, fallbackAgent) {
   }
 
   tools.push(defineTool({
-    name: 'chrome_get_screenshot',
-    description: 'Screenshot of this chat\'s Chrome page, returned INLINE as an image: the viewport, the whole page (fullPage), or one element (uid from chrome_snapshot).',
+    name: 'mcp__chrome__get_screenshot',
+    description: 'Screenshot of this chat\'s Chrome page, returned INLINE as an image: the viewport, the whole page (fullPage), or one element (uid from mcp__chrome__snapshot).',
     parameters: chromeShotParams,
     output: objectOutput(describeShot),
     async execute(args, exec) {
@@ -398,7 +398,7 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'chrome_save_screenshot',
+    name: 'mcp__chrome__save_screenshot',
     description: 'Screenshot of this chat\'s Chrome page written to a file (viewport, fullPage, or element uid). Returns the path.',
     parameters: { path: { type: 'string', required: true, description: 'Destination path (absolute, or relative to the session workspace); extension should match format.' }, ...chromeShotParams },
     output: objectOutput(value => `Saved ${value.path} (${describeShot(value)})`),
@@ -410,7 +410,7 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'chrome_evaluate',
+    name: 'mcp__chrome__evaluate',
     description: 'Evaluate a JavaScript FUNCTION in this chat\'s Chrome page, e.g. `() => document.title` or `(el) => el.innerText` with args referencing snapshot uids. The return value must be JSON-serializable.',
     parameters: {
       function: { type: 'string', required: true, description: 'A JavaScript function expression (arrow or function), called with args.' },
@@ -422,24 +422,24 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'chrome_click',
-    description: 'Click an element (uid from chrome_snapshot) in this chat\'s Chrome page.',
+    name: 'mcp__chrome__click',
+    description: 'Click an element (uid from mcp__chrome__snapshot) in this chat\'s Chrome page.',
     parameters: { uid: { type: 'string', required: true, description: 'Element uid.' }, dblClick: { type: 'boolean', description: 'Double-click.' }, includeSnapshot: { type: 'boolean', description: 'Return a fresh snapshot afterwards.' }, windowId: WINDOW_ID('chrome') },
     output: textOutput,
     execute: forwardChrome('click'),
   }))
 
   tools.push(defineTool({
-    name: 'chrome_fill',
-    description: 'Type into an input / textarea / contenteditable or choose a select option (uid from chrome_snapshot).',
+    name: 'mcp__chrome__fill',
+    description: 'Type into an input / textarea / contenteditable or choose a select option (uid from mcp__chrome__snapshot).',
     parameters: { uid: { type: 'string', required: true, description: 'Element uid.' }, value: { type: 'string', required: true, description: 'Value to fill.' }, includeSnapshot: { type: 'boolean' }, windowId: WINDOW_ID('chrome') },
     output: textOutput,
     execute: forwardChrome('fill'),
   }))
 
   tools.push(defineTool({
-    name: 'chrome_fill_form',
-    description: 'Fill several form fields at once (uids from chrome_snapshot).',
+    name: 'mcp__chrome__fill_form',
+    description: 'Fill several form fields at once (uids from mcp__chrome__snapshot).',
     parameters: {
       elements: { type: 'array', required: true, description: 'Fields to fill.', items: { type: 'object', additionalProperties: false, properties: { uid: { type: 'string', required: true }, value: { type: 'string', required: true, description: '"true"/"false" for checkboxes and toggles.' } } } },
       includeSnapshot: { type: 'boolean' },
@@ -450,15 +450,15 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'chrome_hover',
-    description: 'Hover an element (uid from chrome_snapshot).',
+    name: 'mcp__chrome__hover',
+    description: 'Hover an element (uid from mcp__chrome__snapshot).',
     parameters: { uid: { type: 'string', required: true }, includeSnapshot: { type: 'boolean' }, windowId: WINDOW_ID('chrome') },
     output: textOutput,
     execute: forwardChrome('hover'),
   }))
 
   tools.push(defineTool({
-    name: 'chrome_press_key',
+    name: 'mcp__chrome__press_key',
     description: 'Press a key or combination in this chat\'s Chrome page, e.g. "Enter", "Escape", "Control+a".',
     parameters: { key: { type: 'string', required: true, description: 'Key or combination.' }, includeSnapshot: { type: 'boolean' }, windowId: WINDOW_ID('chrome') },
     output: textOutput,
@@ -466,15 +466,15 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'chrome_type_text',
-    description: 'Type text at the current focus in this chat\'s Chrome page (focus an element first with chrome_click), optionally followed by a key such as Enter.',
+    name: 'mcp__chrome__type_text',
+    description: 'Type text at the current focus in this chat\'s Chrome page (focus an element first with mcp__chrome__click), optionally followed by a key such as Enter.',
     parameters: { text: { type: 'string', required: true }, submitKey: { type: 'string', description: 'Key to press after typing, e.g. Enter.' }, windowId: WINDOW_ID('chrome') },
     output: textOutput,
     execute: forwardChrome('type_text'),
   }))
 
   tools.push(defineTool({
-    name: 'chrome_wait_for',
+    name: 'mcp__chrome__wait_for',
     description: 'Wait until any of the given texts appears on this chat\'s Chrome page.',
     parameters: { text: { type: 'array', required: true, description: 'Texts; resolves when any appears.', items: { type: 'string' } }, timeout: { type: 'number', description: 'Milliseconds (0 = no timeout).' }, windowId: WINDOW_ID('chrome') },
     output: textOutput,
@@ -482,7 +482,7 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'chrome_console_messages',
+    name: 'mcp__chrome__console_messages',
     description: 'Console messages of this chat\'s Chrome page (paginated).',
     parameters: {
       types: { type: 'array', description: 'Only these message types.', items: { type: 'string', enum: ['log', 'debug', 'info', 'error', 'warn', 'dir', 'dirxml', 'table', 'trace', 'clear', 'startGroup', 'startGroupCollapsed', 'endGroup', 'assert', 'profile', 'profileEnd', 'count', 'timeEnd', 'issue'] } },
@@ -494,7 +494,7 @@ export function createTools(deps, fallbackAgent) {
   }))
 
   tools.push(defineTool({
-    name: 'chrome_network_requests',
+    name: 'mcp__chrome__network_requests',
     description: 'Network requests of this chat\'s Chrome page (paginated; filter by resource type).',
     parameters: {
       resourceTypes: { type: 'array', description: 'Only these resource types (e.g. document, xhr, fetch, script, image).', items: { type: 'string' } },
