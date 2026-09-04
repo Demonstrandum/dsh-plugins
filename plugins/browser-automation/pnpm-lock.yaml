@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@deepseek-ai/dsh-mcp-client':
-        specifier: link:/Users/USER/github/deepseek-harness/packages/mcp/mcp-client
-        version: link:../../../deepseek-harness/packages/mcp/mcp-client
       '@deepseek-ai/dsh-tools':
         specifier: link:/Users/USER/github/deepseek-harness/packages/core/tools
         version: link:../../../deepseek-harness/packages/core/tools

@@ -4,7 +4,8 @@
  * Apple's `screenshot` tool captures the whole viewport (its `node` parameter
  * is a documented no-op). This module adds `querySelector`: an in-page script
  * locates the element, scrolls it into view (optional), waits for scrolling to
- * settle, and reports its client rect + devicePixelRatio; the caller takes a
+ * settle (polling with setTimeout — rAF does not fire in occluded windows), and
+ * reports its client rect + devicePixelRatio; the caller takes a
  * viewport screenshot, re-measures the rect (retaking once if the element
  * moved), and crops the sub-rectangle with sharp (not `sips`: its
  * `--cropOffset 0 0` is treated as unset and center-crops). All MCP calls go
@@ -24,7 +25,9 @@ export function measureScript(selector, scrollTo) {
   return `
 const el = document.querySelector(${JSON.stringify(selector)});
 if (!el) return { error: 'no element matches ' + ${JSON.stringify(selector)} };
-const frame = () => new Promise(r => requestAnimationFrame(() => r()));
+// setTimeout, not requestAnimationFrame: rAF is suspended in occluded/hidden
+// windows (e.g. a second stacked STP window), which would hang this loop.
+const frame = () => new Promise(r => setTimeout(r, 40));
 const snap = () => { const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height, sx: window.scrollX, sy: window.scrollY }; };
 if (${scrollTo ? 'true' : 'false'}) el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
 let prev = snap(); let stable = 0;

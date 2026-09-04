@@ -18,15 +18,13 @@
  */
 
 import { readFile } from 'node:fs/promises'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { connectServer } from './servers.mjs'
 
 export const FORMATS = ['markdown', 'plainText', 'text', 'textTree', 'html', 'json']
 
 /**
  * @param {object} options
  * @param {string} options.driver - safaridriver executable (STP).
- * @param {string} options.shim - path to safari-mcp-shim.mjs.
  * @param {string} options.labelPrefix - window banner prefix, e.g. "DSH: ".
  * @param {number} options.maxIdle - readers kept warm after their read (>= 0).
  * @param {number} options.idleMs - dispose all warm readers after this long unused (0 = never).
@@ -36,8 +34,8 @@ export const FORMATS = ['markdown', 'plainText', 'text', 'textTree', 'html', 'js
  * @param {'close_tab' | 'about:blank'} [options.park] - how a reader releases its page after a read.
  */
 export function createReaderPool(options) {
-  const { driver, shim, labelPrefix, maxIdle, idleMs, readTimeoutMs, trace, logger, park = 'close_tab' } = options
-  /** @type {Array<{ id: number, client: Client, transport: StdioClientTransport, busy: boolean, dead: boolean }>} */
+  const { driver, labelPrefix, maxIdle, idleMs, readTimeoutMs, trace, logger, park = 'close_tab' } = options
+  /** @type {Array<{ id: number, conn: import('./servers.mjs').ServerConnection, busy: boolean, dead: boolean }>} */
   const readers = []
   let nextId = 1
   let idleTimer
@@ -53,16 +51,16 @@ export function createReaderPool(options) {
 
   async function spawnReader() {
     const id = nextId++
-    const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [shim, '--name', `${labelPrefix}page reader #${id}`, '--', driver, '--mcp'],
-      stderr: 'inherit',
+    const reader = { id, conn: undefined, busy: true, dead: false }
+    reader.conn = await connectServer({
+      command: driver,
+      args: ['--mcp'],
+      clientName: `${labelPrefix}page reader #${id}`,
+      safari: true,
+      timeoutMs: readTimeoutMs,
+      onClose: () => { reader.dead = true; forget(reader) },
+      onError: (error) => { logger.warn(`browser-automation: reader #${id} transport error: ${String(error)}`) },
     })
-    const client = new Client({ name: 'dsh-browser-automation-reader', version: '0.1.0' })
-    const reader = { id, client, transport, busy: true, dead: false }
-    transport.onclose = () => { reader.dead = true; forget(reader) }
-    transport.onerror = (error) => { logger.warn(`browser-automation: reader #${id} transport error: ${String(error)}`) }
-    await client.connect(transport)
     readers.push(reader)
     trace({ event: 'reader-spawn', reader: id, pool: readers.length })
     return reader
@@ -78,7 +76,7 @@ export function createReaderPool(options) {
     forget(reader)
     reader.dead = true
     try {
-      await reader.client.close() // closes stdin → driver exits → its window closes
+      await reader.conn.close() // closes stdin → driver exits → its window closes
     } catch (error) {
       logger.warn(`browser-automation: reader #${reader.id} close failed: ${String(error)}`)
     }
@@ -116,12 +114,7 @@ export function createReaderPool(options) {
     armIdleTimer()
   }
 
-  async function call(reader, name, args) {
-    const result = await reader.client.callTool({ name, arguments: args }, undefined, { timeout: readTimeoutMs })
-    const text = (result.content ?? []).filter(block => block.type === 'text').map(block => block.text).join('\n')
-    if (result.isError) throw new Error(`safari ${name}: ${text || 'tool error'}`)
-    return text
-  }
+  const call = (reader, name, args) => reader.conn.callText(name, args)
 
   /**
    * Read one page in an isolated reader.

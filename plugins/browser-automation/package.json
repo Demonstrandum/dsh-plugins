@@ -2,7 +2,7 @@
   "name": "tali-browser-automation",
   "version": "0.1.0",
   "private": true,
-  "description": "DSH plugin: per-session browser automation \u2014 mounts the Safari (safaridriver --mcp) and Chrome (chrome-devtools-mcp) MCP servers into each agent's own scope so every chat drives its own browser.",
+  "description": "DSH plugin: per-chat Safari (Technology Preview) and Chrome automation with curated safari_*/chrome_* tools, per-session windows (s:<session>:<window>), isolated page readers, element-aware screenshots.",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -11,10 +11,12 @@
   },
   "files": [
     "index.js",
+    "curated-tools.mjs",
+    "windows.mjs",
+    "servers.mjs",
+    "reader-pool.mjs",
     "youtube-notes.mjs",
     "safari-screenshot.mjs",
-    "reader-pool.mjs",
-    "safari-mcp-shim.mjs",
     "cordis.patch.yml"
   ],
   "dsh": {
@@ -26,10 +28,11 @@
     "check": "node --check index.js && node scripts/smoke-config.mjs",
     "live:reader": "node scripts/live-reader-test.mjs",
     "live:youtube": "node scripts/live-youtube-test.mjs",
-    "live:screenshot": "node scripts/live-screenshot-test.mjs"
+    "live:screenshot": "node scripts/live-screenshot-test.mjs",
+    "live:windows": "node scripts/live-windows-test.mjs",
+    "dump:tools": "node scripts/dump-server-tools.mjs"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-mcp-client": "link:/Users/USER/github/deepseek-harness/packages/mcp/mcp-client",
     "@deepseek-ai/dsh-tools": "link:/Users/USER/github/deepseek-harness/packages/core/tools",
     "@deepseek-ai/schemastery": "link:/Users/USER/github/deepseek-harness/vendor/schemastery",
     "@modelcontextprotocol/sdk": "link:/Users/USER/github/deepseek-harness/node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_zod@4.4.3/node_modules/@modelcontextprotocol/sdk",

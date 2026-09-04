@@ -22,8 +22,9 @@ pnpm dsh web --patch /Users/USER/github/tali-dash-plugins/cordis.dev.yml
   per-tool icon while a tool call runs ([>] terminal SVG for bash, ✏️ edit/write, 👁️ read,
   🔍 grep/glob/search, 🌐 web, 🤖 subagent, 🔧 fallback; rule table ported
   from pi-web's toolIcons system) · ✋ badge when blocked on your input.
-- `browser-automation` — one browser per chat: mounts Apple's Safari MCP server
-  (`safaridriver --mcp`, Safari Technology Preview) and Google's
-  `chrome-devtools-mcp` into each agent's own scope on `agent/created`, so
-  concurrent sessions never share a page list. Tools: `mcp__safari__*`,
-  `mcp__chrome__*`. Host-only (no client half). See its README.
+- `browser-automation` — per-chat Safari (Technology Preview) and Chrome with a
+  curated `safari_*` / `chrome_*` tool set: per-session windows addressed by id
+  (`s:0:1`, `c:0:0`), isolated page readers (`safari_get_page_content`,
+  `safari_get_youtube_notes`), element-aware inline screenshots. Owns the MCP
+  forwarding (private SDK connections to `safaridriver --mcp` and
+  `chrome-devtools-mcp`); host-only. See its README.
