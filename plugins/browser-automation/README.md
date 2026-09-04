@@ -11,7 +11,7 @@ reaches the model: no `mcp__server__tool` names, no raw server tools, no
 
 ## Tools
 
-36 tools, 18 per browser — full reference with every parameter, return value
+41 tools, 20 Safari + 21 Chrome — full reference with every parameter, return value
 and implementation note in **[`docs/tools.md`](docs/tools.md)** (generated from
 the definitions by `pnpm run docs`; `pnpm run check` fails when it is stale).
 
@@ -22,7 +22,7 @@ the definitions by `pnpm run docs`; `pnpm run check` fails when it is stale).
 | JavaScript | `safari_evaluate_expression`, `safari_evaluate_function` | `chrome_evaluate_expression`, `chrome_evaluate_function` |
 | Interaction | `safari_interact` (batch), `safari_click`, `safari_hover`, `safari_press_key`, `safari_type_text` | `chrome_interact` (batch, same format), `chrome_click`, `chrome_fill`, `chrome_fill_form`, `chrome_hover`, `chrome_press_key`, `chrome_type_text` |
 | Screenshots | `safari_get_screenshot` (inline, element crop), `safari_save_screenshot` | `chrome_get_screenshot`, `chrome_save_screenshot` |
-| Diagnostics | `safari_console_messages`, `safari_network_requests`, `safari_set_viewport_size` | `chrome_console_messages`, `chrome_network_requests` |
+| Diagnostics | `safari_console_messages`, `safari_network_requests`, `safari_get_network_request`, `safari_handle_dialog`, `safari_set_viewport_size` | `chrome_console_messages`, `chrome_network_requests`, `chrome_get_network_request`, `chrome_handle_dialog`, `chrome_set_viewport_size` |
 
 Raw server names and schemas these forward to: `docs/server-tools.json`
 (`pnpm run dump:tools` regenerates it).
@@ -123,7 +123,7 @@ live-reloaded).
 
 ## Checks
 
-- `pnpm run check` — offline smoke: config, preflight messages, the 36
+- `pnpm run check` — offline smoke: config, preflight messages, the 41
   registered tools per agent (child filter, disposal), window-id rules
   (numbering, ambiguity, cross-session, browser mismatch), YouTube and
   geometry helpers; plus a freshness check of `docs/tools.md`.

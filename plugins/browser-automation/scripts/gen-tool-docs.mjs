@@ -15,7 +15,7 @@ const GROUPS = [
   { title: 'JavaScript', match: /_evaluate_/ },
   { title: 'Interaction', match: /^(safari|chrome)_(interact|click|hover|press_key|type_text|fill|fill_form)$/ },
   { title: 'Screenshots', match: /_screenshot$/ },
-  { title: 'Diagnostics and viewport', match: /_(console_messages|network_requests|set_viewport_size)$/ },
+  { title: 'Diagnostics, dialogs and viewport', match: /_(console_messages|network_requests|get_network_request|handle_dialog|set_viewport_size)$/ },
 ]
 
 const NOTES = {
@@ -37,6 +37,11 @@ const NOTES = {
   safari_save_screenshot: 'Same capture as `safari_get_screenshot`, written to `path` (relative paths resolve against the session workspace; parents are created).',
   chrome_get_screenshot: 'Server-native capture (viewport, `fullPage`, or element `uid`); inline via the attachment store under the same admission rule as `safari_get_screenshot`.',
   chrome_save_screenshot: 'Same capture as `chrome_get_screenshot`, written to `path`.',
+  safari_network_requests: 'Inspector recording is enabled by the first call (verified: 0 requests for a page loaded before it, 1 after the next navigation). Diagnostics tools require a loaded page (\"No active browsing context\" otherwise).',
+  safari_console_messages: 'Apple\'s server clears the buffer by default; this tool keeps it unless `clear` is true, matching Chrome.',
+  safari_handle_dialog: '`accept` maps to Apple\'s `respond`; `list` reports open dialogs.',
+  chrome_handle_dialog: '`text` maps to the server\'s `promptText`.',
+  chrome_set_viewport_size: 'Forwards to `resize_page`.',
 }
 
 const RETURNS = {

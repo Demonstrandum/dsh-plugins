@@ -297,24 +297,24 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
 
   tools.push(defineTool({
     name: 'safari_console_messages',
-    description: 'Console messages (log/info/warn/error) captured in this chat\'s Safari window.',
+    description: 'Console messages (log/info/warn/error) buffered for this chat\'s Safari window (needs a loaded page). The buffer is kept unless clear is true.',
     parameters: {
       windowId: WINDOW_ID('safari'),
-      limit: { type: 'number', description: 'Maximum number of messages (newest last).' },
-      clear: { type: 'boolean', description: 'Clear the buffer after reading.' },
+      limit: { type: 'number', description: 'Maximum number of messages (default 100, max 500).' },
+      clear: { type: 'boolean', description: 'Clear the buffer after reading (default false).' },
       level_filter: { type: 'array', description: 'Only these levels.', items: { type: 'string', enum: ['log', 'info', 'warn', 'error', 'debug'] } },
     },
     output: textOutput,
     async execute(args, exec) {
       const { id, conn, opened } = await safari(exec, args.windowId)
       const { windowId: _w, ...rest } = args
-      return tagged(id, opened, await conn.callText('browser_console_messages', rest))
+      return tagged(id, opened, await conn.callText('browser_console_messages', { clear: false, ...rest }))
     },
   }))
 
   tools.push(defineTool({
     name: 'safari_network_requests',
-    description: 'Network requests recorded in this chat\'s Safari window (method, URL, status, type, timing).',
+    description: 'Network requests recorded in this chat\'s Safari window (method, URL, status, timing, request_id for safari_get_network_request). Recording starts with the FIRST call: call it once, then navigate or reload, then call again. Needs a loaded page.',
     parameters: {
       windowId: WINDOW_ID('safari'),
       clear: { type: 'boolean', description: 'Clear the recorded list after reading.' },
@@ -325,6 +325,33 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
       const { id, conn, opened } = await safari(exec, args.windowId)
       const { windowId: _w, ...rest } = args
       return tagged(id, opened, await conn.callText('list_network_requests', rest))
+    },
+  }))
+
+  tools.push(defineTool({
+    name: 'safari_get_network_request',
+    description: 'Full detail of one network request recorded in this chat\'s Safari window (headers, text body within the size cap, timing), by the request id from safari_network_requests.',
+    parameters: { request_id: { type: 'string', required: true, description: 'Request id from safari_network_requests.' }, windowId: WINDOW_ID('safari') },
+    output: textOutput,
+    async execute(args, exec) {
+      const { id, conn, opened } = await safari(exec, args.windowId)
+      return tagged(id, opened, await conn.callText('get_network_request', { request_id: args.request_id }))
+    },
+  }))
+
+  tools.push(defineTool({
+    name: 'safari_handle_dialog',
+    description: 'List or answer a JavaScript dialog (alert/confirm/prompt) in this chat\'s Safari window. An open dialog blocks every other tool until it is answered.',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['list', 'accept', 'dismiss'], description: 'list = report open dialogs; accept = OK (with text for prompts); dismiss = Cancel.' },
+      text: { type: 'string', description: 'Text to enter for a prompt dialog when accepting.' },
+      windowId: WINDOW_ID('safari'),
+    },
+    output: textOutput,
+    async execute(args, exec) {
+      const { id, conn, opened } = await safari(exec, args.windowId)
+      const action = args.action === 'accept' ? 'respond' : args.action
+      return tagged(id, opened, await conn.callText('browser_dialogs', { action, ...(args.text !== undefined ? { inputText: args.text } : {}) }))
     },
   }))
 
@@ -717,6 +744,34 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
     },
     output: textOutput,
     execute: forwardChrome('list_network_requests'),
+  }))
+
+  tools.push(defineTool({
+    name: 'chrome_get_network_request',
+    description: 'Full detail of one network request of this chat\'s Chrome page (headers, body, timing), by the reqid from chrome_network_requests.',
+    parameters: { reqid: { type: 'number', required: true, description: 'Request id from chrome_network_requests.' }, windowId: WINDOW_ID('chrome') },
+    output: textOutput,
+    execute: forwardChrome('get_network_request'),
+  }))
+
+  tools.push(defineTool({
+    name: 'chrome_handle_dialog',
+    description: 'Answer a JavaScript dialog (alert/confirm/prompt) open in this chat\'s Chrome page. An open dialog blocks every other tool until it is answered.',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['accept', 'dismiss'], description: 'accept = OK (with text for prompts); dismiss = Cancel.' },
+      text: { type: 'string', description: 'Text to enter for a prompt dialog when accepting.' },
+      windowId: WINDOW_ID('chrome'),
+    },
+    output: textOutput,
+    execute: forwardChrome('handle_dialog', (rest) => ({ action: rest.action, ...(rest.text !== undefined ? { promptText: rest.text } : {}) })),
+  }))
+
+  tools.push(defineTool({
+    name: 'chrome_set_viewport_size',
+    description: 'Resize this chat\'s Chrome page to the given CSS pixel size.',
+    parameters: { width: { type: 'number', required: true, description: 'Page width in CSS px.' }, height: { type: 'number', required: true, description: 'Page height in CSS px.' }, windowId: WINDOW_ID('chrome') },
+    output: textOutput,
+    execute: forwardChrome('resize_page'),
   }))
 
   return tools
