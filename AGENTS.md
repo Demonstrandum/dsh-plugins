@@ -4,15 +4,18 @@ Local-only plugins for DeepSeek Harness (DSH). This file is the onboarding
 guide for agents working in this repo: how DSH plugins work, how this repo is
 laid out, and where the authoritative docs live.
 
-> **VERY IMPORTANT: if you apply patches to the user's live DSH config at
-> `~/.dsh` (their profile or home-level `cordis.patch.yml`, or `dsh plugin
-> add` into their profile), DSH hot-reloads the very client/server session
-> that YOU are likely being run in — which can make this session
-> inoperative.** Do not patch the default config unless explicitly asked to.
-> If the user only implies it (e.g. asks to install a plugin or fix a DSH
-> bug), check with them that they want the change applied to the live DSH
-> they are using. The safe way to trial a plugin is the isolated preview
-> server — see [PREVIEWING.md](PREVIEWING.md) — which needs no confirmation.
+> **VERY IMPORTANT: changes under the user's live DSH home (`~/.dsh`) can
+> hot-reload the very client/server session YOU are likely being run in,
+> making it inoperative.** The `web` profile ships `patchReload: 'live'`, so
+> edits to `~/.dsh/cordis.patch.yml` or `~/.dsh/profiles/<name>/cordis.patch.yml`
+> apply to the running server THE MOMENT you save. Rebuilding a plugin bundle
+> that is installed in the live profile hot-swaps the live browser too. Even
+> boot-time changes (`dsh plugin add`/`remove`) alter what the user's next
+> launch runs. Make none of these changes unless explicitly asked; if the
+> user only implies it (e.g. "install this plugin", "fix this DSH bug"),
+> confirm first that they mean their live DSH. The safe, no-confirmation way
+> to trial a plugin is the isolated preview server — see
+> [PREVIEWING.md](PREVIEWING.md).
 
 ## Ground rules
 

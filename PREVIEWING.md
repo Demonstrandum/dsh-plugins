@@ -1,12 +1,28 @@
 # PREVIEWING.md — trialing plugins safely
 
 > **VERY IMPORTANT: do not modify the user's live DSH configuration without
-> explicit confirmation.** The user's live DSH home is `~/.dsh` (profiles under
-> `~/.dsh/profiles/<name>/`, home-level `~/.dsh/cordis.patch.yml`). If you
-> apply patches there, or `dsh plugin add` into their profile, DSH hot-reloads
-> the affected plugins — **including the very client/server session YOU are
-> likely being run in**, which can render this session inoperative. Therefore
-> do not patch the default config unless explicitly asked to. If the user only
+> explicit confirmation.** The live home is `~/.dsh`. Three tiers of risk,
+> verified against the source checkout (`packages/boot/app-boot/src/profile.ts`,
+> `docs/subsystems/client-modules.md`):
+>
+> 1. **Hot (applies the moment you save):** the `web` profile defaults to
+>    `patchReload: 'live'`, so edits to `~/.dsh/cordis.patch.yml` (home level)
+>    or `~/.dsh/profiles/<name>/cordis.patch.yml` reload the affected plugin
+>    rows in the RUNNING server — including the client/server session YOU are
+>    likely being run in, which can render it inoperative. (`headless`/`sdk`
+>    profiles default to `patchReload: 'startup'`.)
+> 2. **Hot for the browser:** the client-bundle HMR watcher is always mounted;
+>    rebuilding the `lib/client.js` of a plugin that is installed in the live
+>    profile hot-swaps it into the user's open GUI immediately.
+> 3. **Boot-time:** `dsh plugin add`/`remove` rewrites the profile manifest
+>    and node_modules — composed at next launch, not live, but it still
+>    changes what the user's DSH runs from then on (and the install itself
+>    mutates the running profile's directory).
+>
+> (Module-source HMR — `@deepseek-ai/cordis-plugin-hmr` — ships disabled, so
+> editing installed plugins' *source* files alone does not hot-reload.)
+>
+> Make none of these changes unless explicitly asked. If the user only
 > *implies* it — e.g. asks you to "install" a plugin or fix a DSH bug — check
 > first that they want the change applied to the live DSH they are using. The
 > safe way to trial a plugin is the isolated preview server below; that
