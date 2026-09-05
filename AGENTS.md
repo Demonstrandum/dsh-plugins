@@ -166,6 +166,34 @@ cd plugins/<plugin> && pnpm watch        # rebuilds lib/client.js on save
 cd ~/github/deepseek-harness && pnpm dsh web --patch .../cordis.dev.yml
 ```
 
+### The preview server (isolated sandbox)
+
+To test without touching the user's real GUI (usually on :3080) or their
+`~/.dsh` home, run a second instance against a throwaway home:
+
+```sh
+cd ~/github/deepseek-harness
+DSH_HOME=/tmp/tali-dash-plugins-home \
+  pnpm dsh web --patch /Users/USER/github/tali-dash-plugins/cordis.dev.yml \
+  --port 3081 --no-open
+```
+
+- The URL (with its auth token) is printed on stdout: open THAT link; a bare
+  `http://127.0.0.1:3081/` answers 401.
+- Home isolation covers sessions, workspace registrations, and profile state —
+  but NOT the filesystem: agents run there do real work in whatever workspace
+  is opened.
+- A fresh home has no API keys or providers. Forward the user's by copying
+  `~/.dsh/.credentials.yaml` (file-backed key store) and `~/.dsh/settings.yaml`
+  (providers/models) into the throwaway home — they are snapshots, not links.
+- Sanity-check a boot headlessly: fetch the tokened URL with cookies and grep
+  the `window.__DSH_BOOT__` graph for the plugin package name; the bundle is
+  served at `/plugins/??<package>/client.js&rev=...`.
+- HMR: the server stat-polls every plugin bundle, so a `pnpm watch` rebuild
+  hot-swaps the browser without a refresh; the graph row's `rev` flips from a
+  process nonce to a content hash once a rebuild was observed.
+- The `/tmp` home evaporates on reboot; treat everything in it as disposable.
+
 The server's HMR node half stat-polls every graph row's bundle and pushes
 changed bundles to the browser without a manual refresh (dev boots only; see
 `docs/subsystems/client-modules.md`). If nothing loads: check the terminal for
