@@ -105,7 +105,8 @@ export function createTools(deps) {
       }
       trace({ event: 'search', query, docsets: selected.map(row => row.key), returned: response.results.length })
 
-      let items = response.results.map(row => ({
+      // Dash answers `[{}]` for "nothing found"; dash.mjs drops those, but be safe.
+      let items = response.results.filter(row => row && (row.name || row.load_url)).map(row => ({
         docset: row.docset ?? null,
         name: row.name ?? '',
         type: row.type ?? '',

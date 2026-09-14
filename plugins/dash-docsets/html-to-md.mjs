@@ -116,7 +116,7 @@ export function outlineOf(root) {
     const text = h.textContent.replace(/\s+/g, ' ').trim()
     if (text === '') continue
     const id = h.id || (h.parentElement?.tagName === 'SECTION' || h.parentElement?.className?.includes?.('section') ? h.parentElement.id : '') || ''
-    out.push({ level: levelOf(h), text, id: id || undefined })
+    out.push({ level: levelOf(h), text, id: id || null })
   }
   return out
 }
@@ -164,7 +164,7 @@ export function convertPage(html, { url, section, format = 'markdown' }) {
 
   if (section === 'outline') {
     const outline = outlineOf(pickMain(body, pageChars).el)
-    return { title, content: '', scope: { kind: 'outline', chars: 0 }, outline, pageChars, notes }
+    return { title, content: '', scope: { kind: 'outline', target: null, label: null, chars: 0 }, outline, pageChars, notes }
   }
 
   let nodes
@@ -180,13 +180,13 @@ export function convertPage(html, { url, section, format = 'markdown' }) {
     }
     const extent = extentOf(el)
     nodes = extent.nodes
-    scope = { kind: 'section', target: section, label: extent.label }
+    scope = { kind: 'section', target: section, label: extent.label ?? null }
   } else if (anchor) {
     const el = findByName(document, anchor.id, anchor.raw, anchor.decoded, anchor.id !== undefined ? safeDecode(anchor.id) : undefined)
     if (el) {
       const extent = extentOf(el)
       nodes = extent.nodes
-      scope = { kind: 'anchor', target: `#${anchor.decoded}`, label: extent.label }
+      scope = { kind: 'anchor', target: `#${anchor.decoded}`, label: extent.label ?? null }
     } else {
       notes.push(`anchor #${anchor.decoded} not found; returning the main content`)
     }
@@ -194,7 +194,7 @@ export function convertPage(html, { url, section, format = 'markdown' }) {
   if (nodes === undefined) {
     const main = pickMain(body, pageChars)
     nodes = [main.el]
-    scope = { kind: 'page', target: main.reason }
+    scope = { kind: 'page', target: main.reason, label: null }
   }
 
   resolveLinks(document, url)

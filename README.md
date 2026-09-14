@@ -28,3 +28,8 @@ pnpm dsh web --patch /Users/USER/github/tali-dash-plugins/cordis.dev.yml
   `safari_get_youtube_notes`), element-aware inline screenshots. Owns the MCP
   forwarding (private SDK connections to `safaridriver --mcp` and
   `chrome-devtools-mcp`); host-only. See its README.
+- `dash-docsets` — native `dash_list_docsets` / `dash_search` / `dash_get_page`
+  tools over the loopback HTTP API of Dash 8 (macOS docs browser): fuzzy
+  symbol search across installed docsets, pages (or just the anchored section)
+  as Markdown with MathML → LaTeX; launches Dash hidden and enables its API
+  server on demand. Host-only, no MCP. See its README.

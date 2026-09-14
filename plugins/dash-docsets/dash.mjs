@@ -211,6 +211,7 @@ export function createDashClient(options) {
     if (parsed.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)) {
       throw new DashError('dash_get_page only loads URLs returned by dash_search (http://127.0.0.1:<port>/Dash/…).', { hint: 'For other web pages use web_fetch or a browser tool.' })
     }
+    trace({ event: 'page', url })
     let response
     try {
       response = await fetch(parsed, { signal: anySignal(signal, fetchTimeout), headers: { accept: 'text/html,*/*' } })
