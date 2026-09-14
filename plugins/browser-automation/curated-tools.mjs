@@ -13,8 +13,8 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve as resolvePath } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { FORMATS } from './reader-pool.mjs'
-import { imageOf, parseJsonText, unwrapPageContent } from './servers.mjs'
+import { describeCollapsed, extractPage, FORMATS, planRead, renderStructure, SCOPES, STRUCTURE_SCRIPT } from './page-read.mjs'
+import { imageOf, parseJsonText } from './servers.mjs'
 import { cropBox, cropImage, imageSize, measureScript, parseMeasurement, readPng, rectMoved } from './safari-screenshot.mjs'
 import { canonicalWatchUrl, EXTRACT_SCRIPT, renderNotes, shapeNotes } from './youtube-notes.mjs'
 
@@ -97,41 +97,64 @@ export function createTools(deps, fallbackAgent) {
     },
   }))
 
+  /** Parameters shared by safari_get_page_content and safari_get_page_structure. */
+  const readTarget = {
+    url: { type: 'string', description: 'URL to read. Without windowId this uses an isolated reader.' },
+    windowId: { type: 'string', description: 'Read this chat\'s Safari window (s:<session>:<window>) instead of an isolated reader. Omit windowId AND url to read this session\'s single open window.' },
+    waitMs: { type: 'number', description: 'Extra wait after load before extracting, for lazily rendered pages (default 0).' },
+  }
+
+  /** Resolve the read target (isolated reader vs. window) and run one read plan against it. */
+  async function readPage(exec, args, request) {
+    preflight('safari')
+    const isolated = args.windowId === undefined && args.url !== undefined && args.url !== ''
+    if (isolated) {
+      if (readerPool === undefined) throw new Error('isolated reads are disabled (safari.reader.enabled=false); pass windowId to read a window')
+      const result = await readerPool.read({ ...request(true), url: args.url, waitMs: args.waitMs ?? 0 })
+      return { ...result, mode: 'isolated' }
+    }
+    const { id, conn, opened } = await safari(exec, args.windowId)
+    if (args.url !== undefined && args.url !== '') await conn.callText('navigate_to_url', { url: args.url })
+    if ((args.waitMs ?? 0) > 0) await new Promise(resolve => setTimeout(resolve, args.waitMs))
+    const result = await extractPage((name, callArgs) => conn.callText(name, callArgs), request(false), false)
+    return { ...result, mode: 'window', windowId: id, opened }
+  }
+
   tools.push(defineTool({
     name: 'safari_get_page_content',
-    description: `Read a web page with Safari's engine and return its content. TWO MODES. (1) With url and no windowId: reads in an ISOLATED pooled reader window, never this chat's own window, so a page you are working on is not disturbed — the default for "read this URL" (use instead of web_fetch for JavaScript-rendered pages or when web_fetch returns nothing). (2) With windowId, or with no url: reads the current page of this chat's Safari window (url, if also given, is loaded there first); node UIDs in the result can be used with safari_interact. Formats (WebKit's own extraction): ${FORMATS.join(' | ')}, default markdown. waitMs helps lazily rendered pages; script (a JS FUNCTION BODY, use \`return\`) runs in the page and its value is returned as scriptResult. For YouTube videos use safari_get_youtube_notes.`,
+    description: `Read a web page with Safari's engine and return its content. TWO MODES. (1) With url and no windowId: reads in an ISOLATED pooled reader window, never this chat's own window, so a page you are working on is not disturbed — the default for "read this URL" (use instead of web_fetch for JavaScript-rendered pages or when web_fetch returns nothing). (2) With windowId, or with no url: reads the current page of this chat's Safari window (url, if also given, is loaded there first); node UIDs in the result can be used with safari_interact. Formats (WebKit's own extraction): ${FORMATS.join(' | ')}, default markdown. WebKit extracts only RENDERED text: closed <details>, collapsed accordions and unselected tab panels are omitted unless expand is on (default in isolated mode; the header reports what was expanded, or what stayed collapsed). Narrow a read with section (one heading's section, e.g. "#troubleshooting"), selectors (CSS), or scope: "main"; safari_get_page_structure lists the available headings/selectors. prepare runs a JS function body BEFORE extraction (to reveal content); script runs AFTER and returns its value as scriptResult. For YouTube videos use safari_get_youtube_notes.`,
     parameters: {
-      url: { type: 'string', description: 'URL to read. Without windowId this uses an isolated reader.' },
-      windowId: { type: 'string', description: 'Read this chat\'s Safari window (s:<session>:<window>) instead of an isolated reader. Omit windowId AND url to read this session\'s single open window.' },
-      format: { type: 'string', enum: FORMATS, description: 'Extraction format (default markdown). plainText is smallest; textTree/json carry structure and node UIDs; html is the rendered DOM.' },
-      waitMs: { type: 'number', description: 'Extra wait after load before extracting, for lazily rendered pages (default 0).' },
-      maxWordsPerParagraph: { type: 'number', description: 'Truncate paragraphs beyond this many words (default 2000 = effectively none).' },
+      ...readTarget,
+      format: { type: 'string', enum: FORMATS, description: 'Extraction format (default markdown). plainText is smallest; textTree/json carry roles, labels and node UIDs; html is the rendered DOM.' },
+      expand: { type: 'boolean', description: 'Before extracting: open every <details>, click aria-expanded="false" accordions (outside nav/header/footer, never menus), and click through each tab group, appending the other panels\' text under "Hidden tab panels". Default true for isolated reads, false for windows (it changes the page state).' },
+      section: { type: 'string', description: 'CSS selector of ONE heading (e.g. "#troubleshooting" or "h2:nth-of-type(3)"); returns that heading through the next heading of the same or a higher level. Get selectors from safari_get_page_structure.' },
+      selectors: { type: 'array', items: { type: 'string' }, description: 'CSS selectors; only the matching subtrees are extracted. Isolated pages are edited in place, windows are hidden-and-restored. Not combinable with section.' },
+      scope: { type: 'string', enum: SCOPES, description: '"main": extract only the main landmark (main / [role=main] / article / #content); "page": everything; "auto" (isolated default): main when it holds >= 60% of the text, else page. Window default: page. Ignored when section/selectors are given.' },
+      markHeadings: { type: 'boolean', description: 'Rewrite headings as "## Title" so the markdown carries heading levels (WebKit emits them as plain lines). Isolated only; default true for markdown.' },
+      clean: { type: 'boolean', description: 'Strip empty images/links and blank runs from markdown (default true for markdown).' },
+      maxWordsPerParagraph: { type: 'number', description: 'Truncate every paragraph — code blocks included — beyond this many words (default 2000 = effectively none). Values below ~50 are for skimming structure only.' },
       includeURLs: { type: 'boolean', description: 'Include link/image URLs (default true).' },
       nodeIds: { type: 'string', enum: ['none', 'editable', 'interactive', 'allContainers'], description: 'Which nodes get UIDs for safari_interact (window mode; default interactive).' },
-      script: { type: 'string', description: 'Optional JS function body run in the page after load; use `return`. Returned as scriptResult.' },
+      prepare: { type: 'string', description: 'JS function body run in the page BEFORE expand/scope/extraction (e.g. dismiss a cookie banner, click "show more"); use `return` to get a value back as prepareResult.' },
+      script: { type: 'string', description: 'JS function body run in the page AFTER extraction; use `return`. Returned as scriptResult.' },
     },
     output: objectOutput(renderRead),
     async execute(args, exec) {
-      preflight('safari')
-      const format = args.format ?? 'markdown'
-      const maxWords = args.maxWordsPerParagraph ?? 2000
-      const isolated = args.windowId === undefined && args.url !== undefined && args.url !== ''
-      if (isolated) {
-        if (readerPool === undefined) throw new Error('isolated reads are disabled (safari.reader.enabled=false); pass windowId to read a window')
-        const result = await readerPool.read({ url: args.url, format, waitMs: args.waitMs ?? 0, maxWordsPerParagraph: maxWords, includeURLs: args.includeURLs ?? true, script: args.script })
-        return clamp({ ...result, mode: 'isolated' }, limits.maxChars)
-      }
-      const { id, conn, opened } = await safari(exec, args.windowId)
-      if (args.url !== undefined && args.url !== '') await conn.callText('navigate_to_url', { url: args.url })
-      if ((args.waitMs ?? 0) > 0) await new Promise(resolve => setTimeout(resolve, args.waitMs))
-      // Large results (> ~40 kB, routine for json/html) arrive as a "Saved large output to '<path>'" pointer;
-      // unwrapPageContent follows it, same as the isolated reader.
-      const result = await unwrapPageContent(await conn.callText('get_page_content', {
-        format, region: 'entire_page', maxWordsPerParagraph: maxWords, includeURLs: args.includeURLs ?? true, shortenURLs: false, nodeIds: args.nodeIds ?? 'interactive',
-      }))
-      let scriptResult
-      if (args.script !== undefined && args.script.trim() !== '') scriptResult = parseJsonText(await conn.callText('evaluate_javascript', { expression: args.script }))
-      return clamp({ ...result, format, mode: 'window', windowId: id, opened, ...(scriptResult !== undefined ? { scriptResult } : {}) }, limits.maxChars)
+      const result = await readPage(exec, args, isolated => planRead(args, isolated))
+      return clamp(result, limits.maxChars)
+    },
+  }))
+
+  tools.push(defineTool({
+    name: 'safari_get_page_structure',
+    description: 'Outline of a web page without its text: title, text size, main-content landmark, all landmarks (header/nav/main/aside/footer/forms) and every heading with its level and a CSS selector, plus what is collapsed (closed <details>, aria-expanded="false" buttons, tab groups and their tabs). ~1–2 kB. Use it to pick a section or selectors for safari_get_page_content instead of reading a long page whole. Same two modes as safari_get_page_content (url → isolated reader; windowId → this chat\'s window).',
+    parameters: readTarget,
+    output: objectOutput(renderStructure),
+    async execute(args, exec) {
+      const result = await readPage(exec, args, () => ({ ...planRead({ format: 'plainText', expand: false, scope: 'page', markHeadings: false, clean: false }, true), skipContent: true, script: STRUCTURE_SCRIPT }))
+      const { scriptResult, content: _c, notes: _n, ...rest } = result
+      if (scriptResult === undefined || typeof scriptResult !== 'object') throw new Error('page structure script returned no data')
+      return { ...rest, structure: scriptResult }
     },
   }))
 
@@ -439,7 +462,7 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
       preflight('safari')
       if (readerPool === undefined) throw new Error('isolated reads are disabled (safari.reader.enabled=false)')
       const { url } = canonicalWatchUrl(args.url)
-      const result = await readerPool.read({ url, format: 'plainText', waitMs: 0, maxWordsPerParagraph: 0, includeURLs: false, script: EXTRACT_SCRIPT, skipContent: true })
+      const result = await readerPool.read({ ...planRead({ format: 'plainText', expand: false, scope: 'page', markHeadings: false, clean: false }, true), url, waitMs: 0, skipContent: true, script: EXTRACT_SCRIPT })
       return shapeNotes(result.scriptResult, url)
     },
   }))
@@ -830,13 +853,23 @@ function clamp(result, maxChars) {
 
 /** Model-facing text for a page read. */
 function renderRead(value) {
+  const expanded = value.expanded
+  const expandedLine = expanded !== undefined
+    ? (expanded.details + expanded.buttons + expanded.tabs > 0
+        ? `Expanded: ${describeCollapsed({ details: expanded.details, buttons: expanded.buttons, tabGroups: 0 })}${expanded.tabs > 0 ? `${expanded.details + expanded.buttons > 0 ? '; ' : ''}${expanded.tabs} hidden tab panel${expanded.tabs === 1 ? '' : 's'} appended at the end` : ''}`
+        : 'Expanded: nothing was collapsed')
+    : undefined
   const head = [
     value.mode === 'window' ? `[${value.windowId}]${value.opened ? ' (opened)' : ''}` : '[isolated reader]',
     value.title !== undefined ? `Title: ${value.title}` : undefined,
     `URL: ${value.url ?? ''}`,
-    `Format: ${value.format}`,
+    `Format: ${value.format}${value.scope !== undefined ? `; scope: ${value.scope.scope}${value.scope.reason ? ` (${value.scope.reason})` : ''}` : ''}`,
+    expandedLine,
+    ...(value.notes ?? []).map(note => `NOTE: ${note}`),
     value.truncated ? `NOTE: content truncated to ${value.content.length} of ${value.totalChars} chars; full text saved to ${value.fullTextPath} (use read).` : undefined,
   ].filter(Boolean).join('\n')
-  const script = 'scriptResult' in value ? `\n\n--- scriptResult ---\n${typeof value.scriptResult === 'string' ? value.scriptResult : JSON.stringify(value.scriptResult, null, 1)}` : ''
-  return `${head}\n\n${value.content}${script}`
+  const json = (v) => typeof v === 'string' ? v : JSON.stringify(v, null, 1)
+  const prepare = 'prepareResult' in value ? `\n\n--- prepareResult ---\n${json(value.prepareResult)}` : ''
+  const script = 'scriptResult' in value ? `\n\n--- scriptResult ---\n${json(value.scriptResult)}` : ''
+  return `${head}\n\n${value.content}${prepare}${script}`
 }

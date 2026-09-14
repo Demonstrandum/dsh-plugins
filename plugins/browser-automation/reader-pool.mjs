@@ -12,14 +12,15 @@
  * without any read (STP quits when the last session ends).
  *
  * The extraction itself — markdown, plainText, text, textTree, html, json — is
- * WebKit's, via the server's get_page_content tool; this module only passes the
- * options through and unwraps the result (including the server's ">= 32 kB
- * goes to a temp file" behavior).
+ * WebKit's, via the server's get_page_content tool; the surrounding steps
+ * (expand collapsed content, scope to a subtree, mark headings, clean up) live
+ * in page-read.mjs and are shared with window mode.
  */
 
-import { connectServer, unwrapPageContent } from './servers.mjs'
+import { extractPage, FORMATS } from './page-read.mjs'
+import { connectServer } from './servers.mjs'
 
-export const FORMATS = ['markdown', 'plainText', 'text', 'textTree', 'html', 'json']
+export { FORMATS }
 
 /**
  * @param {object} options
@@ -117,8 +118,8 @@ export function createReaderPool(options) {
 
   /**
    * Read one page in an isolated reader.
-   * @param {{ url: string, format: string, maxWordsPerParagraph: number, includeURLs: boolean, waitMs: number, script?: string, skipContent?: boolean }} request
-   * @returns {Promise<{ url: string, title: string | undefined, format: string, content: string, scriptResult?: unknown }>}
+   * @param {ReturnType<import('./page-read.mjs').planRead> & { url: string, waitMs: number }} request
+   * @returns {Promise<{ url?: string, title?: string, format: string, content: string, notes: string[], scriptResult?: unknown }>}
    */
   async function read(request) {
     let releaseWarm
@@ -135,24 +136,10 @@ export function createReaderPool(options) {
         if (releaseWarm !== undefined) releaseWarm()
       }
       if (request.waitMs > 0) await new Promise(resolve => setTimeout(resolve, request.waitMs))
-      const unwrapped = request.skipContent
-        ? { url: request.url, content: '' }
-        : await unwrapPageContent(await call(reader, 'get_page_content', {
-          format: request.format,
-          region: 'entire_page',
-          maxWordsPerParagraph: request.maxWordsPerParagraph,
-          includeURLs: request.includeURLs,
-          shortenURLs: false,
-          nodeIds: 'none',
-        }))
-      let scriptResult
-      if (request.script !== undefined && request.script.trim() !== '') {
-        // Function body semantics (the server's evaluate_javascript contract): use `return`.
-        const text = await call(reader, 'evaluate_javascript', { expression: request.script })
-        try { scriptResult = JSON.parse(text) } catch { scriptResult = text }
-      }
-      trace({ event: 'read', reader: reader.id, url: request.url, format: request.format, chars: unwrapped.content.length, script: request.script !== undefined })
-      return { format: request.format, ...unwrapped, ...(scriptResult !== undefined ? { scriptResult } : {}) }
+      const result = await extractPage((name, args) => call(reader, name, args), request, true)
+      if (result.url === undefined) result.url = request.url
+      trace({ event: 'read', reader: reader.id, url: request.url, format: request.format, chars: result.content.length, script: request.script !== undefined, expand: request.expand, scope: result.scope?.scope })
+      return result
     } finally {
       // Release the page. Default: close the tab (its window goes with it; the
       // driver session and STP stay warm, the next read opens a fresh tab).

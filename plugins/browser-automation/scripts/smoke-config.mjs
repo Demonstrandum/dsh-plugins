@@ -40,7 +40,7 @@ console.log('smoke ok: config + preflight')
   created[0]({ agent: fakeAgent('top', 0) })
   created[0]({ agent: fakeAgent('child', 1) })
   const names = [...registered.keys()].filter(k => k.startsWith('top:')).map(k => k.slice(4)).sort()
-  const expected = ['chrome_click', 'chrome_close', 'chrome_console_messages', 'chrome_evaluate_expression', 'chrome_evaluate_function', 'chrome_fill', 'chrome_fill_form', 'chrome_get_network_request', 'chrome_get_screenshot', 'chrome_handle_dialog', 'chrome_hover', 'chrome_interact', 'chrome_navigate', 'chrome_network_requests', 'chrome_open', 'chrome_press_key', 'chrome_save_screenshot', 'chrome_set_viewport_size', 'chrome_snapshot', 'chrome_type_text', 'chrome_wait_for', 'safari_click', 'safari_close', 'safari_console_messages', 'safari_evaluate_expression', 'safari_evaluate_function', 'safari_get_network_request', 'safari_get_page_content', 'safari_get_screenshot', 'safari_get_youtube_notes', 'safari_handle_dialog', 'safari_hover', 'safari_interact', 'safari_navigate', 'safari_network_requests', 'safari_open', 'safari_press_key', 'safari_save_screenshot', 'safari_set_viewport_size', 'safari_type_text', 'safari_wait_for']
+  const expected = ['chrome_click', 'chrome_close', 'chrome_console_messages', 'chrome_evaluate_expression', 'chrome_evaluate_function', 'chrome_fill', 'chrome_fill_form', 'chrome_get_network_request', 'chrome_get_screenshot', 'chrome_handle_dialog', 'chrome_hover', 'chrome_interact', 'chrome_navigate', 'chrome_network_requests', 'chrome_open', 'chrome_press_key', 'chrome_save_screenshot', 'chrome_set_viewport_size', 'chrome_snapshot', 'chrome_type_text', 'chrome_wait_for', 'safari_click', 'safari_close', 'safari_console_messages', 'safari_evaluate_expression', 'safari_evaluate_function', 'safari_get_network_request', 'safari_get_page_content', 'safari_get_page_structure', 'safari_get_screenshot', 'safari_get_youtube_notes', 'safari_handle_dialog', 'safari_hover', 'safari_interact', 'safari_navigate', 'safari_network_requests', 'safari_open', 'safari_press_key', 'safari_save_screenshot', 'safari_set_viewport_size', 'safari_type_text', 'safari_wait_for']
   if (JSON.stringify(names) !== JSON.stringify(expected)) fail(`tool names: ${names.join(',')}`)
   if ([...registered.keys()].some(k => k.startsWith('child:'))) fail('child agent got tools with subagents=false')
   if (![...registered.keys()].some(k => k.startsWith('pre:'))) fail('pre-existing agent not attached')
@@ -126,5 +126,29 @@ console.log('smoke ok: config + preflight')
     if ('title' in noTitle) fail('undefined title leaked into output')
   } finally { await rm(spill, { force: true }) }
   console.log('smoke ok: page-content unwrapping (inline, spilled-to-file, bare)')
+
+  const { cleanMarkdown, planRead, describeCollapsed, renderStructure, scopeScript, expandScript, STRUCTURE_SCRIPT, MARK_HEADINGS_SCRIPT } = await import('../page-read.mjs')
+  const cleaned = cleanMarkdown('Title\n![]()\n[](https://x.example/icon)\n\n\n\nBody ![]() here  \n![logo](https://x.example/l.svg)\n')
+  if (cleaned !== 'Title\n\nBody  here\n![logo](https://x.example/l.svg)\n') fail(`cleanMarkdown: ${JSON.stringify(cleaned)}`)
+  if (cleanMarkdown('the deprecated [](https://github.com/makenotion/notion-mcp-server) package\u200B') !== 'the deprecated [notion-mcp-server](https://github.com/makenotion/notion-mcp-server) package') fail('inline empty link should regain its text from the URL')
+  const iso = planRead({}, true)
+  if (!(iso.expand && iso.scope === 'auto' && iso.markHeadings && iso.clean && iso.nodeIds === 'none' && iso.format === 'markdown')) fail(`isolated defaults: ${JSON.stringify(iso)}`)
+  const win = planRead({ format: 'textTree', nodeIds: 'allContainers' }, false)
+  if (win.expand || win.scope !== 'page' || win.markHeadings || win.clean || win.nodeIds !== 'allContainers') fail(`window defaults: ${JSON.stringify(win)}`)
+  let both = false
+  try { planRead({ section: '#a', selectors: ['b'] }, true) } catch { both = true }
+  if (!both) fail('section + selectors accepted together')
+  if (describeCollapsed({ details: 14, buttons: 1, tabGroups: 1 }) !== '14 collapsed <details> sections, 1 collapsed accordion button and 1 tab group') fail(describeCollapsed({ details: 14, buttons: 1, tabGroups: 1 }))
+  // Scripts must be syntactically valid function bodies with parameters embedded as JSON.
+  const AsyncFunction = (async () => {}).constructor
+  for (const [label, body] of [['expand', expandScript()], ['scope', scopeScript({ selectors: ['a"b'], scope: 'auto', isolated: true })], ['scope-section', scopeScript({ section: '#x', scope: 'page', isolated: false })], ['structure', STRUCTURE_SCRIPT], ['mark', MARK_HEADINGS_SCRIPT]]) {
+    try { new AsyncFunction(body) } catch (error) { fail(`${label} script does not parse: ${error.message}`) }
+  }
+  if (!scopeScript({ selectors: ['a"b'], scope: 'auto', isolated: true }).includes('"a\\"b"')) fail('selector not JSON-embedded')
+  const outline = renderStructure({ mode: 'isolated', structure: { title: 'T', url: 'https://t.example/', chars: 1000, main: { selector: '#content', chars: 800 }, landmarks: [{ tag: 'nav', label: 'Pages', selector: '#sidebar', chars: 200 }], headings: [{ level: 1, text: 'Top', selector: '#page-title' }, { level: 2, text: 'Sec', selector: '#sec', hidden: true }, { level: 3, text: 'Nav head', selector: 'body > nav > h3', chrome: true }], collapsed: { details: 3, detailsTotal: 5, buttons: 0, tablists: [{ label: 'Code', selector: '#tabs', tabs: ['A', 'B'], selected: 0 }] }, forms: 1, iframes: 0, links: 40 } })
+  for (const needle of ['main content: #content (800 chars, 80%)', '  h1 Top → #page-title', '    h2 Sec [collapsed] → #sec', 'nav/header/footer: 1 (omitted)', '3 of 5 <details> closed', 'tab group "Code" → #tabs: [A] | B']) {
+    if (!outline.includes(needle)) fail(`renderStructure missing ${JSON.stringify(needle)}:\n${outline}`)
+  }
+  console.log('smoke ok: page-read planning, cleanup, scripts parse, structure outline')
 }
 console.log(existsSync(filled.safari.driver) ? 'STP driver present: run pnpm run live:windows for the live matrix' : 'STP driver absent here')

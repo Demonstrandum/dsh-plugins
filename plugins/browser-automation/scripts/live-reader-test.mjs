@@ -1,11 +1,10 @@
 // LIVE test (needs Safari Technology Preview): exercises the reader pool with
 // concurrent reads, warm reuse, surplus disposal, and pool teardown.
-import { fileURLToPath } from 'node:url'
+import { planRead } from '../page-read.mjs'
 import { createReaderPool } from '../reader-pool.mjs'
 
 const pool = createReaderPool({
   driver: '/Applications/Safari Technology Preview.app/Contents/MacOS/safaridriver',
-  shim: fileURLToPath(new URL('../safari-mcp-shim.mjs', import.meta.url)),
   labelPrefix: 'DSH: ',
   maxIdle: 1,
   idleMs: 0,
@@ -14,7 +13,7 @@ const pool = createReaderPool({
   logger: console,
 })
 const t0 = Date.now()
-const req = (url, format = 'markdown') => ({ url, format, maxWordsPerParagraph: 2000, includeURLs: true, waitMs: 0 })
+const req = (url, format = 'markdown') => ({ ...planRead({ format }, true), url, waitMs: 0 })
 const [a, b] = await Promise.all([
   pool.read(req('https://example.com')),
   pool.read(req('https://www.iana.org/', 'plainText')),

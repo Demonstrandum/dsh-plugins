@@ -11,7 +11,7 @@ const tools = createTools({ sessions: {}, readerPool: {}, admitImage: async () =
 
 const GROUPS = [
   { title: 'Windows', match: /^(safari|chrome)_(open|close)$/ },
-  { title: 'Navigation and reading', match: /^(safari|chrome)_(navigate|get_page_content|snapshot|get_youtube_notes|wait_for)$/ },
+  { title: 'Navigation and reading', match: /^(safari|chrome)_(navigate|get_page_content|get_page_structure|snapshot|get_youtube_notes|wait_for)$/ },
   { title: 'JavaScript', match: /_evaluate_/ },
   { title: 'Interaction', match: /^(safari|chrome)_(interact|click|hover|press_key|type_text|fill|fill_form)$/ },
   { title: 'Screenshots', match: /_screenshot$/ },
@@ -21,7 +21,8 @@ const GROUPS = [
 const NOTES = {
   safari_open: 'Each Safari window is a separate `safaridriver --mcp` process: its own automation session, cookies and JS state, in its own STP window whose banner reads `This window is controlled by DSH: ‹chat› · s:0:1.` Nothing is shared between windows.',
   chrome_open: 'All Chrome windows of a session are pages of one isolated Chrome instance (fresh temporary profile; cookies shared between the session\'s windows). Chrome launches with the first page and quits with the last.',
-  safari_get_page_content: 'Two modes: `url` without `windowId` reads in an isolated pooled reader (never a chat window); `windowId`, or no `url`, reads the chat\'s window. The server\'s `maxWordsPerParagraph` default of 15 truncates prose, so the tool defaults it to 2000 and always extracts `region: entire_page`. Output beyond `safari.reader.maxChars` is truncated and the full text saved to a temp file.',
+  safari_get_page_content: 'Two modes: `url` without `windowId` reads in an isolated pooled reader (never a chat window); `windowId`, or no `url`, reads the chat\'s window. WebKit extracts only rendered text, so the tool runs in-page steps around the extraction (page-read.mjs): `prepare` → `expand` (details.open, aria-expanded accordions outside nav/header/footer, tab groups clicked through and appended as "Hidden tab panels") → scope (`section` / `selectors` / `scope`; isolated pages are edited in place, windows are hidden-and-restored) → `markHeadings` → extraction → probe of what stayed collapsed (a NOTE in the header) → `script` → `clean`. Isolated defaults: expand on, scope auto (main landmark when ≥ 60% of the text), headings marked, markdown cleaned; window defaults: expand off, scope page. The server\'s `maxWordsPerParagraph` default of 15 truncates prose, so the tool defaults it to 2000 and always extracts `region: entire_page`. Output beyond `safari.reader.maxChars` is truncated and the full text saved to a temp file.',
+  safari_get_page_structure: 'One in-page script (no extraction): landmarks and headings with CSS selectors (`#id` when unique, else an `nth-of-type` path), the main landmark and its share of the text, collapsed `<details>` / aria-expanded buttons / tab groups. Headings inside nav/header/footer are counted but omitted; hidden headings are tagged `[collapsed]`.',
   safari_get_youtube_notes: 'The rendered watch page never contains the full description (collapsed behind "…more"); the tool reads `videoDetails` from the inline `ytInitialPlayerResponse` script in an isolated reader and parses chapters from timestamp lines.',
   safari_wait_for: 'No server counterpart: an in-page polling script (100 ms) run in 20 s slices, because Apple\'s script timeout is 30 s.',
   safari_evaluate_function: 'Wrapped as `return await (fn)($uid(a), $uid(b))`, so `args` are node UIDs from `safari_get_page_content`.',
@@ -48,7 +49,8 @@ const RETURNS = {
   safari_open: '`{ windowId, url?, title? }`', chrome_open: '`{ windowId, url? }`',
   safari_close: 'text: which ids were closed', chrome_close: 'text: which ids were closed',
   safari_navigate: '`{ windowId, url, title? }`', chrome_navigate: 'text from the server, prefixed `[windowId]`',
-  safari_get_page_content: '`{ mode, windowId?, url, title?, format, content, scriptResult?, truncated?, fullTextPath? }` rendered with a header',
+  safari_get_page_content: '`{ mode, windowId?, url, title?, format, content, notes[], expanded?{details,buttons,tabs}, collapsed?{details,buttons,tabGroups}, scope?{scope,chars,reason?}, prepareResult?, scriptResult?, truncated?, fullTextPath? }` rendered with a header (scope, what was expanded or what stayed collapsed as NOTEs)',
+  safari_get_page_structure: '`{ mode, windowId?, structure: { title, url, chars, main?, landmarks[], headings[{level,text,selector,hidden?,chrome?}], collapsed{details,detailsTotal,buttons,tablists[]}, forms, iframes, links } }` rendered as an outline',
   safari_get_youtube_notes: '`{ url, videoId, title, author, channelId, publishDate, category, lengthSeconds, viewCount, isLive, keywords[], chapters[{time,title}], links[], description }`',
   safari_get_screenshot: 'inline image + `{ windowId, width, height, rect?, viewport?, scale?, clipped?, settled?, unstable? }`',
   chrome_get_screenshot: 'inline image + `{ windowId, width?, height?, uid?, fullPage }`',

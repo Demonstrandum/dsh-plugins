@@ -11,14 +11,14 @@ reaches the model: no `mcp__server__tool` names, no raw server tools, no
 
 ## Tools
 
-41 tools, 20 Safari + 21 Chrome — full reference with every parameter, return value
+42 tools, 21 Safari + 21 Chrome — full reference with every parameter, return value
 and implementation note in **[`docs/tools.md`](docs/tools.md)** (generated from
 the definitions by `pnpm run docs`; `pnpm run check` fails when it is stale).
 
 | Area | Safari | Chrome |
 |---|---|---|
 | Windows | `safari_open`, `safari_close` | `chrome_open`, `chrome_close` |
-| Navigation / reading | `safari_navigate`, `safari_get_page_content` (isolated reader or window), `safari_wait_for`, `safari_get_youtube_notes` | `chrome_navigate`, `chrome_snapshot`, `chrome_wait_for` |
+| Navigation / reading | `safari_navigate`, `safari_get_page_content` (isolated reader or window; expand / section / selectors / scope), `safari_get_page_structure` (outline with selectors), `safari_wait_for`, `safari_get_youtube_notes` | `chrome_navigate`, `chrome_snapshot`, `chrome_wait_for` |
 | JavaScript | `safari_evaluate_expression`, `safari_evaluate_function` | `chrome_evaluate_expression`, `chrome_evaluate_function` |
 | Interaction | `safari_interact` (batch), `safari_click`, `safari_hover`, `safari_press_key`, `safari_type_text` | `chrome_interact` (batch, same format), `chrome_click`, `chrome_fill`, `chrome_fill_form`, `chrome_hover`, `chrome_press_key`, `chrome_type_text` |
 | Screenshots | `safari_get_screenshot` (inline, element crop), `safari_save_screenshot` | `chrome_get_screenshot`, `chrome_save_screenshot` |
@@ -72,6 +72,32 @@ Raw server names and schemas these forward to: `docs/server-tools.json`
   cold); the rest close after `reader.idleMinutes`. Cold start is serialized
   (two brand-new sessions navigating simultaneously can both launch STP).
 
+## Page reads (`page-read.mjs`)
+
+WebKit's extractor (the server's `get_page_content`) returns only *rendered*
+text and always the whole page: closed `<details>`, `aria-expanded="false"`
+accordions and unselected tab panels are silently absent, headings come out as
+plain lines, and every icon becomes `![]()`. `safari_get_page_content` runs
+small in-page scripts around the extraction; both modes share the pipeline:
+
+| Step | Isolated (url) default | Window default | What it does |
+|---|---|---|---|
+| `prepare` | — | — | your JS function body, BEFORE extraction (dismiss banners, "show more"); `script` still runs after |
+| `expand` | on | off | `details.open = true`; click `aria-expanded="false"` outside nav/header/footer (never menus/comboboxes/tabs); click through each `role=tablist`, appending the other panels under **"Hidden tab panels"**; the header reports counts |
+| probe | when not expanded | when not expanded | counts what stayed collapsed → `NOTE: 14 collapsed <details> sections and 1 tab group not expanded …` |
+| `section` / `selectors` / `scope` | `scope: auto` (main landmark when it holds ≥ 60 % of the text) | `scope: page` | isolated pages are edited in place (`body.replaceChildren`); windows hide the siblings along the kept subtrees' ancestor chains (`display:none !important`, tagged `data-dsh-scope-hidden`) and restore afterwards. `section: "#troubleshooting"` = that heading through the next heading of equal or higher level |
+| `markHeadings` | on for markdown | off | writes `## ` into each heading's first text node so the markdown carries levels (never replaces framework-owned nodes — React throws on its next render otherwise) |
+| `clean` | on for markdown | on for markdown | drops zero-width anchors, alt-less images, icon-only link lines; a `[](url)` left inline (WebKit omits link text that also appears in the URL, e.g. `mcp-remote`) gets the URL's last path segment back as text |
+
+`safari_get_page_structure` is the map for all of this: landmarks, every
+heading with a CSS selector (`#id` when unique, else an `nth-of-type` path),
+collapsed counts and tab groups — ~1–3 kB for a long docs page.
+
+Timing that matters: a layout tick (`setTimeout`, not rAF — rAF does not fire
+in occluded windows) between DOM mutations and the extraction. Rewriting
+heading text in the same tick as opening `<details>` made WebKit's markdown
+drop the details' bodies while textTree kept them.
+
 ## Screenshots (`safari-screenshot.mjs`)
 
 Apple's `screenshot` captures the whole viewport (its `node` parameter is a
@@ -123,15 +149,20 @@ live-reloaded).
 
 ## Checks
 
-- `pnpm run check` — offline smoke: config, preflight messages, the 41
+- `pnpm run check` — offline smoke: config, preflight messages, the 42
   registered tools per agent (child filter, disposal), window-id rules
   (numbering, ambiguity, cross-session, browser mismatch), YouTube and
-  geometry helpers; plus a freshness check of `docs/tools.md`.
+  geometry helpers, page-content unwrapping (inline / spilled-to-file), the
+  page-read pipeline's planning, cleanup and script syntax; plus a freshness
+  check of `docs/tools.md`.
 - `pnpm run docs` — regenerate `docs/tools.md` after changing a tool.
 - `pnpm run live:windows` — the live matrix through the real tool executes:
   two Safari windows, isolation, zero-or-one rule, window/isolated reads,
   element screenshot, save, auto-open, two Chrome windows, snapshot/evaluate/
   screenshots, cleanup to zero processes.
+- `pnpm run live:page-read` — expand / scope / section / selectors /
+  markHeadings / structure / prepare on a real docs page, isolated and window
+  mode (hide-and-restore leaves the page intact).
 - `pnpm run live:reader`, `live:youtube [url]`, `live:screenshot [url] [selector]`.
 
 ## Gotchas learned the hard way
@@ -142,6 +173,10 @@ live-reloaded).
   explicit `additionalProperties` on nested object schemas.
 - `ctx.tools.restrict()` masks only global tools — one more reason to own the
   forwarding rather than mount raw MCP tools and try to hide some.
+- Apple's `get_page_content` spills results past ~40 kB (routine for
+  `json`/`html`) to a temp file and answers `Saved large output to '<path>'`;
+  `unwrapPageContent` (servers.mjs) follows it in both modes. Tool output must
+  be lossless JSON — never emit `undefined` fields.
 - pi-web's bridge (`rho/extensions/mcp.ts`) runs one bare `safaridriver --mcp`
   per pi process: all its sessions share one automation window, labeled
   `rho-mcp-bridge`.
