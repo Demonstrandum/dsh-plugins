@@ -6,7 +6,7 @@ pages as Markdown. Three tools, host-only, plain ESM JavaScript, no MCP.
 
 | Tool | Does |
 |---|---|
-| `dash_list_docsets` | installed docsets with the **key** the model uses (`numpy`, `pytorch`, `nlab`, `rust`, …) |
+| `dash_list_docsets` | installed docsets with the **key** the model uses (`numpy`, `pytorch`, `nlab`, `rust`, …); `details: true` adds version, entry counts per type, a browsable landing-page url and the upstream site |
 | `dash_search` | fuzzy symbol/section-name search across all or selected docsets; every result carries a `url` |
 | `dash_get_page` | a page — by default just the **section** the url's anchor points at — as Markdown; `section: "outline"` / `"page"` / `"#id"` / heading text / CSS selector |
 
@@ -47,6 +47,22 @@ Dash also returns **one row per distinct name** (`torch.transpose` hides
 query). PyTorch-style docsets return a Method + Guide + Section row per symbol;
 `dash_search` collapses rows of one page into the symbol row (`(also Guide,
 Section)`) so `maxResults` counts pages.
+
+## Docset details (`docset-info.mjs`)
+
+`dash_list_docsets({ filter, details: true })` (≤ 20 docsets, ~0.3 s each)
+reads what the API does not expose, from the docset bundle: `Contents/Info.plist`
+via `plutil` (landing page `dashIndexFilePath`, `DashDocSetFallbackURL`,
+family) and entry counts per type from `docSet.dsidx` via `/usr/bin/sqlite3`
+(two schemas: Dash's `searchIndex`, and Apple's Core Data `ZTOKEN`/`ZTOKENTYPE`
+used by the HTML/MDN docset). The landing-page **url** needs the docset's
+page-server prefix (`/Dash/<code>/`), which Dash reveals only inside search
+results, so one throwaway search learns it; candidates are then GET-verified
+because many docsets keep their documents inside `tarix.tgz`. Man Pages'
+bundled index is empty (Dash indexes man pages live in `Data/manIndex.dsidx`).
+The result gives the model the true `types` vocabulary per docset and an entry
+point for browsing ("what does this docset cover?"), which name search cannot
+answer.
 
 ## Page conversion (`html-to-md.mjs`)
 
@@ -100,7 +116,7 @@ too. Module changes need a host restart.
 ## Checks
 
 - `pnpm run check` — offline: config, key derivation/resolution on the saved
-  docset list, fragment parsing, math folding, the converter on saved PyTorch
+  docset list, details on a missing bundle (null-safe), fragment parsing, math folding, the converter on saved PyTorch
   and nLab pages (anchor / page / outline / section-by-id / by-text /
   apple_ref / html format), and all three tools against a fake Dash client
   (grouping, type filter, truncation + spill, error messages, lossless-JSON

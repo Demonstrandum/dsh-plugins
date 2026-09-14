@@ -20,6 +20,8 @@ const list = await run('dash_list_docsets', {})
 show(list.text, 600)
 const filtered = await run('dash_list_docsets', { filter: 'py' })
 console.log(filtered.value.docsets.map(d => d.key).join(', '))
+const detailed = await run('dash_list_docsets', { filter: 'torch', details: true })
+show(detailed.text, 600)
 
 const query = process.argv[2] ?? 'Tensor.view'
 const docset = process.argv[3] ?? 'torch'

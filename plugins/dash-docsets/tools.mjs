@@ -11,7 +11,11 @@ import { join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { DashError } from './dash.mjs'
 import { filterDocsets, resolveDocsets, withKeys } from './docsets.mjs'
+import { docsetDetails } from './docset-info.mjs'
 import { convertPage } from './html-to-md.mjs'
+
+/** Upper bound of docsets detailed in one call (each costs plutil + sqlite3 + a probe search + page GETs). */
+const MAX_DETAILS = 20
 
 const objectOutput = (render) => ({
   schema: { type: 'object', additionalProperties: true },
@@ -44,17 +48,30 @@ export function createTools(deps) {
 
   tools.push(defineTool({
     name: 'dash_list_docsets',
-    description: 'List the documentation sets installed in Dash (the macOS docs browser) with the KEY to use in dash_search\'s docsets parameter (e.g. numpy, pytorch, nlab, html, rust). Cheap (~2 kB); call it when unsure which docsets exist or how one is keyed.',
+    description: `List the documentation sets installed in Dash (the macOS docs browser) with the KEY to use in dash_search's docsets parameter (e.g. numpy, pytorch, nlab, html, rust). Cheap (~2 kB); call it when unsure which docsets exist or how one is keyed. With details: true (use with filter; at most ${MAX_DETAILS} docsets) each docset also reports its version, entry counts per type (the vocabulary for dash_search's types), its landing/index page url for browsing with dash_get_page, and the upstream site.`,
     parameters: {
       filter: { type: 'string', description: 'Case-insensitive substring over key, name and platform (e.g. "py").' },
+      details: { type: 'boolean', description: `Add version, entry counts by type, landing-page url and site per docset (default false; slower — ~0.3 s per docset, max ${MAX_DETAILS}).` },
     },
     output: objectOutput(renderDocsets),
     async execute(args, exec) {
       const rows = filterDocsets(await docsets(exec.signal, { refresh: true }), args.filter)
+      if (args.details === true && rows.length > MAX_DETAILS) throw new DashError(`details: true covers at most ${MAX_DETAILS} docsets; ${rows.length} match.`, { hint: 'Narrow with filter.' })
+      const details = args.details === true
+        ? await Promise.all(rows.map(row => docsetDetails(row, { dash, signal: exec.signal })))
+        : null
       return {
         total: cache.rows.length,
         filter: args.filter ?? null,
-        docsets: rows.map(row => ({ key: row.key, name: row.name, platform: row.platform ?? null, identifier: row.identifier, fullTextSearch: row.full_text_search ?? null })),
+        details: args.details === true,
+        docsets: rows.map((row, i) => ({
+          key: row.key,
+          name: row.name,
+          platform: row.platform ?? null,
+          identifier: row.identifier,
+          fullTextSearch: row.full_text_search ?? null,
+          ...(details ? details[i] : {}),
+        })),
       }
     },
   }))
@@ -225,8 +242,24 @@ function renderDocsets(value) {
   const head = value.filter ? `${value.docsets.length} of ${value.total} installed docsets match "${value.filter}"` : `${value.total} installed docsets`
   if (value.docsets.length === 0) return `${head}.`
   const width = Math.min(34, Math.max(...value.docsets.map(d => d.key.length)))
-  const lines = value.docsets.map(d => `${d.key.padEnd(width)}  ${d.name}`)
-  return `${head} (key  name):\n${lines.join('\n')}`
+  if (!value.details) {
+    const lines = value.docsets.map(d => `${d.key.padEnd(width)}  ${d.name}`)
+    return `${head} (key  name):\n${lines.join('\n')}`
+  }
+  const n = (x) => x.toLocaleString('en-US')
+  const blocks = value.docsets.map(d => {
+    const lines = [`${d.key}  ${d.name}${d.fullTextSearch && d.fullTextSearch !== 'enabled' ? `  (full-text search: ${d.fullTextSearch})` : ''}`]
+    if (d.types && d.types.length > 0) {
+      const shown = d.types.slice(0, 10).map(t => `${t.type} ${n(t.count)}`).join(', ')
+      lines.push(`  ${n(d.entries)} entries: ${shown}${d.types.length > 10 ? ` (+${d.types.length - 10} more types)` : ''}`)
+    } else {
+      lines.push(d.types ? '  entries: none in the docset index (Dash indexes this docset elsewhere)' : '  entries: docset index not readable')
+    }
+    if (d.indexUrl) lines.push(`  index page: ${d.indexUrl}`)
+    if (d.site) lines.push(`  site: ${d.site}`)
+    return lines.join('\n')
+  })
+  return `${head}:\n${blocks.join('\n')}`
 }
 
 function renderSearch(value) {

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { Config } from '../index.js'
 import { DashError, errorText } from '../dash.mjs'
 import { filterDocsets, resolveDocsets, slug, stripVersion, withKeys } from '../docsets.mjs'
+import { expandHome } from '../docset-info.mjs'
 import { convertPage, normalizeMathText, parseFragment } from '../html-to-md.mjs'
 import { createTools } from '../tools.mjs'
 
@@ -56,6 +57,11 @@ const ok = (cond, message) => { assert.ok(cond, message); checks++ }
 {
   ok(errorText('<!DOCTYPE html><html><body><h1>HTTP Error 400: Docset with identifier \'x\' not found</h1></body></html>') === 'Docset with identifier \'x\' not found', 'errorText strips the HTML page')
   ok(new DashError('a', { hint: 'b' }).message === 'a b', 'DashError appends the hint')
+}
+
+// ---------------------------------------------------------------- docset-info helpers
+{
+  ok(expandHome('~/Library/x') === `${process.env.HOME}/Library/x` && expandHome('/abs') === '/abs', 'expandHome')
 }
 
 // ---------------------------------------------------------------- fragments & math
@@ -142,9 +148,19 @@ const ok = (cond, message) => { assert.ok(cond, message); checks++ }
   ok(list.value.total === 51 && list.text.startsWith('51 installed docsets') && /^pytorch\s+PyTorch 2\.11\.0$/m.test(list.text), 'list renders key + name')
   const filtered = await run('dash_list_docsets', { filter: 'torch' })
   ok(filtered.value.docsets.length === 1 && /1 of 51 installed docsets match "torch"/.test(filtered.text), 'list filter')
+  await assert.rejects(run('dash_list_docsets', { details: true }), /details: true covers at most 20 docsets; 51 match/)
+  checks++
+  // Details on a docset whose bundle is not on disk: every field present (null), page probe learns the prefix from the fake search.
+  fakeDash.listDocsets = async () => [{ name: 'Ghost 1.2', identifier: 'ghostxyz', platform: 'ghost', path: '/nonexistent/Ghost.docset', full_text_search: 'disabled' }]
+  const detailed = await run('dash_list_docsets', { filter: 'ghost', details: true })
+  const ghost = detailed.value.docsets[0]
+  ok(ghost.version === '1.2' && ghost.types === null && ghost.entries === null && ghost.indexUrl === null && ghost.site === null && ghost.path === '/nonexistent/Ghost.docset', 'details fields are null-safe when the bundle is missing')
+  ok(/^ghost {2}Ghost 1\.2 {2}\(full-text search: disabled\)\n {2}entries: docset index not readable$/m.test(detailed.text), 'details rendering')
+  fakeDash.listDocsets = async () => docsetsJson
+  await run('dash_list_docsets', {}) // refill the cache with the real fixture list for the tests below
 
   const search = await run('dash_search', { query: 'view', docsets: ['torch', 'numpy'], maxResults: 3 })
-  const req = calls.find(c => c[0] === 'search')[1]
+  const req = calls.find(c => c[0] === 'search' && c[1].query === 'view')[1]
   ok(req.identifiers.join(',') === 'shofitzl,srwugqtb' && req.maxResults === 30 && req.snippets === false, 'search resolves docsets to identifiers and over-fetches')
   ok(search.value.results.length === 3 && search.value.truncated === true && search.value.matched > 3, 'maxResults applied after grouping')
   const first = search.value.results[0]
