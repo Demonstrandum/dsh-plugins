@@ -2,6 +2,7 @@
 // real tool executes, for one fake agent.
 import { execSync } from 'node:child_process'
 import * as plugin from '../index.js'
+import { assertLossless } from './lossless.mjs'
 
 const defs = {}; const created = []; let unload
 const cfg = plugin.Config({ idleMinutes: 0, safari: { reader: { idleMinutes: 0 } }, traceFile: '' })
@@ -10,7 +11,7 @@ plugin.apply(ctx, cfg)
 const agent = { id: 'session-livetest', session: { header: { cwd: '/tmp', delegationDepth: 0 } }, ctx: { tools: { register: (d) => { defs[d.name] = d; return () => {} } } } }
 created[0]({ agent })
 const exec = { agent, signal: new AbortController().signal }
-const run = (name, args = {}) => defs[name].execute(args, exec)
+const run = async (name, args = {}) => assertLossless(name, await defs[name].execute(args, exec))
 const text = (name, value) => defs[name].output.render({}, value)[0].text
 const stp = () => execSync(`osascript -e 'tell application "System Events" to (name of processes) contains "Safari Technology Preview"'`).toString().trim()
 const step = (label, value) => console.log(`✓ ${label}${value !== undefined ? ` → ${String(value).split('\n')[0].slice(0, 110)}` : ''}`)

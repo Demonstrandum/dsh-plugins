@@ -4,6 +4,7 @@
 // reader-only Chrome instance.
 import { execSync } from 'node:child_process'
 import * as plugin from '../index.js'
+import { assertLossless } from './lossless.mjs'
 
 const URL = 'https://developers.notion.com/guides/mcp/get-started-with-mcp'
 const defs = {}; const created = []; let unload
@@ -13,7 +14,7 @@ plugin.apply(ctx, cfg)
 const agent = { id: 'session-chromeread', session: { header: { cwd: '/tmp', delegationDepth: 0 } }, ctx: { tools: { register: (d) => { defs[d.name] = d; return () => {} } } } }
 created[0]({ agent })
 const exec = { agent, signal: new AbortController().signal }
-const run = (name, args = {}) => defs[name].execute(args, exec)
+const run = async (name, args = {}) => assertLossless(name, await defs[name].execute(args, exec))
 const render = (name, value) => defs[name].output.render({}, value)[0].text
 // chrome-devtools-mcp sets a bare process title and pgrep -l reports it as 'node': count OUR node children (the only node children this test spawns).
 const chromeProcs = () => { try { return execSync(`pgrep -lP ${process.pid}`).toString().split('\n').filter(line => /\b(node|chrome-devtools-mcp)\b/.test(line)).length } catch { return 0 } }

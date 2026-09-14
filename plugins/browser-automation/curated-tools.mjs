@@ -606,7 +606,7 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
     const result = await conn.callRaw('take_screenshot', { ...rest, pageId })
     const image = imageOf(result)
     if (result.isError || image === undefined) throw new Error(`chrome screenshot failed: ${result.content?.map(b => b.text ?? '').join(' ') || 'no image returned'}`)
-    return { windowId: id, opened, bytes: image.data, mediaType: image.mediaType, uid: args.uid, fullPage: args.fullPage === true }
+    return { windowId: id, opened, bytes: image.data, mediaType: image.mediaType, ...(args.uid !== undefined ? { uid: args.uid } : {}), fullPage: args.fullPage === true }
   }
 
   tools.push(defineTool({
@@ -860,6 +860,14 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
     execute: forwardChrome('resize_page'),
   }))
 
+  // DSH rejects tool output that is not lossless JSON ("value is not lossless JSON"), and an object with an
+  // `undefined`-valued key is exactly that. Several results carry optional fields taken straight from
+  // arguments or server answers (`uid: args.uid`, `title: nav?.title`), so strip them centrally instead of
+  // relying on every site to spread conditionally. (Tests call execute() directly, bypassing DSH's check.)
+  for (const tool of tools) {
+    const execute = tool.execute
+    tool.execute = async (args, exec) => stripUndefined(await execute(args, exec))
+  }
   return tools
 
   // ---------------------------------------------------------------- helpers
@@ -936,4 +944,15 @@ function renderRead(value) {
   const prepare = 'prepareResult' in value ? `\n\n--- prepareResult ---\n${json(value.prepareResult)}` : ''
   const script = 'scriptResult' in value ? `\n\n--- scriptResult ---\n${json(value.scriptResult)}` : ''
   return `${head}\n\n${value.content}${prepare}${script}`
+}
+
+/** Deep-remove `undefined` values from plain objects/arrays (other values pass through untouched). */
+export function stripUndefined(value) {
+  if (Array.isArray(value)) return value.map(entry => entry === undefined ? null : stripUndefined(entry))
+  if (value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+    const out = {}
+    for (const [key, entry] of Object.entries(value)) if (entry !== undefined) out[key] = stripUndefined(entry)
+    return out
+  }
+  return value
 }

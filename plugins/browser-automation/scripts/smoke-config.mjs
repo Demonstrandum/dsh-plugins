@@ -167,5 +167,22 @@ console.log('smoke ok: config + preflight')
   try { await bridge('get_page_content', { format: 'textTree' }) } catch { unsupported = true }
   if (!unsupported) fail('chrome bridge accepted a Safari-only format')
   console.log('smoke ok: chrome read bridge (unfence, serializer parses, format guard)')
+
+  // Every tool result passes through stripUndefined: `{ uid: undefined }` is what made chrome_save_screenshot fail live.
+  const { stripUndefined } = await import('../curated-tools.mjs')
+  const { losslessReason } = await import('./lossless.mjs')
+  if (losslessReason({ a: 1, uid: undefined }) === undefined) fail('lossless helper missed undefined')
+  const stripped = stripUndefined({ windowId: 'c:0:0', uid: undefined, fullPage: false, nested: { title: undefined, ok: [1, undefined, { x: undefined }] } })
+  if (losslessReason(stripped) !== undefined || 'uid' in stripped || 'title' in stripped.nested || stripped.nested.ok[1] !== null) fail(`stripUndefined: ${JSON.stringify(stripped)}`)
+  // And the wrapper is in place on a real tool: a fake capture returning `uid: undefined` comes back clean.
+  const { createTools } = await import('../curated-tools.mjs')
+  const fakeConn = { callRaw: async () => ({ content: [{ type: 'image', data: Buffer.from('x').toString('base64'), mimeType: 'image/png' }] }), callText: async () => '' }
+  const fakeSessions = { resolveChrome: async () => ({ id: 'c:0:0', pageId: 1, conn: fakeConn, opened: false }) }
+  const fakeTools = createTools({ sessions: fakeSessions, readerPool: undefined, admitImage: async () => ({ reason: 'test' }), inlineImages: new WeakMap(), preflight: () => {}, limits: { maxChars: 1000 } }, { id: 'a', session: { header: { cwd: tmpdir() } } })
+  const saveShot = fakeTools.find(t => t.name === 'chrome_save_screenshot')
+  const saved = await saveShot.execute({ path: join(tmpdir(), `dsh-smoke-shot-${process.pid}.png`) }, { agent: { id: 'a', session: { header: { cwd: tmpdir() } } } })
+  if (losslessReason(saved) !== undefined || 'uid' in saved || saved.fullPage !== false) fail(`chrome_save_screenshot result: ${JSON.stringify(saved)}`)
+  await rm(saved.path, { force: true })
+  console.log('smoke ok: results are stripped of undefined (lossless JSON)')
 }
 console.log(existsSync(filled.safari.driver) ? 'STP driver present: run pnpm run live:windows for the live matrix' : 'STP driver absent here')
