@@ -50,6 +50,7 @@
  *   traceFile: ''             # append JSON lifecycle lines here (debugging; '' = off)
  */
 
+import { randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync } from 'node:fs'
 import Schema from '@deepseek-ai/schemastery'
 import { createTools } from './curated-tools.mjs'
@@ -87,6 +88,18 @@ export const Config = Schema.object({
 })
 
 const PLUGIN_SOURCE = { kind: 'plugin', plugin: 'browser-automation' }
+
+/**
+ * A complete user-role message for `agent.inject`. DSH's `UserMessage.content`
+ * is a `ContentBlock[]`; injecting a bare string is persisted as-is and then
+ * every later turn of that session fails with "content.some is not a function".
+ * Mirrors `createUserMessage` in `@deepseek-ai/dsh-llm` (role + fresh id) without
+ * taking the dependency.
+ * @param {string} text - the notice text.
+ */
+function pluginNotice(text) {
+  return { id: randomUUID(), role: 'user', content: [{ type: 'text', text }], source: PLUGIN_SOURCE }
+}
 
 /** Chrome server arguments derived from config (always an isolated profile). */
 export function chromeArgs(config) {
@@ -168,10 +181,9 @@ export function apply(ctx, config) {
     idleMs: config.idleMinutes * 60_000,
     onIdleClose: (agent, closed) => {
       try {
-        agent.inject({
-          content: `[browser-automation] Closed idle browser window(s) ${closed.join(', ')} after ${config.idleMinutes} min without use. Any safari_*/chrome_* call opens a fresh window.`,
-          source: PLUGIN_SOURCE,
-        })
+        agent.inject(pluginNotice(
+          `[browser-automation] Closed idle browser window(s) ${closed.join(', ')} after ${config.idleMinutes} min without use. Any safari_*/chrome_* call opens a fresh window.`,
+        ))
       } catch {
         // The agent may be disposed or not accepting injections; the windows are closed either way.
       }

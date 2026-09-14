@@ -74,6 +74,15 @@ try {
   check('window default read: expand off, probe reports the tab group', plain.collapsed?.details === 0 && plain.collapsed?.tabGroups === 1, JSON.stringify(plain.collapsed))
   check('chrome_close', (await run('chrome_close')) === `Closed ${opened.windowId}.`)
 
+  // 5b. A refused URL: clear error, no window registered, no orphan chrome-error page left behind.
+  let refused = ''
+  try { await run('chrome_open', { url: 'http://127.0.0.1:5199/nothing' }) } catch (error) { refused = error.message }
+  check('refused url → clear error', /could not open http:\/\/127\.0\.0\.1:5199\/nothing: .*ERR_CONNECTION_REFUSED.*No window was opened/.test(refused), refused.slice(0, 120))
+  const probe = await run('chrome_open', { url: 'https://example.com/' })
+  const pages = await run('chrome_evaluate_expression', { windowId: probe.windowId, expression: 'return 1' })
+  check('no window registered by the failed open', probe.windowId === 'c:0:1' /* c:0:0 was the window above */, probe.windowId)
+  check('chrome_close after failed open', (await run('chrome_close')) === `Closed ${probe.windowId}.`)
+
   // 6. Reader-only instance is closed by unload (idle timer disabled here) — zero leftover processes.
   const before = chromeProcs()
   await run('chrome_get_page_content', { url: 'https://example.com/', format: 'plainText' })

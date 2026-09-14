@@ -174,13 +174,32 @@ export class BrowserSessions {
     return conn
   }
 
+  /**
+   * `new_page` that failed to load (ERR_CONNECTION_REFUSED, DNS, …) still creates a page — a selected
+   * `chrome-error://chromewebdata/` tab nobody has an id for. Close such orphans and turn the server's
+   * text into a clear error naming the URL, so the agent knows no window was opened.
+   */
+  async newChromePage(conn, url) {
+    const result = await conn.callRaw('new_page', { url })
+    const listing = textOf(result)
+    const pageId = selectedPageId(listing)
+    if (result.isError || pageId === undefined) {
+      try {
+        const pages = textOf(await conn.callRaw('list_pages', {}))
+        for (const match of pages.matchAll(/^(\d+):\s.*\(chrome-error:\/\/[^)]*\)/gm)) {
+          try { await conn.callText('close_page', { pageId: Number(match[1]) }) } catch { /* best effort */ }
+        }
+      } catch { /* best effort */ }
+      throw new Error(`Chrome could not open ${url}: ${listing.replace(/^Error:\s*/, '').trim()}. No window was opened; start the server or fix the URL and call chrome_open again.`)
+    }
+    return { pageId, listing }
+  }
+
   /** Open a new Chrome page (window) in the caller's session. */
   async openChrome(agent, url) {
     const session = this.session(agent)
     const conn = await this.chromeInstance(session)
-    const listing = textOf(await conn.callRaw('new_page', { url: url ?? 'about:blank' }))
-    const pageId = selectedPageId(listing)
-    if (pageId === undefined) throw new Error(`Chrome did not report the new page id:\n${listing}`)
+    const { pageId, listing } = await this.newChromePage(conn, url ?? 'about:blank')
     const windowIndex = session.nextWindow.chrome++
     const id = this.id(session, 'chrome', windowIndex)
     session.chrome.pages.set(windowIndex, { id, pageId })
@@ -203,9 +222,7 @@ export class BrowserSessions {
   async withChromeReaderPage(agent, url, fn) {
     const session = this.session(agent)
     const conn = await this.chromeInstance(session)
-    const listing = textOf(await conn.callRaw('new_page', { url }))
-    const pageId = selectedPageId(listing)
-    if (pageId === undefined) throw new Error(`Chrome did not report the reader page id:\n${listing}`)
+    const { pageId } = await this.newChromePage(conn, url)
     this.touch(agent)
     this.options.trace({ event: 'chrome-reader-open', id: agent.id, pageId, url })
     try {
