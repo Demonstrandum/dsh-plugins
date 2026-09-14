@@ -9,7 +9,8 @@
 #
 # Live profile owns: enforce-model-preset, browser-automation,
 # local-model-supervisor, reverse-proxy. This overlay only adds what is NOT
-# there: agent-status-indicator, dash-docsets and the preview-only red identity.
+# there: agent-status-indicator, dash-docsets, <private-plugin> and
+# the preview-only red identity.
 #
 # For a fully ISOLATED throwaway-home preview (see PREVIEWING.md) this file is
 # intentionally incomplete — copy the live-profile rows here for that flow.
@@ -21,6 +22,9 @@
     # Dash (macOS docs browser) tools: dash_list_docsets / dash_search / dash_get_page.
     - id: tali-dash-docsets
       name: '/Users/USER/github/tali-dash-plugins/plugins/dash-docsets/index.js'
+    # Per-chat <private> kernels: <private>_eval / <private>_run / <private>_show (inline plots) / <private>_kernel_*.
+    - id: tali-<private-plugin>
+      name: '/Users/USER/github/tali-dash-plugins/plugins/<private-plugin>/index.js'
     # Preview-only identity: red whale + "DSH-dev" so a Dock-installed preview
     # instance is never confused with the live server. Dev overlay ONLY.
     - id: tali-preview-identity
