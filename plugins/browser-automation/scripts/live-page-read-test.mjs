@@ -27,6 +27,7 @@ try {
   check('sidebar nav excluded', !dflt.content.includes('Postman workspace'))
   check('headings marked', /^## Troubleshooting$/m.test(dflt.content), (dflt.content.match(/^##? /gm) ?? []).length + ' heading lines')
   check('markdown litter cleaned', !dflt.content.includes('![]()'))
+  check('step numbers merged into their line', /^1\. Add the Notion server/m.test(dflt.content) && !/^2$/m.test(dflt.content))
 
   // 1b. WebKit's own markdown, with the heading marker hack.
   t0 = Date.now()

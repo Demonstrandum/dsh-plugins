@@ -36,6 +36,7 @@ try {
   check('code fences for <pre>', /```[\s\S]*"mcpServers"[\s\S]*```/.test(dflt.content))
   check('links kept', dflt.content.includes('[Codex MCP documentation](https://developers.openai.com/codex/mcp/)'))
   check('no double heading markers', !/^#+ #/m.test(dflt.content))
+  check('step numbers merged into their line', /^1\. Add the Notion server/m.test(dflt.content) && !/^1$/m.test(dflt.content), JSON.stringify((dflt.content.match(/^1\. .*/m) ?? [''])[0].slice(0, 60)))
   console.log('\n' + render('chrome_get_page_content', dflt).split('\n').slice(0, 6).join('\n') + '\n  …\n')
 
   // 2. expand off → NOTE.

@@ -19,6 +19,8 @@
  *   News) become plain block flow.
  * - <pre> → fenced block using innerText; the language comes from a
  *   `language-*` class on a nested <code>.
+ * - A line holding only an ordinal ("1.", "12") is merged into the next line
+ *   as "1. …": ranks and step numbers that sit in their own cell or box.
  *
  * Function body; returns `{ url, title, format: 'markdown', content }`.
  */
@@ -183,5 +185,17 @@ function walk(node, ctx) {
 }
 walk(document.body, { depth: 0 });
 flush();
-return { url: location.href, title: document.title, format: 'markdown', content: out.join('\\n').replace(/\\n{3,}/g, '\\n\\n').trim() };`
+// A line that is only an ordinal ("1." / "12" / "3)") is a rank or step number rendered in its own cell or
+// box (Hacker News ranks, docs "steps"); merge it into the following line as a list-style prefix.
+const merged = [];
+for (let i = 0; i < out.length; i++) {
+  const ordinal = /^(\\d{1,4})[.)]?$/.exec(out[i]);
+  if (ordinal) {
+    let next = i + 1;
+    while (next < out.length && out[next] === '') next++;
+    if (next < out.length && !/^(#{1,6} |\`\`\`|\\||\\s*(?:-|\\d+\\.) )/.test(out[next])) { merged.push(ordinal[1] + '. ' + out[next]); i = next; continue; }
+  }
+  merged.push(out[i]);
+}
+return { url: location.href, title: document.title, format: 'markdown', content: merged.join('\\n').replace(/\\n{3,}/g, '\\n\\n').trim() };`
 }
