@@ -1,0 +1,42 @@
+{
+  "name": "tali-foreign-link-opener",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin: when the web GUI runs as a Safari \"Add to Dock\" web app, links that leave the DSH server (other ports, other hosts) open in the real browser via `open -a Safari` instead of a new DSH window.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lib/client.js",
+    "lib/client.js.map",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "check": "node --check index.js",
+    "prepare": "node build.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "link:/Users/USER/github/deepseek-harness/vendor/schemastery"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:/Users/USER/github/deepseek-harness/vendor/cordis",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.2"
+  }
+}

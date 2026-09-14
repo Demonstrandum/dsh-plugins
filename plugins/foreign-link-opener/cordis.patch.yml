@@ -1,0 +1,8 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# Defaults: hand foreign links to /Applications/Safari.app, only while the GUI
+# runs as an installed (Dock) web app served from a loopback address.
+# Override `config` in the profile's cordis.patch.yml (a later layer replaces
+# the whole value).
+- insert:
+    - id: tali-foreign-link-opener
+      name: tali-foreign-link-opener
