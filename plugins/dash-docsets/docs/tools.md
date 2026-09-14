@@ -16,7 +16,7 @@ List the documentation sets installed in Dash (the macOS docs browser) with the 
 
 ## `dash_search`
 
-Search the docsets installed in Dash. Matches SYMBOL AND SECTION NAMES (classes, functions, methods, guide/section titles, nLab entries) fuzzily — not body text — so query with an identifier or a short title ("Tensor.view", "argsort", "adjoint functor", "<dialog>"), not a sentence. Default: all installed docsets; narrow with docsets (keys from dash_list_docsets; names like "torch" or "PyTorch" also resolve). Each result carries a url for dash_get_page.
+Search the docsets installed in Dash. Matches SYMBOL AND SECTION NAMES (classes, functions, methods, guide/section titles, nLab entries) fuzzily — not body text — so query with an identifier or a short title ("Tensor.view", "argsort", "adjoint functor", "<dialog>"), not a sentence. Default: all installed docsets; narrow with docsets (keys from dash_list_docsets; names like "torch" or "PyTorch" also resolve). Dash returns ONE entry per name: same-named symbols (torch.transpose vs Tensor.transpose) hide behind the first, so qualify the query ("Tensor.transpose") to reach a specific one. Each result carries a url for dash_get_page.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -28,7 +28,7 @@ Search the docsets installed in Dash. Matches SYMBOL AND SECTION NAMES (classes,
 
 **Returns:** `{ query, docsets[], allDocsets, types, maxResults, matched, truncated, message, warnings[], results[{ docset, name, type, alsoTypes[], description, url, platform, language, tags }] }` rendered as numbered `docset · type · name — parent` lines each followed by the url
 
-**Implementation:** Resolves `docsets` to identifiers (key, exact name, platform, identifier, or a unique fragment — `"torch"` → PyTorch; ambiguity is an error listing the candidates), then `GET /search`. Over-fetches (2× / 4× with `types`, min 30 / 60, max 1000) because rows are filtered by type and grouped by page afterwards: a symbol row (Method, Function, …) absorbs the Guide/Section/Entry rows of the same page and lists them as `(also …)`. Dash searches names fuzzily; rows typed `Full-Text Search` appear for some docsets when the name search finds nothing (not reliable). A 400 "Docset with identifier … not found" drops the docset cache so the next call re-resolves.
+**Implementation:** Resolves `docsets` to identifiers (key, exact name, platform, identifier, or a unique fragment — `"torch"` → PyTorch; ambiguity is an error listing the candidates), then `GET /search`. Over-fetches (2× / 4× with `types`, min 30 / 60, max 1000) because rows are filtered by type and grouped by page afterwards: a symbol row (Method, Function, …) absorbs the Guide/Section/Entry rows of the same page and lists them as `(also …)`. Dash searches names fuzzily and returns one row per distinct name (same-named symbols collapse, as in its UI — the API cannot expand them; qualify the query instead). Rows typed `Full-Text Search` appear for some docsets when the name search finds nothing (not reliable). A 400 "Docset with identifier … not found" drops the docset cache so the next call re-resolves.
 
 ## `dash_get_page`
 

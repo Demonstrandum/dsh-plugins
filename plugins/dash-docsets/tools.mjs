@@ -61,7 +61,7 @@ export function createTools(deps) {
 
   tools.push(defineTool({
     name: 'dash_search',
-    description: 'Search the docsets installed in Dash. Matches SYMBOL AND SECTION NAMES (classes, functions, methods, guide/section titles, nLab entries) fuzzily — not body text — so query with an identifier or a short title ("Tensor.view", "argsort", "adjoint functor", "<dialog>"), not a sentence. Default: all installed docsets; narrow with docsets (keys from dash_list_docsets; names like "torch" or "PyTorch" also resolve). Each result carries a url for dash_get_page.',
+    description: 'Search the docsets installed in Dash. Matches SYMBOL AND SECTION NAMES (classes, functions, methods, guide/section titles, nLab entries) fuzzily — not body text — so query with an identifier or a short title ("Tensor.view", "argsort", "adjoint functor", "<dialog>"), not a sentence. Default: all installed docsets; narrow with docsets (keys from dash_list_docsets; names like "torch" or "PyTorch" also resolve). Dash returns ONE entry per name: same-named symbols (torch.transpose vs Tensor.transpose) hide behind the first, so qualify the query ("Tensor.transpose") to reach a specific one. Each result carries a url for dash_get_page.',
     parameters: {
       query: { type: 'string', required: true, description: 'Symbol or title to look up. Multi-word queries match titles containing the words; fewer words match more.' },
       docsets: { type: 'array', items: { type: 'string' }, description: 'Docset keys/names to search (e.g. ["numpy", "pytorch"]). Omit for all installed docsets.' },

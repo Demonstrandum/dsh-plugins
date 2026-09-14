@@ -42,7 +42,9 @@ section names** fuzzily. Body-text hits appear as type `Full-Text Search` for
 some docsets (HTML/MDN, NumPy) and not others (PyTorch, Python) even though all
 report `full_text_search: enabled` — treat it as a bonus. All 51 docsets at once
 answer in ~0.25 s (first call ~4 s cold), so `docsets` defaults to all.
-PyTorch-style docsets return a Method + Guide + Section row per symbol;
+Dash also returns **one row per distinct name** (`torch.transpose` hides
+`Tensor.transpose`, as in its UI; the API cannot expand the group — qualify the
+query). PyTorch-style docsets return a Method + Guide + Section row per symbol;
 `dash_search` collapses rows of one page into the symbol row (`(also Guide,
 Section)`) so `maxResults` counts pages.
 
