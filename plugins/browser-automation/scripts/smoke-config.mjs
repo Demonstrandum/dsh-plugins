@@ -132,7 +132,9 @@ console.log('smoke ok: config + preflight')
   if (cleaned !== 'Title\n\nBody  here\n![logo](https://x.example/l.svg)\n') fail(`cleanMarkdown: ${JSON.stringify(cleaned)}`)
   if (cleanMarkdown('the deprecated [](https://github.com/makenotion/notion-mcp-server) package\u200B') !== 'the deprecated [notion-mcp-server](https://github.com/makenotion/notion-mcp-server) package') fail('inline empty link should regain its text from the URL')
   const iso = planRead({}, true)
-  if (!(iso.expand && iso.scope === 'auto' && iso.markHeadings && iso.clean && iso.nodeIds === 'none' && iso.format === 'markdown')) fail(`isolated defaults: ${JSON.stringify(iso)}`)
+  if (!(iso.expand && iso.scope === 'auto' && !iso.markHeadings && iso.clean && iso.nodeIds === 'none' && iso.format === 'markdown')) fail(`isolated defaults: ${JSON.stringify(iso)}`)
+  const wk = planRead({ format: 'webkitMarkdown' }, true)
+  if (!(wk.markHeadings && wk.clean)) fail(`webkitMarkdown defaults: ${JSON.stringify(wk)}`)
   const win = planRead({ format: 'textTree', nodeIds: 'allContainers' }, false)
   if (win.expand || win.scope !== 'page' || win.markHeadings || win.clean || win.nodeIds !== 'allContainers') fail(`window defaults: ${JSON.stringify(win)}`)
   let both = false
@@ -141,7 +143,8 @@ console.log('smoke ok: config + preflight')
   if (describeCollapsed({ details: 14, buttons: 1, tabGroups: 1 }) !== '14 collapsed <details> sections, 1 collapsed accordion button and 1 tab group') fail(describeCollapsed({ details: 14, buttons: 1, tabGroups: 1 }))
   // Scripts must be syntactically valid function bodies with parameters embedded as JSON.
   const AsyncFunction = (async () => {}).constructor
-  for (const [label, body] of [['expand', expandScript()], ['scope', scopeScript({ selectors: ['a"b'], scope: 'auto', isolated: true })], ['scope-section', scopeScript({ section: '#x', scope: 'page', isolated: false })], ['structure', STRUCTURE_SCRIPT], ['mark', MARK_HEADINGS_SCRIPT]]) {
+  const { domMarkdownScript } = await import('../dom-markdown.mjs')
+  for (const [label, body] of [['dom-markdown', domMarkdownScript({ maxWordsPerParagraph: 0, includeURLs: true })], ['expand', expandScript()], ['scope', scopeScript({ selectors: ['a"b'], scope: 'auto', isolated: true })], ['scope-section', scopeScript({ section: '#x', scope: 'page', isolated: false })], ['structure', STRUCTURE_SCRIPT], ['mark', MARK_HEADINGS_SCRIPT]]) {
     try { new AsyncFunction(body) } catch (error) { fail(`${label} script does not parse: ${error.message}`) }
   }
   if (!scopeScript({ selectors: ['a"b'], scope: 'auto', isolated: true }).includes('"a\\"b"')) fail('selector not JSON-embedded')

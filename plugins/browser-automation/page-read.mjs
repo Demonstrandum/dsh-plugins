@@ -14,8 +14,9 @@
  *              page's main landmark; isolated pages are edited in place, windows
  *              are hidden-and-restored (display:none on the siblings of the kept
  *              subtrees' ancestor chains)
- *   markHeadings → rewrite h1–h6 text as "## Title" so WebKit's markdown (which
- *              emits headings as plain lines) carries levels; isolated only
+ *   markHeadings → prefix h1–h6 text with "## " so WebKit's markdown (which
+ *              emits headings as plain lines) carries levels; webkitMarkdown,
+ *              isolated only — `markdown` (dom-markdown.mjs) has native headings
  *   probe    → when nothing was expanded, count what is collapsed and say so
  *   clean    → strip WebKit-markdown litter (empty images/links, blank runs)
  *
@@ -23,9 +24,12 @@
  * Parameters are embedded with JSON.stringify — never string-concatenated.
  */
 
+import { domMarkdownScript } from './dom-markdown.mjs'
 import { parseJsonText, unwrapPageContent } from './servers.mjs'
 
-export const FORMATS = ['markdown', 'plainText', 'text', 'textTree', 'html', 'json']
+/** `markdown` is the plugin's serializer (dom-markdown.mjs); `webkitMarkdown` is WebKit's own; the rest are WebKit's. */
+export const FORMATS = ['markdown', 'webkitMarkdown', 'plainText', 'text', 'textTree', 'html', 'json']
+const MARKDOWN_LIKE = new Set(['markdown', 'webkitMarkdown'])
 export const SCOPES = ['auto', 'main', 'page']
 
 /** Landmarks whose collapsed widgets are navigation chrome, not content. */
@@ -288,8 +292,8 @@ export function planRead(args, isolated) {
     selectors,
     section,
     scope: args.scope ?? (isolated ? 'auto' : 'page'),
-    markHeadings: args.markHeadings ?? (isolated && format === 'markdown'),
-    clean: args.clean ?? (format === 'markdown'),
+    markHeadings: args.markHeadings ?? (isolated && format === 'webkitMarkdown'),
+    clean: args.clean ?? MARKDOWN_LIKE.has(format),
     script: typeof args.script === 'string' && args.script.trim() !== '' ? args.script : undefined,
     skipContent: args.skipContent === true,
   }
@@ -333,19 +337,25 @@ export async function extractPage(call, request, isolated) {
     // <details> makes WebKit's markdown extraction drop the details' bodies (textTree keeps them); a tick in between fixes it.
     const mutated = request.prepare !== undefined || request.expand || scoped !== undefined
     if (mutated) await evalJs(SETTLE_SCRIPT)
-    if (request.markHeadings && isolated) {
+    if (request.markHeadings && isolated && request.format === 'webkitMarkdown') {
       await evalJs(MARK_HEADINGS_SCRIPT)
       await evalJs(SETTLE_SCRIPT)
     }
     try {
-      Object.assign(out, await unwrapPageContent(await call('get_page_content', {
-        format: request.format,
-        region: 'entire_page',
-        maxWordsPerParagraph: request.maxWordsPerParagraph,
-        includeURLs: request.includeURLs,
-        shortenURLs: false,
-        nodeIds: request.nodeIds,
-      })))
+      if (request.format === 'markdown') {
+        const envelope = await evalJs(domMarkdownScript({ maxWordsPerParagraph: request.maxWordsPerParagraph, includeURLs: request.includeURLs }))
+        if (envelope === undefined || typeof envelope !== 'object' || typeof envelope.content !== 'string') throw new Error('markdown serializer returned no content')
+        Object.assign(out, { url: envelope.url, title: envelope.title, content: envelope.content })
+      } else {
+        Object.assign(out, await unwrapPageContent(await call('get_page_content', {
+          format: request.format === 'webkitMarkdown' ? 'markdown' : request.format,
+          region: 'entire_page',
+          maxWordsPerParagraph: request.maxWordsPerParagraph,
+          includeURLs: request.includeURLs,
+          shortenURLs: false,
+          nodeIds: request.nodeIds,
+        })))
+      }
     } finally {
       if (!isolated && scoped && typeof scoped === 'object' && (scoped.hidden ?? 0) > 0) {
         try { await evalJs(RESTORE_SCRIPT) } catch { /* the page may have navigated away */ }
@@ -364,7 +374,7 @@ export async function extractPage(call, request, isolated) {
         out.content += `\n\n## Hidden tab panels (expanded)\n${panels.map(panel => `\n### ${panel.group ? `${panel.group}: ` : ''}${panel.tab}\n${panel.text}`).join('\n')}`
       }
     }
-    if (request.clean && request.format === 'markdown') out.content = cleanMarkdown(out.content)
+    if (request.clean && MARKDOWN_LIKE.has(request.format)) out.content = cleanMarkdown(out.content)
   } else {
     out.content = ''
   }

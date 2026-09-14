@@ -28,6 +28,12 @@ try {
   check('headings marked', /^## Troubleshooting$/m.test(dflt.content), (dflt.content.match(/^##? /gm) ?? []).length + ' heading lines')
   check('markdown litter cleaned', !dflt.content.includes('![]()'))
 
+  // 1b. WebKit's own markdown, with the heading marker hack.
+  t0 = Date.now()
+  const wk = await read({ format: 'webkitMarkdown' })
+  check('webkitMarkdown still available with marked headings', /^## Troubleshooting$/m.test(wk.content) && /\[mcp-remote\]\(https:[^)]*\) bridge/.test(wk.content) && !/```/.test(wk.content), `${t(t0)}; ${wk.content.length} chars`)
+  check('markdown (ours) keeps code fences and inline code', /```[\s\S]*"mcpServers"[\s\S]*```/.test(dflt.content) && dflt.content.includes('`~/.codex/config.toml`'))
+
   // 2. No expand: NOTE about collapsed content.
   t0 = Date.now()
   const flat = await read({ expand: false, scope: 'page', markHeadings: false })

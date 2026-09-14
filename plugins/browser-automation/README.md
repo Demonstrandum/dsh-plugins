@@ -86,24 +86,34 @@ small in-page scripts around the extraction; both modes share the pipeline:
 | `expand` | on | off | `details.open = true`; click `aria-expanded="false"` outside nav/header/footer (never menus/comboboxes/tabs); click through each `role=tablist`, appending the other panels under **"Hidden tab panels"**; the header reports counts |
 | probe | when not expanded | when not expanded | counts what stayed collapsed → `NOTE: 14 collapsed <details> sections and 1 tab group not expanded …` |
 | `section` / `selectors` / `scope` | `scope: auto` (main landmark when it holds ≥ 60 % of the text) | `scope: page` | isolated pages are edited in place (`body.replaceChildren`); windows hide the siblings along the kept subtrees' ancestor chains (`display:none !important`, tagged `data-dsh-scope-hidden`) and restore afterwards. `section: "#troubleshooting"` = that heading through the next heading of equal or higher level |
-| `markHeadings` | on for markdown | off | writes `## ` into each heading's first text node so the markdown carries levels (never replaces framework-owned nodes — React throws on its next render otherwise) |
+| `markHeadings` | on for `webkitMarkdown` | off | writes `## ` into each heading's first text node so WebKit's markdown carries levels (never replaces framework-owned nodes — React throws on its next render otherwise). Not needed for `markdown`, which has native headings |
 | `clean` | on for markdown | on for markdown | drops zero-width anchors, alt-less images, icon-only link lines; a `[](url)` left inline (WebKit omits link text that also appears in the URL, e.g. `mcp-remote`) gets the URL's last path segment back as text |
+
+**`format: markdown` is the plugin's own serializer in both browsers**
+(`dom-markdown.mjs`, run as an evaluate script): headings, nested lists, code
+fences with language, inline code, bold/italic, links, images with alt, pipe
+tables (data tables only — layout tables like Hacker News become block flow),
+blockquotes, shadow DOM traversal (MDN's code examples live in
+`<mdn-code-example>` shadow roots). Measured against WebKit's markdown on
+Notion docs / Wikipedia / MDN / HN it is the same speed (5–25 ms) and keeps
+everything WebKit drops (0 → 18 fences and 0 → 34 inline-code spans on the
+Notion page; 8 → 15 headings on MDN); WebKit's is still there as
+`webkitMarkdown` (with the `markHeadings` hack), and `textTree` / `json` /
+`html` / `plainText` remain WebKit's — they carry the node UIDs interaction
+needs. Visibility uses `checkVisibility()` (display, visibility, *and*
+`content-visibility`, which is how Chrome hides the children of a closed
+`<details>` while leaving them layout boxes — plain `getClientRects()` is
+fooled).
 
 **Chrome has the same surface** (`chrome_get_page_content`,
 `chrome_get_page_structure`) through `chrome-read.mjs`: chrome-devtools-mcp has
-no text extractor (its snapshot is the accessibility tree), so the extraction
-is the plugin's own in-page DOM serializer — headings, nested lists, code
-fences with language, inline code, bold/italic, links, images with alt, pipe
-tables, blockquotes — and honestly reads better than WebKit's markdown. The
+no text extractor (its snapshot is the accessibility tree), so markdown is the
+serializer above, `plainText` is `innerText`, `html` the body's innerHTML. The
 expand / scope / probe / clean steps are the very same scripts, bridged onto
-`evaluate_script` by `chromeReadCall`. Visibility uses `checkVisibility()`
-(display, visibility, *and* `content-visibility`, which is how Chrome hides the
-children of a closed `<details>` while leaving them layout boxes — plain
-`getClientRects()` is fooled). A `url` read uses a temporary page of the
-session's Chrome instance; the instance stays warm for later reads and is
+`evaluate_script` by `chromeReadCall`. A `url` read uses a temporary page of
+the session's Chrome instance; the instance stays warm for later reads and is
 closed by the session idle timer (`anythingOpen()` in windows.mjs counts a
-reader-only instance as "open"). `markHeadings` does not apply: the serializer
-emits headings itself.
+reader-only instance as "open").
 
 `safari_get_page_structure` / `chrome_get_page_structure` are the map for all of this: landmarks, every
 heading with a CSS selector (`#id` when unique, else an `nth-of-type` path),
