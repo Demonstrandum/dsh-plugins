@@ -1,0 +1,7 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# Defaults: auto-launch Dash in the background and auto-enable its API server
+# when a tool needs them. Override `config` in the profile's cordis.patch.yml
+# (a later layer replaces the whole value).
+- insert:
+    - id: tali-dash-docsets
+      name: tali-dash-docsets

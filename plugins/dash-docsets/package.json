@@ -1,0 +1,38 @@
+{
+  "name": "tali-dash-docsets",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin: native dash_list_docsets / dash_search / dash_get_page tools over the local HTTP API of Dash 8 (the macOS documentation browser), with HTML-to-Markdown page conversion (section scoping, MathML to LaTeX).",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "tools.mjs",
+    "dash.mjs",
+    "docsets.mjs",
+    "html-to-md.mjs",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "check": "node --check index.js && node scripts/check.mjs && node scripts/gen-tool-docs.mjs --check",
+    "live": "node scripts/live-test.mjs",
+    "docs": "node scripts/gen-tool-docs.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-tools": "link:/Users/USER/github/deepseek-harness/packages/core/tools",
+    "@deepseek-ai/schemastery": "link:/Users/USER/github/deepseek-harness/vendor/schemastery",
+    "linkedom": "^0.18.12",
+    "mathml-to-latex": "^1.5.0",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
+  }
+}

@@ -190,6 +190,35 @@ export class BrowserSessions {
   }
 
   /**
+   * Run `fn` on a temporary page of the session's Chrome instance — the Chrome
+   * counterpart of an isolated Safari read: never one of the chat's registered
+   * windows, closed afterwards. The instance stays warm and is closed by the
+   * session idle timer (or with the session).
+   * @template T
+   * @param {object} agent
+   * @param {string} url
+   * @param {(page: { conn: import('./servers.mjs').ServerConnection, pageId: number }) => Promise<T>} fn
+   * @returns {Promise<T>}
+   */
+  async withChromeReaderPage(agent, url, fn) {
+    const session = this.session(agent)
+    const conn = await this.chromeInstance(session)
+    const listing = textOf(await conn.callRaw('new_page', { url }))
+    const pageId = selectedPageId(listing)
+    if (pageId === undefined) throw new Error(`Chrome did not report the reader page id:\n${listing}`)
+    this.touch(agent)
+    this.options.trace({ event: 'chrome-reader-open', id: agent.id, pageId, url })
+    try {
+      return await fn({ conn, pageId })
+    } finally {
+      if (!conn.closed) {
+        try { await conn.callText('close_page', { pageId }) } catch (error) { this.options.logger.warn(`browser-automation: closing chrome reader page failed: ${String(error)}`) }
+      }
+      this.touch(agent)
+    }
+  }
+
+  /**
    * The Chrome page a tool should use.
    * @returns {Promise<{ id: string, pageId: number, conn: import('./servers.mjs').ServerConnection, opened: boolean }>}
    */
@@ -253,7 +282,7 @@ export class BrowserSessions {
     const session = this.session(agent, false)
     if (session === undefined || this.options.idleMs === 0) return
     clearTimeout(session.timer)
-    if (session.safari.size === 0 && session.chrome.pages.size === 0) return
+    if (!this.anythingOpen(session)) return
     session.timer = setTimeout(() => {
       void this.closeAll(agent, 'idle').then((closed) => {
         if (closed.length > 0) this.options.onIdleClose(agent, closed)
@@ -262,8 +291,13 @@ export class BrowserSessions {
     session.timer.unref?.()
   }
 
+  /** Windows, or a warm Chrome instance kept for reader pages, that the idle timer should eventually close. */
+  anythingOpen(session) {
+    return session.safari.size > 0 || session.chrome.pages.size > 0 || (session.chrome.conn !== undefined && !session.chrome.conn.closed)
+  }
+
   afterClose(session) {
-    if (session.safari.size === 0 && session.chrome.pages.size === 0) {
+    if (!this.anythingOpen(session)) {
       clearTimeout(session.timer)
       session.timer = undefined
     }

@@ -40,7 +40,7 @@ console.log('smoke ok: config + preflight')
   created[0]({ agent: fakeAgent('top', 0) })
   created[0]({ agent: fakeAgent('child', 1) })
   const names = [...registered.keys()].filter(k => k.startsWith('top:')).map(k => k.slice(4)).sort()
-  const expected = ['chrome_click', 'chrome_close', 'chrome_console_messages', 'chrome_evaluate_expression', 'chrome_evaluate_function', 'chrome_fill', 'chrome_fill_form', 'chrome_get_network_request', 'chrome_get_screenshot', 'chrome_handle_dialog', 'chrome_hover', 'chrome_interact', 'chrome_navigate', 'chrome_network_requests', 'chrome_open', 'chrome_press_key', 'chrome_save_screenshot', 'chrome_set_viewport_size', 'chrome_snapshot', 'chrome_type_text', 'chrome_wait_for', 'safari_click', 'safari_close', 'safari_console_messages', 'safari_evaluate_expression', 'safari_evaluate_function', 'safari_get_network_request', 'safari_get_page_content', 'safari_get_page_structure', 'safari_get_screenshot', 'safari_get_youtube_notes', 'safari_handle_dialog', 'safari_hover', 'safari_interact', 'safari_navigate', 'safari_network_requests', 'safari_open', 'safari_press_key', 'safari_save_screenshot', 'safari_set_viewport_size', 'safari_type_text', 'safari_wait_for']
+  const expected = ['chrome_click', 'chrome_close', 'chrome_console_messages', 'chrome_evaluate_expression', 'chrome_evaluate_function', 'chrome_fill', 'chrome_fill_form', 'chrome_get_network_request', 'chrome_get_page_content', 'chrome_get_page_structure', 'chrome_get_screenshot', 'chrome_handle_dialog', 'chrome_hover', 'chrome_interact', 'chrome_navigate', 'chrome_network_requests', 'chrome_open', 'chrome_press_key', 'chrome_save_screenshot', 'chrome_set_viewport_size', 'chrome_snapshot', 'chrome_type_text', 'chrome_wait_for', 'safari_click', 'safari_close', 'safari_console_messages', 'safari_evaluate_expression', 'safari_evaluate_function', 'safari_get_network_request', 'safari_get_page_content', 'safari_get_page_structure', 'safari_get_screenshot', 'safari_get_youtube_notes', 'safari_handle_dialog', 'safari_hover', 'safari_interact', 'safari_navigate', 'safari_network_requests', 'safari_open', 'safari_press_key', 'safari_save_screenshot', 'safari_set_viewport_size', 'safari_type_text', 'safari_wait_for']
   if (JSON.stringify(names) !== JSON.stringify(expected)) fail(`tool names: ${names.join(',')}`)
   if ([...registered.keys()].some(k => k.startsWith('child:'))) fail('child agent got tools with subagents=false')
   if (![...registered.keys()].some(k => k.startsWith('pre:'))) fail('pre-existing agent not attached')
@@ -150,5 +150,19 @@ console.log('smoke ok: config + preflight')
     if (!outline.includes(needle)) fail(`renderStructure missing ${JSON.stringify(needle)}:\n${outline}`)
   }
   console.log('smoke ok: page-read planning, cleanup, scripts parse, structure outline')
+
+  const { unfence, chromeExtractScript, chromeReadCall, CHROME_FORMATS } = await import('../chrome-read.mjs')
+  if (unfence('Script ran on page and returned:\n```json\n{"a":1}\n```') !== '{"a":1}' || unfence('plain') !== 'plain') fail('unfence')
+  for (const format of CHROME_FORMATS) {
+    try { new AsyncFunction(chromeExtractScript({ format, maxWordsPerParagraph: 0, includeURLs: true })) } catch (error) { fail(`chrome extract script (${format}) does not parse: ${error.message}`) }
+  }
+  const calls = []
+  const bridge = chromeReadCall(async (name, args) => { calls.push([name, args]); return 'Script ran on page and returned:\n```json\n{"url":"https://c.example/","title":"C","format":"markdown","content":"# C"}\n```' })
+  const envelope = JSON.parse(await bridge('get_page_content', { format: 'markdown', maxWordsPerParagraph: 0, includeURLs: true }))
+  if (envelope.content !== '# C' || calls[0][0] !== 'evaluate_script' || !calls[0][1].function.startsWith('async () => {')) fail(`chrome bridge: ${JSON.stringify(calls[0]).slice(0, 120)}`)
+  let unsupported = false
+  try { await bridge('get_page_content', { format: 'textTree' }) } catch { unsupported = true }
+  if (!unsupported) fail('chrome bridge accepted a Safari-only format')
+  console.log('smoke ok: chrome read bridge (unfence, serializer parses, format guard)')
 }
 console.log(existsSync(filled.safari.driver) ? 'STP driver present: run pnpm run live:windows for the live matrix' : 'STP driver absent here')

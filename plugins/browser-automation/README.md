@@ -11,14 +11,14 @@ reaches the model: no `mcp__server__tool` names, no raw server tools, no
 
 ## Tools
 
-42 tools, 21 Safari + 21 Chrome — full reference with every parameter, return value
+44 tools, 21 Safari + 23 Chrome — full reference with every parameter, return value
 and implementation note in **[`docs/tools.md`](docs/tools.md)** (generated from
 the definitions by `pnpm run docs`; `pnpm run check` fails when it is stale).
 
 | Area | Safari | Chrome |
 |---|---|---|
 | Windows | `safari_open`, `safari_close` | `chrome_open`, `chrome_close` |
-| Navigation / reading | `safari_navigate`, `safari_get_page_content` (isolated reader or window; expand / section / selectors / scope), `safari_get_page_structure` (outline with selectors), `safari_wait_for`, `safari_get_youtube_notes` | `chrome_navigate`, `chrome_snapshot`, `chrome_wait_for` |
+| Navigation / reading | `safari_navigate`, `safari_get_page_content` (isolated reader or window; expand / section / selectors / scope), `safari_get_page_structure` (outline with selectors), `safari_wait_for`, `safari_get_youtube_notes` | `chrome_navigate`, `chrome_get_page_content` (temporary page or window; same expand / section / selectors / scope; own DOM→markdown serializer), `chrome_get_page_structure`, `chrome_snapshot`, `chrome_wait_for` |
 | JavaScript | `safari_evaluate_expression`, `safari_evaluate_function` | `chrome_evaluate_expression`, `chrome_evaluate_function` |
 | Interaction | `safari_interact` (batch), `safari_click`, `safari_hover`, `safari_press_key`, `safari_type_text` | `chrome_interact` (batch, same format), `chrome_click`, `chrome_fill`, `chrome_fill_form`, `chrome_hover`, `chrome_press_key`, `chrome_type_text` |
 | Screenshots | `safari_get_screenshot` (inline, element crop), `safari_save_screenshot` | `chrome_get_screenshot`, `chrome_save_screenshot` |
@@ -89,7 +89,23 @@ small in-page scripts around the extraction; both modes share the pipeline:
 | `markHeadings` | on for markdown | off | writes `## ` into each heading's first text node so the markdown carries levels (never replaces framework-owned nodes — React throws on its next render otherwise) |
 | `clean` | on for markdown | on for markdown | drops zero-width anchors, alt-less images, icon-only link lines; a `[](url)` left inline (WebKit omits link text that also appears in the URL, e.g. `mcp-remote`) gets the URL's last path segment back as text |
 
-`safari_get_page_structure` is the map for all of this: landmarks, every
+**Chrome has the same surface** (`chrome_get_page_content`,
+`chrome_get_page_structure`) through `chrome-read.mjs`: chrome-devtools-mcp has
+no text extractor (its snapshot is the accessibility tree), so the extraction
+is the plugin's own in-page DOM serializer — headings, nested lists, code
+fences with language, inline code, bold/italic, links, images with alt, pipe
+tables, blockquotes — and honestly reads better than WebKit's markdown. The
+expand / scope / probe / clean steps are the very same scripts, bridged onto
+`evaluate_script` by `chromeReadCall`. Visibility uses `checkVisibility()`
+(display, visibility, *and* `content-visibility`, which is how Chrome hides the
+children of a closed `<details>` while leaving them layout boxes — plain
+`getClientRects()` is fooled). A `url` read uses a temporary page of the
+session's Chrome instance; the instance stays warm for later reads and is
+closed by the session idle timer (`anythingOpen()` in windows.mjs counts a
+reader-only instance as "open"). `markHeadings` does not apply: the serializer
+emits headings itself.
+
+`safari_get_page_structure` / `chrome_get_page_structure` are the map for all of this: landmarks, every
 heading with a CSS selector (`#id` when unique, else an `nth-of-type` path),
 collapsed counts and tab groups — ~1–3 kB for a long docs page.
 
@@ -163,6 +179,9 @@ live-reloaded).
 - `pnpm run live:page-read` — expand / scope / section / selectors /
   markHeadings / structure / prepare on a real docs page, isolated and window
   mode (hide-and-restore leaves the page intact).
+- `pnpm run live:chrome-read` — the same through `chrome_get_page_content` /
+  `chrome_get_page_structure` (headless): temporary page, window mode, warm
+  reader instance, zero processes after unload.
 - `pnpm run live:reader`, `live:youtube [url]`, `live:screenshot [url] [selector]`.
 
 ## Gotchas learned the hard way
@@ -173,6 +192,9 @@ live-reloaded).
   explicit `additionalProperties` on nested object schemas.
 - `ctx.tools.restrict()` masks only global tools — one more reason to own the
   forwarding rather than mount raw MCP tools and try to hide some.
+- `chrome-devtools-mcp` sets a bare process title, so `ps`/`pgrep -f` never
+  show its `--isolated` args; count *your own* children (`pgrep -lP <pid>`,
+  listed as `node`) when checking for leaks.
 - Apple's `get_page_content` spills results past ~40 kB (routine for
   `json`/`html`) to a temp file and answers `Saved large output to '<path>'`;
   `unwrapPageContent` (servers.mjs) follows it in both modes. Tool output must

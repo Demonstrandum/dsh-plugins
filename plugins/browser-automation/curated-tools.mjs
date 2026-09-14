@@ -13,6 +13,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve as resolvePath } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { CHROME_FORMATS, chromeReadCall } from './chrome-read.mjs'
 import { describeCollapsed, extractPage, FORMATS, planRead, renderStructure, SCOPES, STRUCTURE_SCRIPT } from './page-read.mjs'
 import { imageOf, parseJsonText } from './servers.mjs'
 import { cropBox, cropImage, imageSize, measureScript, parseMeasurement, readPng, rectMoved } from './safari-screenshot.mjs'
@@ -529,6 +530,69 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
     execute: forwardChrome('take_snapshot'),
   }))
 
+  /** Resolve the Chrome read target (temporary reader page vs. window) and run one read plan against it. */
+  async function readChromePage(exec, args, request) {
+    preflight('chrome')
+    const isolated = args.windowId === undefined && args.url !== undefined && args.url !== ''
+    const settle = async () => { if ((args.waitMs ?? 0) > 0) await new Promise(resolve => setTimeout(resolve, args.waitMs)) }
+    if (isolated) {
+      const result = await sessions.withChromeReaderPage(agentOf(exec), args.url, async ({ conn, pageId }) => {
+        await settle()
+        return extractPage(chromeReadCall((name, callArgs) => conn.callText(name, { ...callArgs, pageId })), request(true), true)
+      })
+      return { ...result, mode: 'isolated', browser: 'chrome' }
+    }
+    const { id, pageId, conn, opened } = await chrome(exec, args.windowId)
+    if (args.url !== undefined && args.url !== '') await conn.callText('navigate_page', { type: 'url', url: args.url, pageId })
+    await settle()
+    const result = await extractPage(chromeReadCall((name, callArgs) => conn.callText(name, { ...callArgs, pageId })), request(false), false)
+    return { ...result, mode: 'window', browser: 'chrome', windowId: id, opened }
+  }
+  /** Chrome has no WebKit extractor: headings are emitted by our own serializer, so the marker step is never needed. */
+  const chromePlan = (args, isolated) => ({ ...planRead(args, isolated), markHeadings: false })
+
+  const chromeReadTarget = {
+    url: { type: 'string', description: 'URL to read. Without windowId this uses a temporary page of this chat\'s Chrome instance (opened and closed for the read; the chat\'s windows are untouched).' },
+    windowId: { type: 'string', description: 'Read this chat\'s Chrome window (c:<session>:<window>) instead. Omit windowId AND url to read this session\'s single open window.' },
+    waitMs: { type: 'number', description: 'Extra wait after load before extracting, for lazily rendered pages (default 0).' },
+  }
+
+  tools.push(defineTool({
+    name: 'chrome_get_page_content',
+    description: `Read a web page with Chrome and return its content as ${CHROME_FORMATS.join(' | ')} (default markdown; the plugin's own DOM serializer — chrome-devtools-mcp has no text extractor; chrome_snapshot gives the accessibility tree instead). TWO MODES like safari_get_page_content: url without windowId reads in a temporary page of this chat's Chrome instance; windowId, or no url, reads that window (url, if also given, is loaded there first). Only RENDERED text is extracted: closed <details>, collapsed accordions and unselected tab panels are omitted unless expand is on (default for url reads; the header reports what was expanded or what stayed collapsed). Narrow with section (one heading's section), selectors (CSS) or scope: "main"; chrome_get_page_structure lists headings/selectors. prepare runs BEFORE extraction, script AFTER (its value is scriptResult).`,
+    parameters: {
+      ...chromeReadTarget,
+      format: { type: 'string', enum: CHROME_FORMATS, description: 'markdown (default; headings, lists, code fences, links, tables), plainText (innerText), html (rendered body innerHTML).' },
+      expand: { type: 'boolean', description: 'Before extracting: open every <details>, click aria-expanded="false" accordions (outside nav/header/footer, never menus), click through each tab group and append the other panels\' text under "Hidden tab panels". Default true for url reads, false for windows.' },
+      section: { type: 'string', description: 'CSS selector of ONE heading (e.g. "#troubleshooting"); returns that heading through the next heading of the same or a higher level. Get selectors from chrome_get_page_structure.' },
+      selectors: { type: 'array', items: { type: 'string' }, description: 'CSS selectors; only the matching subtrees are extracted. Temporary pages are edited in place, windows are hidden-and-restored. Not combinable with section.' },
+      scope: { type: 'string', enum: SCOPES, description: '"main": only the main landmark; "page": everything; "auto" (url-read default): main when it holds >= 60% of the text. Window default: page. Ignored when section/selectors are given.' },
+      clean: { type: 'boolean', description: 'Strip empty images/links and blank runs from markdown (default true for markdown).' },
+      maxWordsPerParagraph: { type: 'number', description: 'Truncate every paragraph beyond this many words (default 2000 = effectively none).' },
+      includeURLs: { type: 'boolean', description: 'Include link/image URLs (default true).' },
+      prepare: { type: 'string', description: 'JS function body run in the page BEFORE expand/scope/extraction; `return` a value to get it back as prepareResult.' },
+      script: { type: 'string', description: 'JS function body run in the page AFTER extraction; `return` a value to get it back as scriptResult.' },
+    },
+    output: objectOutput(renderRead),
+    async execute(args, exec) {
+      const result = await readChromePage(exec, args, isolated => chromePlan(args, isolated))
+      return clamp(result, limits.maxChars)
+    },
+  }))
+
+  tools.push(defineTool({
+    name: 'chrome_get_page_structure',
+    description: 'Outline of a web page in Chrome without its text: title, text size, main-content landmark, all landmarks and every heading with its level and a CSS selector, plus what is collapsed (closed <details>, aria-expanded="false" buttons, tab groups). ~1–3 kB. Use it to pick a section or selectors for chrome_get_page_content. Same two modes as chrome_get_page_content (url → temporary page; windowId → this chat\'s window).',
+    parameters: chromeReadTarget,
+    output: objectOutput(renderStructure),
+    async execute(args, exec) {
+      const result = await readChromePage(exec, args, () => ({ ...chromePlan({ format: 'plainText', expand: false, scope: 'page', clean: false }, true), skipContent: true, script: STRUCTURE_SCRIPT }))
+      const { scriptResult, content: _c, notes: _n, ...rest } = result
+      if (scriptResult === undefined || typeof scriptResult !== 'object') throw new Error('page structure script returned no data')
+      return { ...rest, structure: scriptResult }
+    },
+  }))
+
   const chromeShotParams = {
     windowId: WINDOW_ID('chrome'),
     uid: { type: 'string', description: 'Element uid from chrome_snapshot to capture just that element.' },
@@ -860,7 +924,7 @@ function renderRead(value) {
         : 'Expanded: nothing was collapsed')
     : undefined
   const head = [
-    value.mode === 'window' ? `[${value.windowId}]${value.opened ? ' (opened)' : ''}` : '[isolated reader]',
+    value.mode === 'window' ? `[${value.windowId}]${value.opened ? ' (opened)' : ''}` : value.browser === 'chrome' ? '[temporary Chrome page]' : '[isolated reader]',
     value.title !== undefined ? `Title: ${value.title}` : undefined,
     `URL: ${value.url ?? ''}`,
     `Format: ${value.format}${value.scope !== undefined ? `; scope: ${value.scope.scope}${value.scope.reason ? ` (${value.scope.reason})` : ''}` : ''}`,

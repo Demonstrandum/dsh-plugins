@@ -390,7 +390,7 @@ export function describeCollapsed(counts) {
 export function renderStructure(value) {
   const s = value.structure
   const lines = [
-    value.mode === 'window' ? `[${value.windowId}]${value.opened ? ' (opened)' : ''}` : '[isolated reader]',
+    value.mode === 'window' ? `[${value.windowId}]${value.opened ? ' (opened)' : ''}` : value.browser === 'chrome' ? '[temporary Chrome page]' : '[isolated reader]',
     `Title: ${s.title}`,
     `URL: ${s.url}`,
     `Text: ${s.chars.toLocaleString('en-US')} chars${s.main ? `; main content: ${s.main.selector} (${s.main.chars.toLocaleString('en-US')} chars, ${s.chars > 0 ? Math.round(s.main.chars / s.chars * 100) : 0}%)` : '; no main landmark'}`,
@@ -413,6 +413,7 @@ export function renderStructure(value) {
   if (c.buttons > 0) collapsedBits.push(`${c.buttons} aria-expanded="false" buttons`)
   lines.push('', `Collapsed content: ${collapsedBits.length > 0 ? collapsedBits.join('; ') : 'none detected'}`)
   for (const t of c.tablists) lines.push(`  tab group${t.label ? ` "${t.label}"` : ''} → ${t.selector}: ${t.tabs.map((tab, i) => i === t.selected ? `[${tab}]` : tab).join(' | ')}`)
-  lines.push('', 'Next: safari_get_page_content with section: "<heading selector>" for one section, selectors: [...] for specific subtrees, expand: true to include collapsed text.')
+  const tool = value.browser === 'chrome' ? 'chrome_get_page_content' : 'safari_get_page_content'
+  lines.push('', `Next: ${tool} with section: "<heading selector>" for one section, selectors: [...] for specific subtrees, expand: true to include collapsed text.`)
   return lines.join('\n')
 }

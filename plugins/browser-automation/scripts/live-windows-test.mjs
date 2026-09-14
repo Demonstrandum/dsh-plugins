@@ -67,7 +67,9 @@ step('chrome_close c:0:0', await run('chrome_close', { windowId: 'c:0:0' }))
 const nav = await run('chrome_navigate', { url: 'https://example.net' }); step('chrome_navigate (single window default)', nav.split('\n')[0])
 step('chrome_close all', await run('chrome_close'))
 console.log('stats after closes:', JSON.stringify(deps()))
-function deps() { return { chromeProcs: Number(execSync(`ps -axo args= | grep -c '[c]hrome-devtools-mcp --isolated' || true`).toString().trim()), safariDrivers: Number(execSync(`ps -axo args= | grep -c '[s]afaridriver --mcp' || true`).toString().trim()) } }
+function childCount(pattern) { try { return execSync(`pgrep -lP ${process.pid}`).toString().split('\n').filter(line => pattern.test(line)).length } catch { return 0 } }
+// chrome-devtools-mcp sets a bare process title (no args in ps): count our own children instead of grepping args.
+function deps() { return { chromeProcs: childCount(/\b(node|chrome-devtools-mcp)\b/), safariDrivers: Number(execSync(`ps -axo args= | grep -c '[s]afaridriver --mcp' || true`).toString().trim()) } }
 await unload()
 await new Promise(r => setTimeout(r, 2500))
 console.log('after unload: STP running =', stp(), '| procs', JSON.stringify(deps()))
