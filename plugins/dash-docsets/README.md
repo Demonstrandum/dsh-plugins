@@ -60,9 +60,18 @@ page-server prefix (`/Dash/<code>/`), which Dash reveals only inside search
 results, so one throwaway search learns it; candidates are then GET-verified
 because many docsets keep their documents inside `tarix.tgz`. Man Pages'
 bundled index is empty (Dash indexes man pages live in `Data/manIndex.dsidx`).
-The result gives the model the true `types` vocabulary per docset and an entry
-point for browsing ("what does this docset cover?"), which name search cannot
-answer.
+`files:` reports the conventional `Contents/Resources/Documents/` folder when
+it exists on disk (nLab, tokio, most generated docsets — `grep`/`read` work
+directly on it); feed docsets (PyTorch, NumPy, HTML) are `packed` (`tarix.tgz`)
+and reachable only through Dash's server. The result gives the model the true
+`types` vocabulary per docset and an entry point for browsing ("what does this
+docset cover?"), which name search cannot answer.
+
+Why the probe search stays: Dash's prefs do record the page-server code
+(`"DHWebServerFullPath - <docset>/Contents/Resources/Documents/" = yhhfldsx`,
+stable across launches), but only for docsets Dash has already served (15 of
+51 here), and the page-server **port** is stored nowhere — it appears only in
+search-result URLs.
 
 ## Page conversion (`html-to-md.mjs`)
 

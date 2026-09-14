@@ -9,6 +9,9 @@
  *   entry counts per type. Two schemas exist: Dash's `searchIndex(name, type,
  *   path)` and Apple's Core Data one (`ZTOKEN` joined to `ZTOKENTYPE`, e.g. the
  *   HTML/MDN docset).
+ * - On-disk pages: the conventional `Contents/Resources/Documents/` folder is
+ *   reported when it exists (nLab, tokio, most user-generated docsets); feed
+ *   docsets (PyTorch, NumPy, HTML) ship packed as `tarix.tgz` and have none.
  * - Landing-page URL: Dash serves pages under `http://127.0.0.1:<port>/Dash/
  *   <code>/…` where `<code>` is only revealed inside search results, so one
  *   throwaway search learns the prefix; candidates (`dashIndexFilePath`,
@@ -17,6 +20,7 @@
  */
 
 import { execFile } from 'node:child_process'
+import { stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -63,6 +67,13 @@ export async function pagePrefix(dash, identifier, signal) {
   return null
 }
 
+async function isDir(path) {
+  try { return (await stat(path)).isDirectory() } catch { return false }
+}
+async function isFile(path) {
+  try { return (await stat(path)).isFile() } catch { return false }
+}
+
 async function exists(url, signal) {
   try {
     const response = await fetch(url, { signal: AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(5000)]) })
@@ -92,9 +103,18 @@ export async function docsetDetails(row, { dash, signal }) {
       if (await exists(url, signal)) { indexUrl = url; break }
     }
   }
+  const documentsDir = join(docsetPath, 'Contents', 'Resources', 'Documents')
+  const documentsPath = docsetPath !== '' && await isDir(documentsDir) ? documentsDir : null
+  const indexFile = documentsPath && typeof plist.dashIndexFilePath === 'string' && await isFile(join(documentsPath, plist.dashIndexFilePath))
+    ? join(documentsPath, plist.dashIndexFilePath)
+    : null
+  const packed = documentsPath === null && await isFile(join(docsetPath, 'Contents', 'Resources', 'tarix.tgz'))
   const version = String(row.name ?? '').slice(row.displayName.length).trim() || null
   return {
     version,
+    documentsPath,
+    indexFile,
+    packed,
     entries: types ? types.reduce((sum, t) => sum + t.count, 0) : null,
     types,
     indexUrl,

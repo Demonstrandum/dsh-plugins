@@ -256,6 +256,8 @@ function renderDocsets(value) {
       lines.push(d.types ? '  entries: none in the docset index (Dash indexes this docset elsewhere)' : '  entries: docset index not readable')
     }
     if (d.indexUrl) lines.push(`  index page: ${d.indexUrl}`)
+    if (d.documentsPath) lines.push(`  files: ${d.documentsPath}${d.indexFile ? ` (index: ${d.indexFile.slice(d.documentsPath.length + 1)})` : ''}`)
+    else if (d.packed) lines.push('  files: packed (tarix.tgz) — pages exist only through Dash\'s server')
     if (d.site) lines.push(`  site: ${d.site}`)
     return lines.join('\n')
   })

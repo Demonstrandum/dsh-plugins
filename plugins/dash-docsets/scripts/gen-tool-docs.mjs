@@ -16,7 +16,7 @@ const NOTES = {
 }
 
 const RETURNS = {
-  dash_list_docsets: '`{ total, filter, details, docsets[{ key, name, platform, identifier, fullTextSearch, version?, entries?, types?[{type,count}], indexUrl?, site?, family?, path? }] }` rendered as `key  name` lines, or per-docset blocks with `details`',
+  dash_list_docsets: '`{ total, filter, details, docsets[{ key, name, platform, identifier, fullTextSearch, version?, entries?, types?[{type,count}], indexUrl?, documentsPath?, indexFile?, packed?, site?, family?, path? }] }` rendered as `key  name` lines, or per-docset blocks with `details`',
   dash_search: '`{ query, docsets[], allDocsets, types, maxResults, matched, truncated, message, warnings[], results[{ docset, name, type, alsoTypes[], description, url, platform, language, tags }] }` rendered as numbered `docset · type · name — parent` lines each followed by the url',
   dash_get_page: '`{ url, title, format, scope{ kind: anchor|section|page|outline, target, label?, chars }, pageChars, notes[], outline?, content, truncated?, totalChars?, fullTextPath? }` rendered with a Title/URL/Scope header (plus NOTEs) and the content',
 }

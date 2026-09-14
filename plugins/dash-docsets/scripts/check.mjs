@@ -154,7 +154,7 @@ const ok = (cond, message) => { assert.ok(cond, message); checks++ }
   fakeDash.listDocsets = async () => [{ name: 'Ghost 1.2', identifier: 'ghostxyz', platform: 'ghost', path: '/nonexistent/Ghost.docset', full_text_search: 'disabled' }]
   const detailed = await run('dash_list_docsets', { filter: 'ghost', details: true })
   const ghost = detailed.value.docsets[0]
-  ok(ghost.version === '1.2' && ghost.types === null && ghost.entries === null && ghost.indexUrl === null && ghost.site === null && ghost.path === '/nonexistent/Ghost.docset', 'details fields are null-safe when the bundle is missing')
+  ok(ghost.version === '1.2' && ghost.types === null && ghost.entries === null && ghost.indexUrl === null && ghost.site === null && ghost.path === '/nonexistent/Ghost.docset' && ghost.documentsPath === null && ghost.indexFile === null && ghost.packed === false, 'details fields are null-safe when the bundle is missing')
   ok(/^ghost {2}Ghost 1\.2 {2}\(full-text search: disabled\)\n {2}entries: docset index not readable$/m.test(detailed.text), 'details rendering')
   fakeDash.listDocsets = async () => docsetsJson
   await run('dash_list_docsets', {}) // refill the cache with the real fixture list for the tests below
