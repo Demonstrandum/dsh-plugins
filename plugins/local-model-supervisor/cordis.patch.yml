@@ -1,0 +1,19 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# Default: the AFM server backing the `apple` provider (Apple Foundation
+# on-device) on port 9997 — matching ~/.dsh/settings.yaml's apple baseURL.
+# Override `config` in the profile's cordis.patch.yml (a later layer replaces
+# the whole value). Recipe:
+# ~/projects/deepseek-harness/apple-foundation-model-provider.md
+- insert:
+    - id: tali-local-model-supervisor
+      name: tali-local-model-supervisor
+      config:
+        servers:
+          - id: afm
+            providers: [apple]
+            command: afm
+            args: ['--port', '9997']
+            healthUrl: http://127.0.0.1:9997/v1/models
+            idleMinutes: 15
+            startupTimeoutMs: 90000
+            logFile: /tmp/local-model-supervisor-afm.log

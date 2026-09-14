@@ -1,0 +1,16 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# Default rules bind tiny local models to tiny compositions; override `config`
+# in the profile's cordis.patch.yml (a later layer replaces the whole value).
+# The `minimal-no-tools` preset is a user preset under
+# `~/.dsh/.agent-presets/minimal-no-tools` — see the plugin README.
+- insert:
+    - id: tali-enforce-model-preset
+      name: tali-enforce-model-preset
+      config:
+        rules:
+          - provider: apple
+            preset: minimal-no-tools
+          - provider: lmstudio
+            preset: minimal
+          - provider: '*'
+            preset: standard

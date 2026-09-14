@@ -1,0 +1,24 @@
+{
+  "name": "tali-local-model-supervisor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin: host local model servers (AFM, llama.cpp, ...) from dsh itself — start on first use, reuse, adopt external instances, shut down when idle and unused.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "check": "node --check index.js"
+  }
+}

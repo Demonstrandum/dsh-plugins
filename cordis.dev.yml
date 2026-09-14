@@ -1,9 +1,24 @@
-# Dev overlay: load every plugin in this repo into a dsh boot by absolute path.
-#   cd ~/github/deepseek-harness && pnpm dsh web --patch /Users/USER/github/tali-dash-plugins/cordis.dev.yml
+# Dev-instance additions, applied ON TOP OF the live web profile.
+#
+# The preview server runs with `pnpm dsh web --patch <this file> --port 3081`
+# against the LIVE home (~/.dsh), so its composition is: profile bundles +
+# ~/.dsh/profiles/web/cordis.patch.yml + this overlay. A plugin already
+# installed in the live profile must therefore NOT be repeated here — a second
+# row with the same id fails the boot with "duplicate loader entry id", and a
+# renamed id would load the plugin twice (double tools, double servers).
+#
+# Live profile owns: enforce-model-preset, browser-automation,
+# local-model-supervisor, reverse-proxy. This overlay only adds what is NOT
+# there: agent-status-indicator and the preview-only red identity.
+#
+# For a fully ISOLATED throwaway-home preview (see PREVIEWING.md) this file is
+# intentionally incomplete — copy the live-profile rows here for that flow.
 # Paths MUST be absolute (a patch contributes config; it does not move the
 # loader's module-resolution root). Machine-specific by design.
 - insert:
     - id: tali-agent-status-indicator
       name: '/Users/USER/github/tali-dash-plugins/plugins/agent-status-indicator/index.js'
-    - id: tali-browser-automation
-      name: '/Users/USER/github/tali-dash-plugins/plugins/browser-automation/index.js'
+    # Preview-only identity: red whale + "DSH-dev" so a Dock-installed preview
+    # instance is never confused with the live server. Dev overlay ONLY.
+    - id: tali-preview-identity
+      name: '/Users/USER/github/tali-dash-plugins/plugins/preview-identity/index.js'

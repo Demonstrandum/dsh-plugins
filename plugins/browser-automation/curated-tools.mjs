@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve as resolvePath } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { FORMATS } from './reader-pool.mjs'
-import { imageOf, parseJsonText } from './servers.mjs'
+import { imageOf, parseJsonText, unwrapPageContent } from './servers.mjs'
 import { cropBox, cropImage, imageSize, measureScript, parseMeasurement, readPng, rectMoved } from './safari-screenshot.mjs'
 import { canonicalWatchUrl, EXTRACT_SCRIPT, renderNotes, shapeNotes } from './youtube-notes.mjs'
 
@@ -124,15 +124,14 @@ export function createTools(deps, fallbackAgent) {
       const { id, conn, opened } = await safari(exec, args.windowId)
       if (args.url !== undefined && args.url !== '') await conn.callText('navigate_to_url', { url: args.url })
       if ((args.waitMs ?? 0) > 0) await new Promise(resolve => setTimeout(resolve, args.waitMs))
-      const raw = parseJsonText(await conn.callText('get_page_content', {
+      // Large results (> ~40 kB, routine for json/html) arrive as a "Saved large output to '<path>'" pointer;
+      // unwrapPageContent follows it, same as the isolated reader.
+      const result = await unwrapPageContent(await conn.callText('get_page_content', {
         format, region: 'entire_page', maxWordsPerParagraph: maxWords, includeURLs: args.includeURLs ?? true, shortenURLs: false, nodeIds: args.nodeIds ?? 'interactive',
       }))
-      const result = typeof raw === 'object' && raw !== null && typeof raw.content === 'string'
-        ? { url: raw.url, title: raw.title, content: raw.content }
-        : { url: undefined, title: undefined, content: String(raw) }
       let scriptResult
       if (args.script !== undefined && args.script.trim() !== '') scriptResult = parseJsonText(await conn.callText('evaluate_javascript', { expression: args.script }))
-      return clamp({ ...result, format, mode: 'window', windowId: id, opened, ...(args.script !== undefined ? { scriptResult } : {}) }, limits.maxChars)
+      return clamp({ ...result, format, mode: 'window', windowId: id, opened, ...(scriptResult !== undefined ? { scriptResult } : {}) }, limits.maxChars)
     },
   }))
 

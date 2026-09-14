@@ -107,5 +107,24 @@ console.log('smoke ok: config + preflight')
   if (parseMeasurement(JSON.stringify(JSON.stringify({ rect: { x: 1, y: 2, width: 3, height: 4 } }))).rect.width !== 3) fail('double-encoded measurement')
   if (!measureScript('h1 > a', true).includes('"h1 > a"')) fail('measureScript embedding')
   console.log('smoke ok: youtube + screenshot helpers')
+
+  // get_page_content decoding: inline envelope, "Saved large output" pointer, bare text — never an undefined field.
+  const { unwrapPageContent } = await import('../servers.mjs')
+  const { writeFile, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const spill = join(tmpdir(), `dsh-smoke-spill-${process.pid}.json`)
+  await writeFile(spill, JSON.stringify({ content: { type: 'root', children: [] }, url: 'https://x.example/', title: 'X', format: 'json' }))
+  try {
+    const inline = await unwrapPageContent(JSON.stringify({ title: 'T', url: 'https://t.example/', content: 'body', format: 'markdown' }))
+    if (inline.title !== 'T' || inline.content !== 'body') fail(`inline envelope: ${JSON.stringify(inline)}`)
+    const spilled = await unwrapPageContent(`Saved large output to '${spill}' (42.9 kB). Use the Read tool to view its contents.`)
+    if (spilled.title !== 'X' || spilled.content !== '{"type":"root","children":[]}') fail(`spilled envelope: ${JSON.stringify(spilled)}`)
+    const bare = await unwrapPageContent('just text')
+    if (bare.content !== 'just text' || 'url' in bare || 'title' in bare) fail(`bare text: ${JSON.stringify(bare)}`)
+    const noTitle = await unwrapPageContent(JSON.stringify({ url: 'https://u.example/', content: 'c' }))
+    if ('title' in noTitle) fail('undefined title leaked into output')
+  } finally { await rm(spill, { force: true }) }
+  console.log('smoke ok: page-content unwrapping (inline, spilled-to-file, bare)')
 }
 console.log(existsSync(filled.safari.driver) ? 'STP driver present: run pnpm run live:windows for the live matrix' : 'STP driver absent here')

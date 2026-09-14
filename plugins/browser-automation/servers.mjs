@@ -12,6 +12,7 @@
  */
 
 import { execFile, execFileSync } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
@@ -138,6 +139,36 @@ export function imageOf(result) {
   const block = (result.content ?? []).find(candidate => candidate.type === 'image' && typeof candidate.data === 'string')
   if (block === undefined) return undefined
   return { data: new Uint8Array(Buffer.from(block.data, 'base64')), mediaType: block.mimeType ?? 'image/png' }
+}
+
+/**
+ * Decode a get_page_content result into `{ url?, title?, content }`.
+ *
+ * Apple's server answers either with an inline JSON envelope `{title,url,content,format}` or, past roughly
+ * 40 kB, with the pointer "Saved large output to '<path>' (…)" whose file holds the same envelope. `content`
+ * is text for every format (json/html included). Never emit `undefined` fields: DSH requires lossless JSON.
+ * @param {string} raw
+ * @returns {Promise<{ url?: string, title?: string, content: string }>}
+ */
+export async function unwrapPageContent(raw) {
+  let text = raw
+  const saved = /(?:saved|written)[^'\n]*'([^']+)'/i.exec(raw) ?? /\/[^\s'"]+\.(?:md|txt|json|html)\b/.exec(raw)
+  if (!raw.trimStart().startsWith('{') && saved) {
+    text = await readFile(saved[1] ?? saved[0], 'utf8')
+  }
+  try {
+    const parsed = JSON.parse(text)
+    if (parsed && typeof parsed === 'object' && 'content' in parsed) {
+      return {
+        ...(typeof parsed.url === 'string' ? { url: parsed.url } : {}),
+        ...(typeof parsed.title === 'string' ? { title: parsed.title } : {}),
+        content: typeof parsed.content === 'string' ? parsed.content : JSON.stringify(parsed.content),
+      }
+    }
+  } catch {
+    // Not JSON: the extraction is the whole text.
+  }
+  return { content: text }
 }
 
 /** Decode Apple's JSON text results (sometimes double-encoded). */

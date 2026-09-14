@@ -17,8 +17,7 @@
  * goes to a temp file" behavior).
  */
 
-import { readFile } from 'node:fs/promises'
-import { connectServer } from './servers.mjs'
+import { connectServer, unwrapPageContent } from './servers.mjs'
 
 export const FORMATS = ['markdown', 'plainText', 'text', 'textTree', 'html', 'json']
 
@@ -137,8 +136,8 @@ export function createReaderPool(options) {
       }
       if (request.waitMs > 0) await new Promise(resolve => setTimeout(resolve, request.waitMs))
       const unwrapped = request.skipContent
-        ? { url: request.url, title: undefined, content: '' }
-        : await unwrap(await call(reader, 'get_page_content', {
+        ? { url: request.url, content: '' }
+        : await unwrapPageContent(await call(reader, 'get_page_content', {
           format: request.format,
           region: 'entire_page',
           maxWordsPerParagraph: request.maxWordsPerParagraph,
@@ -153,7 +152,7 @@ export function createReaderPool(options) {
         try { scriptResult = JSON.parse(text) } catch { scriptResult = text }
       }
       trace({ event: 'read', reader: reader.id, url: request.url, format: request.format, chars: unwrapped.content.length, script: request.script !== undefined })
-      return { format: request.format, ...unwrapped, ...(request.script !== undefined ? { scriptResult } : {}) }
+      return { format: request.format, ...unwrapped, ...(scriptResult !== undefined ? { scriptResult } : {}) }
     } finally {
       // Release the page. Default: close the tab (its window goes with it; the
       // driver session and STP stay warm, the next read opens a fresh tab).
@@ -174,24 +173,6 @@ export function createReaderPool(options) {
       }
       await release(reader)
     }
-  }
-
-  /** Decode the server's result: inline JSON, or a "saved to <path>" pointer for large output. */
-  async function unwrap(raw) {
-    let text = raw
-    const saved = /(?:saved|written)[^'\n]*'([^']+)'/i.exec(raw) ?? /\/[^\s'"]+\.(?:md|txt|json|html)\b/.exec(raw)
-    if (!raw.trimStart().startsWith('{') && saved) {
-      text = await readFile(saved[1] ?? saved[0], 'utf8')
-    }
-    try {
-      const parsed = JSON.parse(text)
-      if (parsed && typeof parsed === 'object' && typeof parsed.content === 'string') {
-        return { url: parsed.url, title: parsed.title, content: parsed.content }
-      }
-    } catch {
-      // Not JSON: the extraction is the whole text.
-    }
-    return { url: undefined, title: undefined, content: text }
   }
 
   async function dispose() {
