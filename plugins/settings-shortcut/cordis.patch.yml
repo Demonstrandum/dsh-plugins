@@ -1,0 +1,5 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# No config: the chord is fixed (⌘. on macOS, Ctrl+. elsewhere).
+- insert:
+    - id: tali-settings-shortcut
+      name: tali-settings-shortcut

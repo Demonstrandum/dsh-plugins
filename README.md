@@ -33,3 +33,7 @@ pnpm dsh web --patch /Users/USER/github/tali-dash-plugins/cordis.dev.yml
   symbol search across installed docsets, pages (or just the anchored section)
   as Markdown with MathML → LaTeX; launches Dash hidden and enables its API
   server on demand. Host-only, no MCP. See its README.
+- `settings-shortcut` — ⌘. (Ctrl+. off macOS) toggles the web GUI's Settings
+  panel in Chrome, Safari and the Dock-installed Safari web app. Browser-only.
+  ⌘, is impossible in Safari (the app consumes it before the page sees it);
+  its README records the real-keystroke verification.
