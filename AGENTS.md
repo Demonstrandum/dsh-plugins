@@ -366,6 +366,15 @@ can reproduce or maintain it:
   packed-chunk-row traps).
 - `preview-identity.md` — red icon + "DSH-dev" label for the preview server,
   and the dev-overlay/live-profile collision rule.
+- `rebase-fork-on-upstream.md` — trialing a rebase of the `feat/embed-session`
+  fork onto `upstream/master` in a separate worktree: the six conflicts and
+  their resolutions (selection moved out of the Session Controller into
+  ui-workspace, nested-group `renderGroup`, the transport `streamBaseUrl`
+  override), the two fix-ups the new upstream gates demand (client-typecheck
+  of test doubles, `gen-cordis-catalog` type/event classification), the
+  throwaway-home + prefix-stripping-proxy verification of every fork feature,
+  the plugin breakages it exposed (turnTail chain→list, `requestBody` on
+  Fetch routes), and how to promote the trial branch.
 - `session-introspect-plugin.md` — model-facing `transcript_*` tools for
   reading *other* agents' transcripts (`session-introspect` plugin: find by
   `workspace/title`, per-turn outline, timeline render, per-tool error/latency
