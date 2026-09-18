@@ -80,6 +80,9 @@ export function apply(ctx, config) {
   route({
     path: CONFIG_PATH,
     methods: ['GET', 'HEAD'],
+    // Required by the node:http bridge: a route without it is treated as
+    // streaming, and a streaming GET Request throws → the webserver answers 400.
+    requestBody: 'buffered',
     fetch: async (request) => {
       const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' }
       if (request.method === 'HEAD') return new Response(null, { status: 200, headers })
@@ -90,6 +93,7 @@ export function apply(ctx, config) {
   route({
     path: OPEN_PATH,
     methods: ['GET', 'HEAD'],
+    requestBody: 'buffered',
     fetch: async (request) => {
       if (request.headers.get(REQUEST_HEADER) !== '1') return new Response('missing request header', { status: 403 })
       const raw = new URL(request.url).searchParams.get('url') ?? ''
