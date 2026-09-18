@@ -118,6 +118,16 @@ pristine `upstream/master`** (checked in a second worktree: `git worktree add
   `/favicon.svg` from `preview-identity`'s own manifest (`icons.src: '/favicon.svg'`).
 - Plugins page lists all 11 installed plugins; dev-overlay `preview-identity`
   serves its favicon/manifest/title tap.
+- **`dsh-tailscale-remote`'s directory-picker pin** (its `cordis.patch.yml`
+  disables `directory-picker` and inserts `directory-picker-browse` +
+  `ui-directory-picker-browse`, committed `1151d9d`): applied as a throwaway
+  overlay (`/tmp/picker-pin.overlay.yml`, the same rows without the tailscale
+  row — the real bundle would bind the live :3083/:3084 and drive `tailscale
+  serve`). `--dump-config` shows the `-auto` row disabled and the browse pair
+  inserted; the boot serves only `ui-directory-picker-browse`; **Add workspace**
+  opens the in-app "Select Workspace Directory" dialog. Upstream's own
+  `apps/web/tests/pin-browse-picker.overlay.yml` is the identical pair, and the
+  package names are unchanged since the fork's base, so no fork change is needed.
 
 ## Plugin breakages the new upstream exposed (fixed in this repo)
 
