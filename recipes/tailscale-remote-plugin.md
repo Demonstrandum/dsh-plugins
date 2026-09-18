@@ -265,6 +265,7 @@ DSH branch pushed: `taliesinb/deepseek-harness` → `fix/tailscale-mounting`.
 | Panel says "controlled from the DSH host only" on the laptop | you opened the laptop GUI through the tailnet URL — use `http://127.0.0.1:<port>/` |
 | Settings changes from the phone do not persist | `isLoopback` false remotely (see "Not done" above) |
 | Manifest 401 in console | fixed by the public passthrough; if it reappears the path changed |
+| **Add workspace** opens a native macOS folder dialog (invisible from the phone / to browser automation) | Stock `directory-picker` is the `-auto` chooser → native on a loopback bind + darwin. `dsh-full-remote` had pinned the in-app browser; removing it (2026-09-16) exposed the native default. Since 2026-09-18 this bundle's `cordis.patch.yml` disables `directory-picker` and inserts the `directory-picker-browse` + `ui-directory-picker-browse` pair (bundle layers are read at profile start — restart DSH; the profile-patch hot reload does *not* re-read bundle patches, verified). Native back: see the README's "Directory picker" section. |
 
 ## Sibling plugins with root-relative `/api` URLs
 

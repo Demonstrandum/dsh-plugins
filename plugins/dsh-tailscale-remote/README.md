@@ -124,6 +124,32 @@ itself; on boot the plugin restarts the proxy when `enabled` and republishes
 the route if `serve status` no longer shows it. Unloading the plugin closes
 the listener but leaves the route (it comes back with the next boot).
 
+### Directory picker pinned to the in-app browser
+
+The bundle patch also disables the web-app's `directory-picker` row (the
+`-auto` chooser) and inserts `directory-picker-browse` +
+`ui-directory-picker-browse`. Stock DSH on a loopback bind with a local display
+resolves `-auto` to the **native OS folder dialog**, which opens on the host's
+screen — a phone or laptop on the tailnet (and any browser automation) cannot
+see or drive it, so "Add workspace" would silently hang remotely. The in-app
+browser works from every client. Bundle layers are read at profile start, so
+this needs a DSH restart after installing the plugin (`launchctl kickstart -k
+gui/$UID/io.github.taliesinb.dsh-web-relay`). To get the native chooser back
+anyway, override in the profile's `cordis.patch.yml` (later layer wins per row):
+
+```yaml
+- id: directory-picker
+  disabled: false
+- id: directory-picker-browse
+  disabled: true
+- id: ui-directory-picker-browse
+  disabled: true
+```
+
+Do not *also* insert those two ids from another layer — duplicate ids fail the
+boot. (`dsh-full-remote` carried the same pin; it disappeared with that plugin's
+removal on 2026-09-16, which is when the native dialog first appeared.)
+
 ## Control channel
 
 `POST /tailscale-remote/<endpoint>`, a `webServer` prefix route gated by

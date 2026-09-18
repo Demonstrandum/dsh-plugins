@@ -7,3 +7,28 @@
 - insert:
     - id: tali-tailscale-remote
       name: dsh-tailscale-remote
+
+# Remote-safe "Add workspace": pin DSH's in-app directory browser. The web-app
+# bundle's `directory-picker` row is the -auto chooser, which on a loopback
+# bind with a local display resolves to the NATIVE OS folder dialog — it opens
+# on the host's screen, where a phone or laptop on the tailnet (and browser
+# automation) can never see or drive it. Bundle layers apply in manifest order
+# and dsh-web-app precedes this bundle, so the row exists when this disables
+# it. Same shape as upstream's apps/web/tests/pin-browse-picker.overlay.yml.
+# Host rows: takes effect at the next DSH start.
+#
+# To get the native chooser back, override in the profile's cordis.patch.yml:
+#   - id: directory-picker
+#     disabled: false
+#   - id: directory-picker-browse
+#     disabled: true
+#   - id: ui-directory-picker-browse
+#     disabled: true
+# Do not ALSO insert these two ids from another layer (duplicate ids fail boot).
+- id: directory-picker
+  disabled: true
+- insert:
+    - id: directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+    - id: ui-directory-picker-browse
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
