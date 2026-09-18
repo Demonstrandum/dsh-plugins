@@ -344,15 +344,14 @@ sed -i '' "s#/Users/USER/github/tali-dash-plugins#$PWD#g" cordis.dev.yml
 ```
 
 Install **every** plugin, then build the ones with a client bundle. The
-build-only plugins (`session-title-slug`, `settings-shortcut`,
-`agent-status-indicator`) have no runtime deps but need their devDependencies
+build-only plugins (`session-title-slug`, `settings-shortcut`) have no runtime deps but need their devDependencies
 (esbuild, typescript) — `pnpm build` fails with "node_modules missing" until
 they are installed too:
 
 ```sh
-for p in plugins/*/; do (cd "$p" && pnpm install); done          # 14 plugins; the three plain-ESM ones are no-ops
+for p in plugins/*/; do (cd "$p" && pnpm install); done          # 13 plugins; the three plain-ESM ones are no-ops
 for p in dsh-tailscale-remote dsh-remote-workspaces session-title-slug settings-shortcut \
-         agent-status-indicator foreign-link-opener <private-plugin>; do (cd plugins/$p && pnpm build); done
+         foreign-link-opener <private-plugin>; do (cd plugins/$p && pnpm build); done
 ```
 
 `enforce-model-preset`, `local-model-supervisor`, `preview-identity` are plain
@@ -449,9 +448,7 @@ carries an absolute path. It refuses to run if a client plugin's
 | `tali-session-title-slug` | nothing | `slug: prompt` naming |
 | `dsh-remote-workspaces` | nothing (only meaningful on a Mac that controls remotes) | "Remotes" sidebar section |
 
-Not installed, by choice: `agent-status-indicator` (floating status emoji;
-`pnpm dsh plugin --profile web add plugins/agent-status-indicator` if wanted)
-and `preview-identity` (dev-overlay only; never in a live profile). A plugin
+Not installed, by choice: `preview-identity` (dev-overlay only; never in a live profile). A plugin
 whose external app is missing does not break the boot — its tools fail at
 first use — so remove it or leave it.
 

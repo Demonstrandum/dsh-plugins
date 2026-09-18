@@ -24,11 +24,6 @@ future agent can reproduce it — live in `recipes/` (index in `AGENTS.md`).
 
 ## Plugins
 
-- `agent-status-indicator` — floating emoji at the bottom-right of the chat
-  area showing the agent's state: 🙂 waiting · 🤨 thinking · 😶 error ·
-  per-tool icon while a tool call runs ([>] terminal SVG for bash, ✏️ edit/write, 👁️ read,
-  🔍 grep/glob/search, 🌐 web, 🤖 subagent, 🔧 fallback; rule table ported
-  from pi-web's toolIcons system) · ✋ badge when blocked on your input.
 - `browser-automation` — per-chat Safari (Technology Preview) and Chrome with a
   curated `safari_*` / `chrome_*` tool set: per-session windows addressed by id
   (`s:0:1`, `c:0:0`), isolated page readers (`safari_get_page_content`,

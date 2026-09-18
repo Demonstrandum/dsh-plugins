@@ -165,7 +165,7 @@ boots from the injected `window.__DSH_BOOT__` graph. Subsystem doc:
 ### Client bundle format
 
 Source of truth: `packages/client/tsdown.client.ts` (in-tree preset). Our
-out-of-tree equivalent is `plugins/agent-status-indicator/build.mjs` (esbuild).
+out-of-tree equivalent is `plugins/<private-plugin>/build.mjs` (esbuild).
 The artifact is a CJS bundle wrapped in a factory registration:
 
 ```js
@@ -299,9 +299,6 @@ can reproduce or maintain it:
 
 ### Recipe index
 
-- `agent-status-indicator-plugin.md` — floating animated status/tool icons in
-  the chat area (`agent-status-indicator` plugin), its document-type icon
-  pipeline, and how to rebuild/preview it.
 - `anthropic-many-image-2000px-limit.md` — "many-image requests: 2000 pixels"
   400 after the 21st image of a session: Anthropic's >20-image per-dimension
   cap vs DSH's pixel-count-only `requestImagePixelBudget`, diagnosing from

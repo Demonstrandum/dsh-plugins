@@ -46,8 +46,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# The live set. Deliberately absent: agent-status-indicator (not in the maintainer's
-# live profile) and preview-identity (dev-overlay only; never in a live profile).
+# The live set. Deliberately absent: preview-identity (dev-overlay only; never
+# in a live profile).
 PLUGINS=(
   dsh-tailscale-remote
   enforce-model-preset

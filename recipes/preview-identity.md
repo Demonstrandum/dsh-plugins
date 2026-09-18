@@ -77,7 +77,6 @@ ownership (2026-09-05):
 | browser-automation | ✅ | — |
 | local-model-supervisor | ✅ | — |
 | reverse-proxy | ✅ | — |
-| agent-status-indicator | — | ✅ |
 | preview-identity (red icon) | — | ✅ |
 
 `pnpm dsh web --dump-config --patch cordis.dev.yml` verifies the composition

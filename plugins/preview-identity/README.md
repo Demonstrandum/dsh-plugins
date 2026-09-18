@@ -49,6 +49,7 @@ row present in both fails the boot with `duplicate loader entry id`. Renaming
 the overlay id is NOT a fix — it loads the plugin twice. Resolution: the dev
 overlay is now a **complement** to the live profile — plugins installed live
 (enforce-model-preset, browser-automation, local-model-supervisor,
-reverse-proxy) are no longer repeated in `cordis.dev.yml`; it only carries the
-not-yet-live `agent-status-indicator` and this preview-only identity plugin.
+reverse-proxy) are no longer repeated in `cordis.dev.yml`; it only carries
+this preview-only identity plugin (the `agent-status-indicator` demo plugin
+that used to sit beside it was deleted on 2026-09-18).
 See `~/projects/deepseek-harness/preview-identity.md`.
