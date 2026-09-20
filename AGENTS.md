@@ -358,6 +358,15 @@ can reproduce or maintain it:
 - `notion-mcp.md` — Notion's hosted MCP server in the web profile: why DSH's
   mcp-client can't do OAuth, the `mcp-remote` stdio bridge, the one-time
   terminal login into `~/.mcp-auth`, and the sandbox/`npx` EPERM trap.
+- `numbered-session-switching-plugin.md` — ⌘1…⌘5 between the five most
+  recently viewed sessions, numbers in the sidebar gutter
+  (`numbered-switching` plugin): the post-rebase selection facts (no
+  `list.current`; current = `retainedBy.mainView`, open =
+  `ctx.uiWorkspace.openSession`), row→session identity through React's
+  fiber expando (rows carry no id), the badge-in-the-padding-box geometry,
+  why only the WKWebView Dock app receives ⌘digit, and the PID-keyed
+  AX/`CGEvent.postToPid` method for testing real chords — because System
+  Events resolves both same-named "DSH" apps to the LIVE one.
 - `plugin-inject-string-content-bug.md` — "This turn failed: content.some is
   not a function": a host plugin passed a bare string as `agent.inject`
   `content`, poisoning the session log; the `UserMessage` shape rule, the fix

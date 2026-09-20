@@ -21,3 +21,7 @@
     # never confused with the live server.
     - id: tali-preview-identity
       name: '/Users/USER/github/tali-dash-plugins/plugins/preview-identity/index.js'
+    # Under trial: ⌘1…⌘5 switch between the five most recent sessions
+    # (numbers in the sidebar gutter). Recipe: recipes/numbered-session-switching-plugin.md
+    - id: tali-numbered-switching
+      name: '/Users/USER/github/tali-dash-plugins/plugins/numbered-switching/index.js'

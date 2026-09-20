@@ -1,0 +1,44 @@
+{
+  "name": "tali-numbered-switching",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH client plugin: the five most recently viewed sessions hold stable numbers 1-5, shown in the sidebar gutter; ⌘1…⌘5 switch between them (LRU eviction when a sixth session is opened).",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lib/client.js",
+    "lib/client.js.map",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "check": "node --check index.js",
+    "prepare": "node build.mjs"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:../../deepseek-harness/vendor/cordis",
+    "@deepseek-ai/dsh-api-session-controller": "link:../../deepseek-harness/packages/api/session-controller",
+    "@deepseek-ai/dsh-api-workspace-controller": "link:../../deepseek-harness/packages/api/workspace-controller",
+    "@deepseek-ai/dsh-client-ui-session": "link:../../deepseek-harness/packages/client/ui-session",
+    "@deepseek-ai/dsh-client-ui-workspace": "link:../../deepseek-harness/packages/client/ui-workspace",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.2"
+  }
+}

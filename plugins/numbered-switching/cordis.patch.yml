@@ -1,0 +1,5 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# No config: five slots, ⌘1…⌘5 (Ctrl on non-Apple platforms); see README.
+- insert:
+    - id: tali-numbered-switching
+      name: tali-numbered-switching
