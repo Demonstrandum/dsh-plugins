@@ -366,6 +366,14 @@ can reproduce or maintain it:
   packed-chunk-row traps).
 - `preview-identity.md` — red icon + "DSH-dev" label for the preview server,
   and the dev-overlay/live-profile collision rule.
+- `promotion-loop-and-duplicate-dsh-tools.md` — the two faults that made the
+  live GUI blank and every tool call die after the 2026-09-18 promotion:
+  a `launchctl submit` one-shot script is **keepalive by default** (an
+  install→build→restart loop rewrote `apps/web/dist` under the live server
+  every 25 s for an hour), and `@deepseek-ai/dsh-tools` loaded twice (src via
+  tsconfig paths, lib via one row resolved through `node_modules`) so the
+  module-local `TOOL_RUNTIME_SCHEDULER` symbol never matched — fixed with
+  `Symbol.for` (fork commit `9384b80976`; re-apply on every rebase).
 - `rebase-fork-on-upstream.md` — trialing a rebase of the `feat/embed-session`
   fork onto `upstream/master` in a separate worktree: the six conflicts and
   their resolutions (selection moved out of the Session Controller into

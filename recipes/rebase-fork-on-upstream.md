@@ -157,6 +157,22 @@ present) vs the rebased one (absent). Re-enable when a compatible release
 ships. `dsh-import-agents` 0.3.0 loads fine (its row is disabled in the live
 profile anyway).
 
+**What went wrong after the promotion (2026-09-20)** — both root-caused by a
+second agent in `promotion-loop-and-duplicate-dsh-tools.md`: (1) the detached
+job above was registered with `launchctl submit`, which is **keepalive by
+default**, so the one-shot script looped install→build→restart every ~25 s and
+kept rewriting `apps/web/dist` under the running server → 404s, blank page,
+`renderSlot('root') before any 'root' registration`. Never `launchctl submit` a
+one-shot; use a plist with `RunAtLoad` and no `KeepAlive`, or run it in the
+foreground. (2) Independently, every tool call died with `Cannot read
+properties of undefined (reading 'prepare')`: `@deepseek-ai/dsh-tools` is
+loaded twice under tsx (src through tsconfig paths, lib through the
+`dsh-agent-instructions` row resolved via `apps/cli/node_modules`), and the
+scheduler key was a module-local `Symbol()`. Fork commit `9384b80976` makes it
+`Symbol.for(...)` — **a fork-local edit to upstream source; carry it across the
+next rebase** (or upstream it). The symbol itself predates the rebase (Aug 13);
+what made the second load appear is not bisected.
+
 Rollback: `cd deepseek-harness && git reset --hard feat/embed-session-pre-rebase-20260918
 && pnpm install --frozen-lockfile && pnpm run build`, restart the relay, drop
 the rewind row, `git add deepseek-harness` in this repo.
