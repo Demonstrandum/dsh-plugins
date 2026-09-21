@@ -25,3 +25,7 @@
     # (numbers in the sidebar gutter). Recipe: recipes/numbered-session-switching-plugin.md
     - id: tali-numbered-switching
       name: '/Users/USER/github/tali-dash-plugins/plugins/numbered-switching/index.js'
+    # Under trial alongside it: remote workspaces (the preview mirrors itself
+    # as a remote, added through the GUI/control channel; no seeded servers).
+    - id: tali-remote-workspaces
+      name: '/Users/USER/github/tali-dash-plugins/plugins/dsh-remote-workspaces/index.js'

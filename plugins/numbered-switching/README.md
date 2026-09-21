@@ -28,6 +28,31 @@ switch to the holder of that number.
 - Pure browser state: nothing is written to the host. The slot table lives in
   `sessionStorage` (per window; survives ⌘R, dies with the window).
 
+## Remote workspaces
+
+With [`dsh-remote-workspaces`](../dsh-remote-workspaces/README.md) loaded,
+sessions of mirrored remote hosts take part exactly like local ones: viewing
+one numbers it, it evicts and gets evicted by the same LRU rule, its badge is
+drawn on the remote row, and ⌘N brings its frame back (the remote panel).
+Slot keys are `local:<sessionId>` and `remote:<workspaceId>:<sessionId>`
+(`src/client/targets.ts`).
+
+The coupling is optional and runtime-only: the remote plugin provides the
+browser Cordis service `ctx.remoteWorkspaces` (`getSelection` / `has` /
+`open` / `subscribe`) and stamps its rows with `data-remote-session`;
+numbered-switching consumes it through `ctx.inject(['remoteWorkspaces'], …)`,
+which runs only while that service exists. Without the remote plugin nothing
+changes. While it is absent — not installed, or gone for a moment during a
+bundle hot-swap, or not yet up at boot — remote holders are *kept* (unknown
+is not gone): they show no row and ⌘N does nothing for them until the plugin
+returns or the LRU rule evicts them. They are pruned only on positive
+evidence from `has()`.
+
+Embedded shells (`?embed=<id>`, what a remote frame is) run this plugin too
+but bail out in `apply`: the frame is a same-origin iframe and shares the
+tab's `sessionStorage`, so an active framed instance would overwrite the
+outer window's table.
+
 ## Where the chord works
 
 | Surface | ⌘1…⌘5 reach the page? |
@@ -49,16 +74,21 @@ logs. `src/client/`:
 | file | role |
 |---|---|
 | `slots.ts` | pure slot model: `touch` (seat/bump with LRU eviction), `prune`, `slotOf`/`holderOf`, `restoreSlotState` (sessionStorage validation). Unit-tested. |
-| `index.ts` | `apply`: follows the selection, owns the state, installs the keydown capture, wires the badges. |
-| `badges.ts` | DOM reconciler that draws the numbers on the sidebar rows. |
+| `targets.ts` | slot-key codec: `local:<id>` / `remote:<ws>:<id>`. Unit-tested. |
+| `index.ts` | `apply`: follows the selection (local + optional remote), owns the state, installs the keydown capture, wires the badges and the panel watcher. |
+| `badges.ts` | DOM reconciler that draws the numbers on the sidebar rows (local and remote). |
 
 **Current session.** ui-workspace keeps the selection private (its
 `UiWorkspaceService.selection` store), but the Session Controller list
 exposes it as local reference counts: the current session is the one row with
 `retainedBy.mainView > 0` — the same derivation the Workspace browser uses
-for its row highlight. The plugin subscribes to `sessions.list` (and
-`workspaces.list` for `archivedSessionIds`) and turns every change of that id
-into one `touch`.
+for its row highlight — counted only while no global main panel is showing
+(`usePanelInfo().activePanelId === null`, read by a renderless
+`shell.overlay` entry), so Settings or a remote frame covering the retained
+local session does not make it "viewed". The plugin subscribes to
+`sessions.list` (and `workspaces.list` for `archivedSessionIds`, and the
+remote service when present) and turns every change of the current key into
+one `touch`.
 
 **Switching.** `ctx.uiWorkspace.openSession(id)` — the same verb a row click
 runs (one UI navigation action; it also returns the main view to the
@@ -72,20 +102,23 @@ any editor keymap sees it.
 
 **Badges (DOM patch).** There is no per-row slot in the Workspace browser
 (its only row seam is `contributeSessionMenu`), so the numbers are patched
-onto the rendered rows, like `session-title-slug` does. The row DOM carries no
-session id and rows are ordered by manual order or recency, so each row is
-mapped to its session through **React's fiber expando** (`__reactFiber$…` on
-the row → walk `.return` to `SessionNodeItem` → `props.node.id`; stable since
-React 16), with a fallback to the `_title` text when it names exactly one
-listed session and exactly one visible row. A `MutationObserver` re-applies
+onto the rendered rows, like `session-title-slug` does. A remote row is
+identified by its `data-remote-session` attribute. The local row DOM carries
+no session id and rows are ordered by manual order or recency, so each local
+row is mapped to its session through **React's fiber expando**
+(`__reactFiber$…` on the row → walk `.return` to `SessionNodeItem` →
+`props.node.id`; stable since React 16), with a fallback to the `_title` text
+when it names exactly one listed session and exactly one visible row. A `MutationObserver` re-applies
 after React re-renders (one reconcile per frame; a timer stands in for rAF
 while the document is hidden, because a background window gets no frames).
 
-Geometry: a session row is `padding-inline-start: calc(8px +
-var(--dsh-workspace-indent))` then a 16px status slot then the title; the
-badge is `position: absolute` over exactly that padding box (`width:
-calc(8px + var(--dsh-workspace-indent, 0px))`), so the digit sits in the
-gutter left of the status dot and the row's own layout is untouched. Rows
+Geometry: a local session row is `padding-inline-start: calc(8px +
+var(--dsh-workspace-indent))` (`depth * 12px`, 0 under a top-level
+Workspace), a remote row `padding: 0 8px`; then a 16px status slot then the
+title. The badge is `position: absolute` over exactly that padding box (its
+width is copied from the row's computed `padding-inline-start` at reconcile
+time), so the digit sits in the 8px gutter left of the status dot and the
+row's own layout is untouched. Rows
 carry `data-tns-positioned` while badged (inline `position: relative`, the
 value Rows.module.css already uses for drag markers) and the badge is
 `<span data-tns-badge aria-hidden title="⌘3">3</span>`. Colours are the
@@ -128,6 +161,8 @@ nine). No runtime config.
 |---|---|
 | Chord does nothing in Chrome/Safari | Expected: the browser owns ⌘digit. Use the Dock app. |
 | No badges, console line present | Row→id mapping failed: React renamed its fiber expando or `SessionNodeItem` lost its `node` prop; the title fallback then only badges unique titles. Check `fiberSessionId(row)` in the console (`Object.keys(row)` should contain `__reactFiber$…`). |
-| Badges in the wrong place | Rows.module.css changed the row padding / `--dsh-workspace-indent`; adjust `STYLE_TEXT` in `badges.ts`. |
+| Badges in the wrong place | The badge box is the row's leading padding; if Rows.module.css moved the status slot elsewhere, adjust `STYLE_TEXT` / `setBadge` in `badges.ts`. |
+| Remote rows never get a badge | Remote plugin absent, or `data-remote-session` missing from its rows (contract in its README). Console shows `remote workspaces joined the numbering` when the service was found. |
+| Remote slots vanish after ⌘R or a rebuild | Should not happen since the unknown-keeps rule; check `has()` in the remote plugin's `index.tsx` still returns true before the first snapshot. |
 | Numbering reset after ⌘R | `sessionStorage` unavailable (private mode) — numbering is per window and best-effort. |
 | A New Session row shows a number but the session is not in its Workspace | The blank session already held a slot when + reused it — by design (same id). |

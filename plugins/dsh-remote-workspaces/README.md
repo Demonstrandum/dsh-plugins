@@ -137,6 +137,33 @@ script ships it); a remote whose sessions default to a small on-device model
 should pin its titler to a capable model or titles come out like "New
 session" (the deploy overlay pins `session-title-llm`).
 
+## For other browser plugins: `ctx.remoteWorkspaces`
+
+The browser half provides an optional Cordis service so sibling plugins can
+treat remote sessions like local ones without a build-time dependency —
+consume it with `ctx.inject(['remoteWorkspaces'], scoped => …)`, which runs
+only while this plugin is loaded and unwinds when it goes (first consumer:
+`numbered-switching`, which numbers remote sessions alongside local ones and
+brings a remote frame back with ⌘N).
+
+```ts
+interface RemoteWorkspacesFace {
+  getSelection(): { workspaceId: string; sessionId: string } | undefined  // the remote session ON SCREEN (undefined while a local Conversation / another panel shows)
+  has(selection): boolean      // false only on positive evidence (workspace gone, or fetched and not listing the session); unknown = true
+  open(selection): void        // what a row click does: select + show the remote panel
+  subscribe(listener): () => void  // view (selection, on-screen) + runtime (catalogue) changes
+}
+```
+
+Row identity for DOM patchers: every remote session row carries
+`data-remote-session="<workspaceId>:<sessionId>"` (the frame key).
+
+Fact for such consumers: the framed page is a **same-origin** shell running
+the same client plugins, and iframes share the tab's `sessionStorage` — a
+plugin with per-window browser state must stay inactive in embedded shells
+(`ctx.layout.embedSessionId !== undefined`) or it will fight its outer
+instance.
+
 ## Facts worth keeping
 
 - The embedded shell computes every Host URL relative to its document directory,

@@ -30,6 +30,48 @@ Selection tracking = subscribe to `sessions.list` and diff the `mainView`
 holder; switching = `uiWorkspace.openSession`; badges = DOM patch with a
 fiber-walk for row identity (title-text fallback).
 
+## Remote workspaces (same day)
+
+The maintainer: must play nicely with `dsh-remote-workspaces`, detected at runtime,
+never required. Facts:
+
+| Fact | Where |
+|---|---|
+| Remote selection is the remote plugin's persisted view store (`selected`, `remoteActive`); its rows are `div role="treeitem" aria-selected` too, click = `openRemoteSession` → `model.select` + `ctx.layout.selectPanel('remote-session')`. Switching back to a local session runs the shell's `openSession`, which resets the panel and flips `remoteActive` false (`FramePool` → `hideAll`). | `dsh-remote-workspaces/src/client/{store,ui,index}.ts*` |
+| A browser plugin can `ctx.provide('name', value)` (function-form plugin, same as `ui-theme`'s `ctx.provide('theme', …)`); a consumer's `ctx.inject(['name'], scoped => …)` is a sub-plugin that starts when the service appears and is disposed when it goes — the idiomatic optional dependency, better than the slug plugin's `globalThis` convention. | `vendor/cordis/src/reflect.ts` `provide`, `registry.ts` `inject` |
+| `activePanelId` is exposed only as the `usePanelInfo` root hook of slot components (`ctx.layout` has no observable) — read it with a renderless `shell.overlay` entry. | `ui-layout/src/client/index.ts:142` |
+| Local session rows under a **top-level** Workspace have an **8px** gutter (`--dsh-workspace-indent` = `depth * 12px`, depth 0), not 20px as the first cut assumed; remote rows are `padding: 0 8px` — parity already. | `WorkspaceBrowser.tsx:460`, remote `ui.tsx` `S.sessionRow` |
+| The remote frame is a **same-origin iframe** (`/remote/<id>/?embed=<sid>`) running the full shell incl. this plugin, and iframes share the tab's `sessionStorage`. | `dsh-remote-workspaces` README |
+
+Design: the remote plugin provides `ctx.remoteWorkspaces` (`getSelection` /
+`has` / `open` / `subscribe`) and stamps rows with `data-remote-session`;
+numbered-switching keys slots as `local:<id>` / `remote:<ws>:<id>`
+(`targets.ts`), injects the service optionally, and reads the badge width
+from each row's computed padding. Two bugs the preview caught, both worth
+remembering for any plugin with an optional sibling:
+
+1. **"Absent" is not "gone".** The first cut pruned remote holders whenever
+   the service was missing. A bundle hot-swap of the remote plugin removes
+   and re-adds its service within one tick, and at boot it may come up after
+   this plugin — both wiped the remote slots. Rule now: prune only on
+   positive evidence (`has()` false with data loaded and the workspace
+   fetched); unknown keeps the slot.
+2. **The embedded shell runs your plugin too, on the same `sessionStorage`.**
+   The framed instance saw its pinned session as current, pruned every other
+   holder and overwrote the outer table. `apply` now returns immediately when
+   `ctx.layout.embedSessionId !== undefined`. (Applies to the real remote case
+   just the same — the frame is same-origin by design.)
+
+Preview test without touching live: the preview mirrors **itself**
+(`servers.probe` / `workspaces.add` on the control channel
+`POST /remote-workspaces/<method>` with `payload: { args: {…} }`, url
+`http://127.0.0.1:3085/` + the standing token from
+`~/.dsh-preview/tailscale-remote-preview.json`; state persists in
+`~/.dsh-preview/remote-workspaces.json`). Verified: remote rows take slots
+and badges, LRU eviction across kinds, ⌘N brings the frame back
+(`remoteActive` true), Settings open/close touches nothing, table stable with
+three live frames after the embed guard.
+
 ## Design choices worth remembering
 
 - **Badge in the padding box, not the status slot.** The 16px slot carries
@@ -146,6 +188,8 @@ stayed put.
 - Built, typechecked, unit-tested; verified end to end on the preview
   (badges, MRU/eviction, synthetic chords in STP, **real** ⌘digit keystrokes
   in `DSH Preview.app`).
+- Remote workspaces integrated (optional service); `cordis.dev.yml` also
+  carries `tali-remote-workspaces` for the preview, which mirrors itself.
 - Row lives in `cordis.dev.yml` (preview). **Not installed live** — needs
   the maintainer's confirmation; the row for `~/.dsh/profiles/web/cordis.patch.yml` is
   in the README (then reload the GUI page once; remove the `cordis.dev.yml`

@@ -82,7 +82,10 @@ const S = {
     flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, border: 'none',
     borderRadius: 4, padding: 0, background: 'transparent', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer',
   } as CSSProperties,
-  // .sessionRow: 32px, pad 0 8, a 16px status slot, then a 4px title gap (no extra indent under a group).
+  // .sessionRow: 32px, pad 0 8, a 16px status slot, then a 4px title gap (no
+  // extra indent under a group — the local tree's `--dsh-workspace-indent` is
+  // 0 for a top-level Workspace too). The 8px leading padding is also where
+  // numbered-switching draws its slot number.
   sessionRow: {
     display: 'flex', alignItems: 'center', gap: 0, height: 32, padding: '0 8px', borderRadius: 8, cursor: 'pointer',
     userSelect: 'none', color: 'var(--dsw-alias-label-primary)', fontSize: 13, boxSizing: 'border-box',
@@ -341,6 +344,7 @@ function SessionRow({ workspace, session, selected, busy, openRemoteSession, mod
       <div
         role="treeitem"
         aria-selected={selected}
+        data-remote-session={frameKey({ workspaceId: workspace.id, sessionId: session.id })}
         draggable={reorderable && session.placeholder !== true}
         style={{ ...S.sessionRow, ...NO_SELECT, ...dropStyle(drag, dragKey), height: caption === undefined ? 32 : 44, background: selected || hover ? HOVER : 'transparent', opacity: pending || drag.item?.id === session.id ? 0.6 : 1 }}
         onMouseEnter={() => { setHover(true) }}

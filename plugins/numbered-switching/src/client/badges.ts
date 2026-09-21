@@ -9,10 +9,12 @@
  * session-title-slug plugin: patch the rendered rows and re-apply after React
  * re-renders (MutationObserver → one rAF-coalesced reconcile).
  *
- * ROW → SESSION ID — the row DOM carries no id (Rows.tsx renders
- * `role="treeitem" aria-selected` with class-module names only), and rows are
- * ordered by manual order or recency, so position is no key either. Two
- * routes, in order:
+ * ROW → SLOT KEY (targets.ts) — the local row DOM carries no id (Rows.tsx
+ * renders `role="treeitem" aria-selected` with class-module names only), and
+ * rows are ordered by manual order or recency, so position is no key either.
+ * Routes, in order:
+ *   0. `data-remote-session="<ws>:<id>"` — a dsh-remote-workspaces row; the
+ *      attribute is that plugin's published row identity → `remote:` key.
  *   1. React's fiber expando (`__reactFiber$…`) on the row element: walk
  *      `.return` a few levels to `SessionNodeItem`, whose `node` prop is the
  *      SessionNode (`{ id, title, blank, … }`). Stable since React 16.
@@ -21,14 +23,16 @@
  *      exactly one visible row carry that title.
  * A row that resolves to nothing simply gets no badge.
  *
- * GEOMETRY — a session row is `padding-inline-start: calc(8px +
- * var(--dsh-workspace-indent))` (12px per depth level), then a 16px status
- * slot, then the title. The badge is absolutely positioned over exactly that
- * padding box (`width: calc(8px + var(--dsh-workspace-indent, 0px))`, the
- * variable inherits from the group), so a depth-1 row shows the digit
- * centered in a 20px gutter and the row's own layout is untouched. The row
- * gets `position: relative` inline while it carries a badge (Rows.module.css
- * sets the same value for its drag markers, so nothing else changes).
+ * GEOMETRY — a local session row is `padding-inline-start: calc(8px +
+ * var(--dsh-workspace-indent))` (`depth * 12px`; 0 under a top-level
+ * Workspace), a remote row `padding: 0 8px`; then a 16px status slot, then
+ * the title. The badge is absolutely positioned over exactly that padding
+ * box — its width is read from the row's computed `padding-inline-start` at
+ * reconcile time, so the digit is centered in the 8px gutter left of the
+ * status dot (20px under a nested Workspace) and the row's own layout is
+ * untouched. The row gets `position: relative` inline while it carries a
+ * badge (Rows.module.css sets the same value for its drag markers, so
+ * nothing else changes).
  *
  * CSS-module classes are built `[hash]_[local]`, so `[class$="_title"]` is a
  * stable selector; ghost rows from session-title-slug (`data-tdsn-ghost`) are
@@ -42,13 +46,15 @@ const POSITIONED_ATTR = 'data-tns-positioned'
 const STYLE_ID = 'tali-numbered-switching-style'
 const ROW_SELECTOR = 'div[role="treeitem"][aria-selected]'
 const GHOST_WRAPPER_SELECTOR = '[data-tdsn-ghost]'
+/** dsh-remote-workspaces row identity (`<workspaceId>:<sessionId>`). */
+const REMOTE_ROW_ATTR = 'data-remote-session'
 
 const STYLE_TEXT = `
 [${BADGE_ATTR}] {
   position: absolute;
   inset-block: 0;
   inset-inline-start: 0;
-  width: calc(8px + var(--dsh-workspace-indent, 0px));
+  width: 8px; /* overwritten per row from its computed padding */
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -69,13 +75,15 @@ const STYLE_TEXT = `
 
 /** What the reconciler needs from the data layer. */
 export interface BadgeInputs {
-  /** 1-based slot number of a session, or undefined for unnumbered ones. */
-  numberOf: (sessionId: string) => number | undefined
-  /** Listed sessions by display title (for the title fallback). */
+  /** 1-based slot number of a slot key (targets.ts), or undefined for unnumbered ones. */
+  numberOf: (key: string) => number | undefined
+  /** Listed local sessions by display title → slot keys (for the title fallback). */
   titles: () => ReadonlyMap<string, readonly string[]>
   /** Tooltip text for slot `n` (e.g. "⌘3"). */
   tooltip: (n: number) => string
 }
+
+import { encodeTarget, remoteKeyOfFrameKey } from './targets.ts'
 
 interface FiberLike {
   memoizedProps?: unknown
@@ -112,13 +120,28 @@ function rowTitle(row: HTMLElement): string | undefined {
 }
 
 /** Fallback: a title that names exactly one listed session and exactly one visible row. */
-function titleSessionId(row: HTMLElement, rows: readonly HTMLElement[], titles: ReadonlyMap<string, readonly string[]>): string | undefined {
+function titleKey(row: HTMLElement, rows: readonly HTMLElement[], titles: ReadonlyMap<string, readonly string[]>): string | undefined {
   const title = rowTitle(row)
   if (title === undefined) return undefined
   const ids = titles.get(title)
   if (ids === undefined || ids.length !== 1) return undefined
   if (rows.filter(other => rowTitle(other) === title).length !== 1) return undefined
   return ids[0]
+}
+
+/**
+ * The slot key a row stands for (remote attribute, fiber, title fallback).
+ * @param row - a session row element.
+ * @param rows - every visible session row (title-uniqueness check).
+ * @param titles - lazily built title map for the fallback.
+ * @returns the key, or undefined when the row cannot be identified.
+ */
+export function rowKey(row: HTMLElement, rows: readonly HTMLElement[], titles: () => ReadonlyMap<string, readonly string[]>): string | undefined {
+  const remote = row.getAttribute(REMOTE_ROW_ATTR)
+  if (remote !== null) return remoteKeyOfFrameKey(remote)
+  const sessionId = fiberSessionId(row)
+  if (sessionId !== undefined) return encodeTarget({ kind: 'local', sessionId })
+  return titleKey(row, rows, titles())
 }
 
 function sessionRows(): HTMLElement[] {
@@ -152,6 +175,10 @@ function setBadge(row: HTMLElement, n: number, tooltip: string): void {
   const text = String(n)
   if (badge.textContent !== text) badge.textContent = text
   if (badge.title !== tooltip) badge.title = tooltip
+  // The gutter is the row's own leading padding (8px on a local row under a
+  // top-level Workspace and on a remote row; 12px more per nesting level).
+  const gutter = getComputedStyle(row).paddingInlineStart
+  if (gutter !== '' && badge.style.width !== gutter) badge.style.width = gutter
   if (!row.hasAttribute(POSITIONED_ATTR)) {
     // Remember whether we set it, so the clear path restores only our own write.
     if (row.style.position === '') row.style.position = 'relative'
@@ -180,13 +207,10 @@ export function installBadges(inputs: BadgeInputs): { update: () => void; dispos
     timer = undefined
     const rows = sessionRows()
     let titles: ReadonlyMap<string, readonly string[]> | undefined
+    const lazyTitles = (): ReadonlyMap<string, readonly string[]> => (titles ??= inputs.titles())
     for (const row of rows) {
-      let id = fiberSessionId(row)
-      if (id === undefined) {
-        titles ??= inputs.titles()
-        id = titleSessionId(row, rows, titles)
-      }
-      const n = id === undefined ? undefined : inputs.numberOf(id)
+      const key = rowKey(row, rows, lazyTitles)
+      const n = key === undefined ? undefined : inputs.numberOf(key)
       if (n === undefined) clearBadge(row)
       else setBadge(row, n, inputs.tooltip(n))
     }

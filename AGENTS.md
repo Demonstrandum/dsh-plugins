@@ -364,9 +364,12 @@ can reproduce or maintain it:
   `list.current`; current = `retainedBy.mainView`, open =
   `ctx.uiWorkspace.openSession`), row→session identity through React's
   fiber expando (rows carry no id), the badge-in-the-padding-box geometry,
-  why only the WKWebView Dock app receives ⌘digit, and the PID-keyed
+  why only the WKWebView Dock app receives ⌘digit, the PID-keyed
   AX/`CGEvent.postToPid` method for testing real chords — because System
-  Events resolves both same-named "DSH" apps to the LIVE one.
+  Events resolves both same-named "DSH" apps to the LIVE one — and the
+  optional coupling to `dsh-remote-workspaces` (`ctx.provide` +
+  `ctx.inject` for a sibling plugin; "absent is not gone"; the same-origin
+  embed frame shares `sessionStorage` and must opt out).
 - `plugin-inject-string-content-bug.md` — "This turn failed: content.some is
   not a function": a host plugin passed a bare string as `agent.inject`
   `content`, poisoning the session log; the `UserMessage` shape rule, the fix
