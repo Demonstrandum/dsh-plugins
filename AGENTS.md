@@ -311,12 +311,18 @@ can reproduce or maintain it:
   (LM Studio + Apple Foundation via AFM), the pi-ai token-budget trap,
   minimal presets, and the `enforce-model-preset` plugin.
 - `bootstrap-mac-installer.md` — `tools/bootstrap-mac.sh`, the one-command
-  fresh-machine installer (INSTALLING.md Part A + C1–C5 as fourteen idempotent
-  steps: CLT, Homebrew, node/pnpm/git, the four app casks, clone, fork +
-  plugin builds, `~/.dsh`, bundles, afm + Apple provider, Tailscale-login
-  wait → relay → route → Dock app); why a `.pkg` is the wrong container, the
-  headless facts it relies on, the macOS-VM landscape (Virtualization.framework
-  vs UTM / Tart / VirtualBuddy) and the pending clean-VM test plan on the remote.
+  fresh-machine installer (INSTALLING.md Part A + C1–C5 as sixteen idempotent
+  steps: CLT, Homebrew, node/pnpm/git, STP/Chrome casks, the mandatory
+  Tailscale gate (install → `tailscale up` reconnect → driven browser login),
+  clone, fork + plugin builds, `~/.dsh`, bundles, afm + Apple provider, relay
+  → route → Dock app); the fresh-machine abort gate and its resume marker, the
+  paid-app rule (Dash/<private> never installed, their plugins gated on
+  bundle-id detection — the Setapp-Dash trap), why a `.pkg` is the wrong
+  container, the headless facts it relies on, the macOS-VM landscape
+  (Virtualization.framework vs UTM / Tart / VirtualBuddy) and the pending
+  clean-VM test plan on the remote; `pnpm bootstrap-remote user@host` (ssh runner) and
+  `--replace`, which turns a deploy-remote (Path B) host such as <remote> into a
+  standalone install while keeping `~/.dsh`.
 - `browser-automation-plugin.md` — per-chat Safari Technology Preview /
   Chrome windows and the isolated page reader (`browser-automation` plugin):
   why a plugin and not MCP config, the STP `--mcp` facts that shape it, the

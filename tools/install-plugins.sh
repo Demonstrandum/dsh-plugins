@@ -3,7 +3,11 @@
 # install-plugins.sh — install every live-profile plugin of this repo into a
 # DSH profile as bundles, in one command (the "tali-plugins superplugin").
 #
-#   pnpm install-plugins [--profile web] [--checkout DIR] [--remove] [--dry-run]
+#   pnpm install-plugins [--profile web] [--checkout DIR] [--without NAME,NAME] [--remove] [--dry-run]
+#
+# --without drops plugins from the set for this run (directory names, e.g.
+# `--without dash-docsets,<private-plugin>` on a Mac without Dash or
+# <private> — tools/bootstrap-mac.sh does exactly that).
 #
 # Each plugin under plugins/ that is meant for a live profile declares
 # `dsh.bundle.patch` (its cordis.patch.yml inserts its own `tali-*` row by
@@ -33,8 +37,11 @@ PROFILE=web
 CHECKOUT="${DSH_CHECKOUT:-$HERE/deepseek-harness}"
 ACTION=add
 DRY=0
+WITHOUT=""
 while [ $# -gt 0 ]; do
   case "$1" in
+    --without) WITHOUT="$WITHOUT,$2"; shift 2 ;;
+    --without=*) WITHOUT="$WITHOUT,${1#--without=}"; shift ;;
     --profile) PROFILE="$2"; shift 2 ;;
     --profile=*) PROFILE="${1#--profile=}"; shift ;;
     --checkout) CHECKOUT="$2"; shift 2 ;;
@@ -69,6 +76,14 @@ die() { printf '\033[1;31m✖\033[0m %s\n' "$*" >&2; exit 1; }
 
 [ -f "$CHECKOUT/apps/cli/lib/bin.js" ] || [ -f "$CHECKOUT/apps/cli/src/bin.ts" ] \
   || die "DSH checkout not found at $CHECKOUT (set DSH_CHECKOUT or --checkout)"
+
+if [ -n "$WITHOUT" ]; then
+  KEPT=()
+  for p in "${PLUGINS[@]}"; do
+    case ",$WITHOUT," in *",$p,"*) log "leaving out $p (--without)" ;; *) KEPT+=("$p") ;; esac
+  done
+  PLUGINS=("${KEPT[@]}")
+fi
 
 DIRS=(); NAMES=()
 for p in "${PLUGINS[@]}"; do

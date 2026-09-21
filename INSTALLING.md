@@ -37,6 +37,35 @@ Both paths share the manual prerequisites in Part A; A4 (Apple model) is
 optional for both. The preview instance (`~/.dsh-preview`, `DSH Preview.app`,
 port 3088) is deliberately left out.
 
+> **One-command version of Part A + Path C:** `tools/bootstrap-mac.sh`
+> (recipe: `recipes/bootstrap-mac-installer.md`). On a fresh machine:
+>
+> ```sh
+> bash -c "$(curl -fsSL https://raw.githubusercontent.com/taliesinb/dsh-plugins/main/tools/bootstrap-mac.sh)"
+> ```
+>
+> It asks where the clone goes, installs the Command Line Tools, Homebrew,
+> node/pnpm/git, offers Tailscale / Safari Technology Preview / Chrome as
+> casks when missing (never the paid apps: `dash-docsets` and
+> `<private-plugin>` are installed only if Dash / <private> are
+> already present), clones, builds the fork and the plugins, initialises
+> `~/.dsh`, installs the plugin bundles, sets up afm + the Apple provider and
+> preset, installs the relay, enables the route and builds the Dock app —
+> i.e. A1, A2, A4, A6, C1–C5 below, in order. Two hard gates: it **aborts if
+> DSH already seems installed or running** on the Mac (fresh machines only;
+> `--force` overrides), and it **requires Tailscale installed, connected and
+> logged in before cloning anything** — it installs the cask if you agree,
+> reconnects a stopped backend with `tailscale up`, and drives the browser
+> login (prints/opens the URL, waits). Idempotent (re-run to resume); `--dry-run` shows the plan,
+> `--no-apps` / `--no-tailnet` / `--no-apple` / `--skip STEP` trim it,
+> `--yes` takes every default. The manual steps remain the hand-off list it
+> prints at the end (Apple Intelligence toggle, STP licence, provider keys).
+> Over ssh: `pnpm bootstrap-remote user@host [flags]`; to turn a Path B host
+> into a standalone Path C install (the remote): `pnpm bootstrap-remote <user>@<remote>
+> --replace` — stops the deploy-remote LaunchAgent, removes `~/dsh`, keeps
+> `~/.dsh`, reinstalls. The rest of this document is the step-by-step it
+> automates and the reference for when a step fails.
+
 ## Resulting topology (Path B, as on the remote)
 
 ```
@@ -422,7 +451,7 @@ its own `tali-*` row by package name), so the whole set is one command:
 
 ```sh
 cd ~/github/tali-dash-plugins
-pnpm install-plugins                 # = tools/install-plugins.sh; --profile <name>, --checkout DIR, --dry-run, --remove
+pnpm install-plugins                 # = tools/install-plugins.sh; --profile <name>, --checkout DIR, --without NAME,NAME, --dry-run, --remove
 ```
 
 It runs `pnpm dsh plugin --profile web add <12 plugin dirs>` from the fork
