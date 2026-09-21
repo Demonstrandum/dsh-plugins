@@ -27,6 +27,8 @@
 #                         Serve path /dsh-NAME and Dock app DSH-NAME, written as a row override into
 #                         ~/.dsh/profiles/web/cordis.patch.yml. Everything else is per-user already.
 #   --port-base N         web port (relay = N+3, proxy = N+4); default 3080, or auto-picked with --instance
+#   --allow LOGIN[,LOGIN] tailnet logins admitted to this instance by identity (besides the node's own); e.g. the
+#                         person a --instance is for, when the Mac is logged in to Tailscale as someone else
 #   --repo URL            clone URL (default https://github.com/taliesinb/dsh-plugins)
 #   --list                list the step names and exit
 #
@@ -70,6 +72,7 @@ FORCE=0
 REPLACE=0
 INSTANCE=""
 PORT_BASE=""
+ALLOW=""
 TS_TIMEOUT=""
 SKIP=""
 ONLY=""
@@ -94,6 +97,8 @@ while [ $# -gt 0 ]; do
     --instance) INSTANCE="$2"; shift 2 ;;
     --instance=*) INSTANCE="${1#--instance=}"; shift ;;
     --port-base) PORT_BASE="$2"; shift 2 ;;
+    --allow) ALLOW="$ALLOW,$2"; shift 2 ;;
+    --allow=*) ALLOW="$ALLOW,${1#--allow=}"; shift ;;
     --port-base=*) PORT_BASE="${1#--port-base=}"; shift ;;
     --tailscale-timeout) TS_TIMEOUT="$2"; shift 2 ;;
     --tailscale-timeout=*) TS_TIMEOUT="${1#--tailscale-timeout=}"; shift ;;
@@ -608,8 +613,9 @@ if wants home; then
     [ -f "$DSH_HOME_DIR/profiles/web/cordis.patch.yml" ] || die "profile not created"
     ok "home initialised"
   fi
-  # A fresh home has an empty .credentials.yaml (a comment header only); a --replace host keeps its keys.
-  if ! grep -qsE '^[^#[:space:]]' "$DSH_HOME_DIR/.credentials.yaml" 2>/dev/null; then
+  # A fresh home's .credentials.yaml holds only the browser-session grant the first launch writes; provider keys
+  # are further `records:` entries. A --replace host keeps its keys.
+  if [ "$(grep -E '^  [^ ]' "$DSH_HOME_DIR/.credentials.yaml" 2>/dev/null | grep -vc 'client-connection/' || true)" = 0 ]; then
     todo "add at least one cloud provider + key in the GUI (Settings → Providers); keys go to $DSH_HOME_DIR/.credentials.yaml"
   else ok "credentials present in $DSH_HOME_DIR/.credentials.yaml"; fi
 fi
@@ -756,15 +762,19 @@ JS
       if [ "$DRY" = 1 ]; then log "would write $STATE (enabled: true) and start the relay"
       else
         SELF_LOGIN="$(ts_login)"
-        node - "$STATE" "$SELF_LOGIN" <<'JS'
-const fs = require('fs'); const [file, login] = process.argv.slice(2);
+        node - "$STATE" "$SELF_LOGIN,$ALLOW" <<'JS'
+const fs = require('fs'); const [file, logins] = process.argv.slice(2);
 let s = {}; try { s = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
 s.version = 1; s.enabled = true;
-s.allowedUsers = [...new Set([...(s.allowedUsers ?? []), ...(login ? [login.toLowerCase()] : [])])];
+const before = JSON.stringify(s.allowedUsers ?? []);
+s.allowedUsers = [...new Set([...(s.allowedUsers ?? []), ...logins.split(/[\s,;]+/).filter(Boolean).map(u => u.toLowerCase())])];
+if (JSON.stringify(s.allowedUsers) !== before) fs.writeFileSync(file + '.changed', '');
 if (!/^[A-Za-z0-9_-]{16,}$/.test(s.token ?? '')) s.token = require('crypto').randomBytes(24).toString('base64url');
 fs.writeFileSync(file, JSON.stringify(s, null, 2) + '\n', { mode: 0o600 }); fs.chmodSync(file, 0o600);
 console.log('    tailscale-remote.json: enabled, allowed users ' + JSON.stringify(s.allowedUsers));
 JS
+        # The plugin reads the state file at boot: if our dsh is already up and the allowlist changed, restart it.
+        if [ -e "$STATE.changed" ]; then rm -f "$STATE.changed"; lsof -ti tcp:"$WEB_PORT" -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null || true; sleep 2; fi
         launchctl kickstart -k "gui/$(id -u)/$RELAY_LABEL" 2>/dev/null || true
         log "poking the relay (starts dsh web; ~10 s on a cold start)"
         curl -s -o /dev/null --max-time 5 "http://127.0.0.1:$RELAY_PORT/" || true
