@@ -244,6 +244,24 @@ former, and a `skipPresets` gate in the two per-agent plugins for the latter
 `agent-preset/selected`). Diagnosed by decoding the session log
 (`zstd -dc session.v3.jsonl.zstd`, `request/header` → `tools.length`).
 
+### Read-only "Tailscale remote"/"Server" panes and no <private> card for the owner
+
+Seen from the direct-remote Dock app: *"The Tailscale remote is controlled from
+the DSH host only"* and no host-settings cards. Not the relay — that only
+autostarts and forwards; the proxy already admits identity users and hands DSH
+a loopback connection. It was the proxy's **operator** fence: the control
+channel (`/tailscale-remote/*`) and the `ownsHost` script (which makes
+Settings persist on the host and reveals host-settings panes) were granted
+only to requests from the node's own tailnet address. Right for one Mac with
+one owner; on a shared machine the owner of an instance is never "the node". Fix
+(`dsh-tailscale-remote` `identityOperators`, default `true`): **identity-
+admitted ⇒ operator** — the same Serve-injected login the allowlist trusts;
+token/QR holders stay non-operators; `false` restores the old policy.
+Separately, the <private> card lives on the bundle's page in the **sidebar ▸
+Plugins** panel since the 0.1.6-alpha.2 rebase (not Settings), and an instance
+whose plugin client bundle was built before that fix registers into a slot
+that no longer exists — rebuild `lib/client.js` after pulling.
+
 **Paid apps are never installed.** Dash (Kapeli's docs browser) and
 <private> are not offered; instead `dash-docsets` and
 `<private-plugin>` are left out of the build and of the bundle
