@@ -49,9 +49,12 @@ future agent can reproduce it — live in `recipes/` (index in `AGENTS.md`).
   dsh itself: start on first `model/selection` for a carried provider, reuse
   across sessions, adopt (and never kill) externally started instances, stop
   owned servers once idle and unselected. Host-only.
-- `preview-identity` — red whale `/favicon.svg` + "DSH-dev" `/manifest.webmanifest`
-  (and `<title>`) for the preview/dev web server, so a Dock-installed preview
-  is distinguishable from the live instance. Load **only** in `cordis.dev.yml`.
+- `instance-identity` — tell DSH instances apart: colour the sidebar whale
+  (and `/favicon.svg`) per instance (preview red, remotes blue), quieten the
+  build-version chip under the wordmark (no box, 40 % opacity), optionally
+  relabel the Safari web-app manifest. Host-only `<style>` row via
+  `webserver/index-inject`; no client bundle. Bundle default = stock colour +
+  quiet chip; `cordis.dev.yml` gives the preview its red.
 - `settings-shortcut` — ⌘. (Ctrl+. off macOS) toggles the web GUI's Settings
   panel in Chrome, Safari and the Dock-installed Safari web app. Browser-only.
   ⌘, is impossible in Safari (the app consumes it before the page sees it);

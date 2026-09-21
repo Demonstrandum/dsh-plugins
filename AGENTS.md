@@ -121,7 +121,7 @@ generated API in `docs/cordis-api/`):
    `dsh plugin --profile <name> add ./plugins/<dir>` (pnpm-links the local
    directory; `remove` undoes it). Layer order, git installs, and the pnpm
    `allowBuilds` catch: `docs/user/develop/basic/publish.md`.
-   **All thirteen live plugins at once:** `pnpm install-plugins [--profile web]`
+   **All fifteen live plugins at once:** `pnpm install-plugins [--profile web]`
    (`tools/install-plugins.sh`; `pnpm remove-plugins` undoes it). Rows then
    resolve by package name from the profile's hoisted `node_modules`, so no
    patch carries an absolute path. A "superplugin" package that merely lists
@@ -401,8 +401,16 @@ can reproduce or maintain it:
   in `browser-automation`/`<private-plugin>`, and the
   `repair-session-string-content.mjs` log-repair tool (zstd multi-frame and
   packed-chunk-row traps).
-- `preview-identity.md` — red icon + "DSH-dev" label for the preview server,
-  and the dev-overlay/live-profile collision rule.
+- `instance-identity.md` — telling the DSH / DSH Preview / DSH Remote windows
+  apart (`instance-identity` plugin, host-only): a `webserver/index-inject`
+  `<style>` row colours the sidebar whale per instance (`fill="currentColor"`;
+  `span[class*="_brandMark"]` + the rail's `_railMark`) and turns the baked-in
+  build-version chip into dim box-less text; why the wordmark/window title
+  cannot be renamed from a plugin (single-occupant `common` locale namespace,
+  `DocumentTitle` rewrites `document.title`), the `<hash>_local` CSS-module
+  selector fact, and per-instance loading (overlay row vs bundle).
+- `preview-identity.md` — superseded stub (2026-09-05 red favicon + "DSH-dev"
+  manifest for the Safari Dock preview; the dev-overlay/profile collision rule).
 - `promotion-loop-and-duplicate-dsh-tools.md` — the two faults that made the
   live GUI blank and every tool call die after the 2026-09-18 promotion:
   a `launchctl submit` one-shot script is **keepalive by default** (an

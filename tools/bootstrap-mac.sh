@@ -408,7 +408,6 @@ has_<private>() { [ -d /Applications/<private>.app ] || [ -d /Applications/<priv
 EXCLUDED=()
 has_dash    || EXCLUDED+=(dash-docsets)
 has_<private> || EXCLUDED+=(<private-plugin>)
-EXCLUDED+=(preview-identity)   # dev-overlay only, never in a live profile (install-plugins.sh omits it too)
 excluded() { case " ${EXCLUDED[*]} " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 # ===========================================================================
@@ -636,7 +635,7 @@ if wants install-plugins; then
   banner "Install the plugins into the web profile as bundles"
   [ -x "$DIR/tools/install-plugins.sh" ] || [ "$DRY" = 1 ] || die "tools/install-plugins.sh missing in $DIR"
   WITHOUT=""
-  for p in "${EXCLUDED[@]}"; do [ "$p" = preview-identity ] || WITHOUT="$WITHOUT,$p"; done
+  for p in "${EXCLUDED[@]}"; do WITHOUT="$WITHOUT,$p"; done
   WITHOUT="${WITHOUT#,}"
   IP_ARGS=(--checkout "$CK"); [ -z "$WITHOUT" ] || IP_ARGS+=(--without "$WITHOUT")
   if [ "$DRY" = 1 ] && [ ! -d "$DIR" ]; then log "would run tools/install-plugins.sh ${IP_ARGS[*]}"

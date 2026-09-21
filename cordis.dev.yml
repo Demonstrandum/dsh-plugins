@@ -17,10 +17,26 @@
 # Paths MUST be absolute (a patch contributes config; it does not move the
 # loader's module-resolution root). Machine-specific by design.
 - insert:
-    # Preview-only identity: red whale + "DSH-dev" title so the preview is
-    # never confused with the live server.
-    - id: tali-preview-identity
-      name: '/Users/USER/github/tali-dash-plugins/plugins/preview-identity/index.js'
+    # Instance identity: red sidebar whale + favicon and a "DSH-dev" web-app
+    # manifest so the preview is never confused with the live server; the
+    # build-version chip is quiet (default). Live/remote profiles get the same
+    # plugin as a BUNDLE (pnpm install-plugins) — never both for one home.
+    - id: tali-instance-identity
+      name: '/Users/USER/github/tali-dash-plugins/plugins/instance-identity/index.js'
+      config:
+        brandColor: '#E5484D'
+        dockLabel: DSH-dev
+    # symba-dsh under trial (2026-09-21): the Symba CLI as symba_* tools. Lives
+    # in the PRIVATE symbolica-ai/symba repo (branch tali/dsh-plugin,
+    # integrations/dsh/), not in this repo. Handles persist in
+    # ~/.dsh-preview/symba-dsh.json. It talks to production Forge with the maintainer's
+    # tailnet identity — creating a node from the preview costs real money.
+    # Installed as a BUNDLE into the preview profile instead of a row here
+    # (only bundles get a Plugins-panel page for their card):
+    #   DSH_HOME=~/.dsh-preview pnpm dsh plugin --profile web add ~/github/symba/integrations/dsh
+    # (never both — duplicate id fails the boot). Row form, for host-only trials:
+    # - id: symba-dsh
+    #   name: '/Users/USER/github/symba/integrations/dsh/index.js'
     # (numbered-switching was trialed here 2026-09-21 together with
     # dsh-remote-workspaces — the preview mirrored itself as a remote via the
     # control channel; state persists in ~/.dsh-preview/remote-workspaces.json.

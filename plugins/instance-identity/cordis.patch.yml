@@ -1,0 +1,12 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# Defaults: stock whale colour, subtle build-version badge, stock manifest.
+# Override `config` in the profile's cordis.patch.yml (a later layer replaces
+# the whole value):
+#   - id: tali-instance-identity
+#     config:
+#       brandColor: '#0090FF'   # sidebar whale + /favicon.svg; '' = stock
+#       versionBadge: subtle    # subtle | stock
+#       dockLabel: ''           # non-empty: replace /manifest.webmanifest (Safari "Add to Dock" installs)
+- insert:
+    - id: tali-instance-identity
+      name: tali-instance-identity

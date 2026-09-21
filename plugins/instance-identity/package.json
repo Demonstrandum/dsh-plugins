@@ -1,0 +1,26 @@
+{
+  "name": "tali-instance-identity",
+  "version": "0.2.0",
+  "private": true,
+  "description": "DSH plugin: tell one DSH web instance from another — colour the sidebar whale (and favicon), quieten the build-version badge, optionally relabel the Safari web-app manifest. Host-only, no client bundle.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "favicon-template.svg",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "check": "node --check index.js",
+    "test": "node --test tests/*.test.mjs"
+  }
+}

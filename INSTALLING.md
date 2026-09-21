@@ -382,12 +382,12 @@ build-only plugins (`session-title-slug`, `settings-shortcut`) have no runtime d
 they are installed too:
 
 ```sh
-for p in plugins/*/; do (cd "$p" && pnpm install); done          # 13 plugins; the three plain-ESM ones are no-ops
+for p in plugins/*/; do (cd "$p" && pnpm install); done          # the three plain-ESM ones are no-ops
 for p in dsh-tailscale-remote dsh-remote-workspaces session-title-slug settings-shortcut \
          foreign-link-opener <private-plugin>; do (cd plugins/$p && pnpm build); done
 ```
 
-`enforce-model-preset`, `local-model-supervisor`, `preview-identity` are plain
+`enforce-model-preset`, `local-model-supervisor`, `instance-identity` are plain
 ESM with `node:` imports only. A `dsh.client` package whose `lib/client.js` is
 missing fails activation loudly at boot, so build before loading.
 
@@ -480,8 +480,9 @@ carries an absolute path. It refuses to run if a client plugin's
 | `tali-settings-shortcut` | nothing | ⌘. toggles Settings |
 | `tali-session-title-slug` | nothing | `slug: prompt` naming |
 | `dsh-remote-workspaces` | nothing (only meaningful on a Mac that controls remotes) | "Remotes" sidebar section |
+| `tali-instance-identity` | nothing; set `brandColor` by id in the profile patch to colour this instance's sidebar whale (`#0090FF` on a remote Mac) | quiet version chip under the wordmark |
 
-Not installed, by choice: `preview-identity` (dev-overlay only; never in a live profile). A plugin
+A plugin
 whose external app is missing does not break the boot — its tools fail at
 first use — so remove it or leave it.
 

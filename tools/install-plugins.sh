@@ -53,10 +53,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# The live set. Deliberately absent: preview-identity (dev-overlay only; never
-# in a live profile).
+# The live set. instance-identity's bundle default is stock whale + subtle
+# version chip; the preview overlay loads the same plugin by absolute path
+# with its red colour — a home gets one or the other, never both.
 PLUGINS=(
   dsh-tailscale-remote
+  instance-identity
   enforce-model-preset
   browser-automation
   dash-docsets
