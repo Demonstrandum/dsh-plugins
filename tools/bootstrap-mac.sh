@@ -206,6 +206,12 @@ write_marker() { # write_marker STARTED
     "$1" "${DIR:-}" "$INSTANCE" "${WEB_PORT:-null}" >"$MARKER"
 }
 have_brew() { [ -x /opt/homebrew/bin/brew ]; }
+# Homebrew: install exactly what we ask for. No `brew update` on first use (a fresh tap sync prints pages
+# of unrelated new formulae/casks and can take a minute), no upgrading of already-installed dependents,
+# no post-install cleanup of unrelated versions, no env hints. These are environment variables, not
+# flags — Homebrew has no per-command switch for the auto-update.
+export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 HOMEBREW_NO_INSTALL_CLEANUP=1 \
+       HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_ANALYTICS=1
 brew_env() { have_brew && eval "$(/opt/homebrew/bin/brew shellenv)"; }
 pkg_field() { node -p "const p=require('$1/package.json'); $2" 2>/dev/null; }
 
