@@ -38,6 +38,10 @@ const CHROME = 'nav, header, footer, aside, [role=navigation], [role=banner], [r
 const NOT_CLICKABLE = 'summary, [role=tab], [aria-haspopup], [role=combobox], [role=menuitem], input, select, textarea'
 const MAIN = 'main, [role=main], article, #content, #main, #main-content'
 const HEADINGS = 'h1, h2, h3, h4, h5, h6, [role=heading]'
+/** Elements whose presence makes a heading's ancestor a section container rather than a mere heading wrapper (see scopeScript). */
+const BLOCK_CONTENT = 'p, ul, ol, dl, table, pre, blockquote, figure, img, iframe, section, article'
+/** Text a heading wrapper may carry beside the heading itself ("edit", "[edit source]", "¶", "#", "Copy link"). */
+const MAX_WRAPPER_DECORATION_CHARS = 24
 const MAX_CLICKS = 50
 const MAX_TAB_PANEL_CHARS = 4000
 
@@ -131,9 +135,17 @@ if (P.selectors && P.selectors.length > 0) {
   if (!h) return { error: 'section heading not found: ' + P.section };
   if (!h.matches(HEADINGS)) { const inner = h.querySelector(HEADINGS); if (inner) h = inner; }
   const hl = h.matches(HEADINGS) ? level(h) : 7;
-  // A heading wrapped alone in its parent(s): the section's siblings live one level up.
+  // A heading wrapped in its parent(s): the section's siblings live one level up. The wrapper may carry
+  // decorations beside the heading — MediaWiki's <div class="mw-heading"><h2/><span class="mw-editsection">edit</span></div>,
+  // permalink anchors ("¶", "#") — but never a second heading or block content (then it is the section itself).
+  const ht = textOf(h);
+  const wrapsHeading = (el) => {
+    if (el === document.body || el.querySelectorAll(HEADINGS).length !== 1 || el.querySelector(${JSON.stringify(BLOCK_CONTENT)})) return false;
+    const extra = textOf(el).replace(ht, '').trim();
+    return extra.length <= ${MAX_WRAPPER_DECORATION_CHARS};
+  };
   let anchor = h;
-  while (anchor.parentElement && anchor.parentElement !== document.body && textOf(anchor.parentElement) === textOf(h)) anchor = anchor.parentElement;
+  while (anchor.parentElement && wrapsHeading(anchor.parentElement)) anchor = anchor.parentElement;
   nodes.push(anchor);
   for (let sib = anchor.nextElementSibling; sib; sib = sib.nextElementSibling) {
     // The section ends at the next heading of the same or a higher level, whether it is the sibling itself or wrapped inside it.
