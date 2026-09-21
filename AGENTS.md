@@ -320,9 +320,11 @@ can reproduce or maintain it:
   bundle-id detection — the Setapp-Dash trap), why a `.pkg` is the wrong
   container, the headless facts it relies on, the macOS-VM landscape
   (Virtualization.framework vs UTM / Tart / VirtualBuddy) and the pending
-  clean-VM test plan on the remote; `pnpm bootstrap-remote user@host` (ssh runner) and
-  `--replace`, which turns a deploy-remote (Path B) host such as <remote> into a
-  standalone install while keeping `~/.dsh`.
+  clean-VM test plan; `pnpm bootstrap-remote user@host` (ssh runner) and
+  `--replace`, which turned <remote> from a deploy-remote (Path B) host into a
+  standalone install while keeping `~/.dsh` (2026-09-21; the five-run log of
+  what only a real run finds: ssh submodule URL, masked `runq` failures,
+  lefthook vs a fresh submodule's `core.worktree`, pnpm 12 build scripts).
 - `browser-automation-plugin.md` — per-chat Safari Technology Preview /
   Chrome windows and the isolated page reader (`browser-automation` plugin):
   why a plugin and not MCP config, the STP `--mcp` facts that shape it, the

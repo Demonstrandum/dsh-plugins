@@ -495,6 +495,12 @@ else
 fi
 CK="$DIR/deepseek-harness"
 [ "$DRY" = 1 ] || [ -f "$CK/package.json" ] || die "fork submodule not present at $CK (run the clone step)"
+# The marker is written before the directory is known; record it now so a bare re-run finds the clone.
+MARKER="${DSH_HOME:-$HOME/.dsh}/bootstrap-mac.json"
+if [ "$DRY" = 0 ] && [ -f "$MARKER" ] && ! grep -q "\"dir\": \"$DIR\"" "$MARKER"; then
+  printf '{ "tool": "tali-dash-plugins/tools/bootstrap-mac.sh", "started": "%s", "dir": "%s" }\n' \
+    "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("started",""))' "$MARKER" 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)" "$DIR" >"$MARKER"
+fi
 
 # ===========================================================================
 if wants fork; then

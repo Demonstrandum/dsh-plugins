@@ -88,7 +88,7 @@ Local fallback: http://127.0.0.1:3084/?token=<standing token>   (Dock app uses i
 | Logs (launchd stdout/stderr) | `~/dsh/logs/dsh.log`, `~/dsh/logs/afm.log` |
 | Dock app | `~/Applications/DSH.app` (`Contents/Resources/dsh-dock-app.json` holds url/fallback/tokenFile) |
 
-Path C differs: the checkout is this repo's submodule
+Path C (what **the remote runs since 2026-09-21**, after `pnpm bootstrap-remote <user>@<remote> --replace`) differs: the checkout is this repo's submodule
 `tali-dash-plugins/deepseek-harness` (the plugins link into it relatively) run
 through `pnpm dsh web`, an always-on **relay** LaunchAgent (`io.github.taliesinb.dsh-web-relay`,
 port 3083) starts DSH on demand, and the plugins load from

@@ -95,14 +95,27 @@ Why the old absolute-path overlay must go: `install-plugins` adds the same
 plugins as bundles, and duplicate `tali-*` row ids fail the boot. Why the
 Path B checkout must go: nothing else references it, and 1.7 GB.
 
-`pnpm bootstrap-remote <user>@<remote> --dry-run --replace` (verified 2026-09-21,
-exit 0) prints the full plan from the remote's point of view; the real run is
-`pnpm bootstrap-remote <user>@<remote> --replace` (no local tty → `--yes` is
-added; <remote> needs no sudo since brew and the CLT are there). Over ssh the
-GUI-dependent parts work because the user is logged into the remote's GUI session:
-`launchctl bootstrap gui/$UID`, `open -ga Tailscale`, the Tailscale CLI (the
-"GUI failed to start" error is launchd-only — needs `SHLVL`, which an ssh
-command has), `xcrun swiftc` and the Dock pin all worked for deploy-remote.sh.
+**Done for real on 2026-09-21** (`pnpm bootstrap-remote <user>@<remote> --replace`,
+no local tty → `--yes`; <remote> needed no sudo since brew and the CLT were
+there). Result: relay LaunchAgent `io.github.taliesinb.dsh-web-relay` running
+`pnpm dsh web` from `~/github/tali-dash-plugins/deepseek-harness` (2.7 GB),
+Serve `/dsh` → `:3083`, 12 `tali-` rows, afm answering, Dock app rebuilt
+(`fallbackUrl` now `:3083`, still pinned), `~/dsh` and `~/.dsh/deploy` gone,
+`~/.dsh` intact (token + 3 allowlisted users), `https://<remote>.example.ts.net/dsh/`
+→ 200 from the Air by identity. Over ssh the GUI-dependent parts worked as
+expected because the user is logged into the remote's GUI session (`launchctl
+bootstrap gui/$UID`, the Tailscale CLI, `xcrun swiftc`, launching the app).
+
+It took **five runs**; each failure resumed via the marker, and each found a
+bug that a dry run cannot (all fixed in `638c95a`…`49d8689`):
+
+| Run | Failure | Root cause → fix |
+|---|---|---|
+| 1 | `git clone --recurse-submodules`: *Host key verification failed* | `.gitmodules` uses `git@github.com:` for the fork; a fresh machine has no GitHub key. The fork is public → clone the superproject alone, then override `submodule.<name>.url` to https **in the clone's config** (`.gitmodules` untouched, so the maintainer's ssh workflow is unaffected) before `submodule update --init` |
+| 2 | fork "built" ✓ but `apps/cli/lib/bin.js` missing; plugins ✓ with `ERR_PNPM_IGNORED_BUILDS`; `--without` unknown | (a) `runq` read `$?` *after* an `if` → always 0, masking every failure; (b) the fork's postinstall `install-lefthook.mjs` refused the submodule layout; (c) pnpm 12 (brew's latest; plugins pin no pnpm) makes ignored build scripts an error → `--config.dangerouslyAllowAllBuilds=true`; (d) the remote's clone was `main` *before* the push — the remote flow only works once `main` carries the tooling |
+| 3 | `--without` still unknown | the adopt path didn't `pull`; my "clean tree" precondition was defeated by our own `cordis.dev.yml` re-point → always `pull --ff-only`, warn on failure |
+| 4 | `install-plugins` → `pnpm dsh plugin add` fails in the lefthook postinstall | pnpm's verify-deps-before-run re-runs `pnpm install` before **every** `pnpm dsh …`, so `CI=true` on two commands was not enough. Real fix = the migration the error asks for, on the submodule's common config: `core.repositoryFormatVersion 1`, `extensions.worktreeConfig true`, move `core.worktree` into `config.worktree`. (the maintainer's own submodule has an *embedded* `.git` dir and no `core.worktree`, which is why it never showed up locally.) |
+| 5 | — | success |
 
 **Paid apps are never installed.** Dash (Kapeli's docs browser) and
 <private> are not offered; instead `dash-docsets` and
@@ -189,11 +202,10 @@ script — not logic inside `postinstall`.
   propose no action (both paid-app plugins correctly detected as installable).
   No real run has been made on that machine on purpose — it would
   re-clone/rebuild the live checkout.
-- **Remote dry run on the remote** (`pnpm bootstrap-remote <user>@<remote> --dry-run
-  --replace`): all 16 steps, exit 0 — plan: tear down Path B, `brew install
-  node pnpm`, clone, build, 12 bundles (`--without dash-docsets`), afm present,
-  relay + route + Dock app rebuild. Real run pending the maintainer's go-ahead (it
-  replaces a working deployment).
+- **Real `--replace` run on the remote, 2026-09-21: success** on the fifth attempt
+  (see § Redeploying for the four bugs the first four found). <remote> is now a
+  Path C install driven by the relay; `deploy-remote.sh`/`remote-ctl.sh` no
+  longer apply to it (`pnpm remote-status` looks for `ai.symbolica.dsh-remote`).
 - **Clean-machine run: pending.** Plan: a pristine macOS guest on **<remote>**
   (macOS 27.0, 366 GB free; the Air has 30 GB free, too little for a
   20–25 GB guest image) with **Tart** (`brew install cirruslabs/cli/tart`;
@@ -229,6 +241,10 @@ because everything is scriptable and a `tart clone` is a free snapshot.
 | `something already listens on :3080` in the `home` step | another DSH instance; stop it or run `--skip home` if `~/.dsh/profiles/web` already exists |
 | `still waiting for the Tailscale login…` | complete the browser login at the printed `log in here:` URL (same user as your other DSH Macs); `--tailscale-timeout 600` bounds the wait |
 | `no /dsh in tailscale serve status` | MagicDNS + HTTPS certs off on the tailnet, or Tailscale run from bare launchd (the relay plist uses `zsh -lc`; see INSTALLING.md A2) |
+| fork `pnpm install`/`pnpm dsh`: `[install-lefthook] cannot enable extensions.worktreeConfig while core.worktree is in the common config` | freshly cloned submodule; the clone step's migration did not run (re-run `--only clone`), or do it by hand: `git config --file .git/modules/deepseek-harness/config core.repositoryFormatVersion 1; … extensions.worktreeConfig true; … --unset core.worktree; git config --file .git/modules/deepseek-harness/config.worktree core.worktree ../../../deepseek-harness` |
+| `Host key verification failed` cloning the submodule | the `git@github.com:` URL in `.gitmodules`; the clone step overrides it to https — if it did not, `git config submodule.deepseek-harness.url https://github.com/taliesinb/deepseek-harness.git` then `git submodule update --init` |
+| `ERR_PNPM_IGNORED_BUILDS` in a plugin | pnpm ≥ 12 — `pnpm install --config.dangerouslyAllowAllBuilds=true` (the script does) |
+| remote run: `unknown argument: --without` (or any tool missing on the host) | the host clones `origin/main`: push first |
 | `pnpm install` in a plugin fails on `link:` | fork submodule missing: the `clone` step's `git submodule update --init` did not run — re-run `--only clone,plugins` |
 | afm smoke test: `Apple Intelligence is not enabled` | expected until System Settings → Apple Intelligence & Siri is on and the model downloaded; also always the case inside a VM |
 
