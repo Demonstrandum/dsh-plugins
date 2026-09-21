@@ -53,7 +53,7 @@ export const REMOTE_GLYPH_COLOR = '#0090FF'
  */
 export function parseRemoteTarget(text) {
   const raw = String(text ?? '').trim()
-  if (raw === '') throw new Error('remote target must not be empty ([user@]host[/path] or a URL)')
+  if (raw === '') throw new Error('remote target must not be empty (host[/path] or a URL)')
   if (/^https?:\/\//i.test(raw)) {
     const u = new URL(raw)
     const path = u.pathname.replace(/\/+$/, '') || '/'
