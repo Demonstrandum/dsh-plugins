@@ -470,6 +470,26 @@ if wants clone; then
     done
   fi
   run git -C "$DIR" submodule update --init || die "submodule checkout failed"
+  # A freshly cloned submodule keeps `core.worktree` in its common config (.git/modules/<name>/config).
+  # The fork's pnpm postinstall (scripts/install-lefthook.mjs) refuses that layout — and pnpm re-runs the
+  # postinstall before EVERY `pnpm dsh …` (verify-deps-before-run), so nothing in the fork would work.
+  # Do the migration its error message asks for: repository format 1, extensions.worktreeConfig, and
+  # core.worktree moved into config.worktree. (the maintainer's own submodule has an embedded .git dir and no
+  # core.worktree, which is why this never showed up there.)
+  if [ "$DRY" = 0 ]; then
+    for sub in $(git -C "$DIR" submodule --quiet foreach 'echo $sm_path' 2>/dev/null); do
+      gd="$(git -C "$DIR/$sub" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+      [ -n "$gd" ] || continue
+      wt="$(git config --file "$gd/config" core.worktree 2>/dev/null || true)"
+      if [ -n "$wt" ]; then
+        git config --file "$gd/config" core.repositoryFormatVersion 1
+        git config --file "$gd/config" extensions.worktreeConfig true
+        git config --file "$gd/config" --unset core.worktree
+        git config --file "$gd/config.worktree" core.worktree "$wt"
+        ok "submodule $sub: core.worktree moved to config.worktree (repository format 1, extensions.worktreeConfig)"
+      fi
+    done
+  fi
 else
   [ -n "$DIR" ] || DIR="$HOME/github/tali-dash-plugins"; DIR="${DIR/#\~/$HOME}"
 fi
@@ -484,12 +504,9 @@ if wants fork; then
   else
     log "pnpm install (the fork pins pnpm via packageManager; pnpm fetches that version itself)"
     if [ "$DRY" = 1 ] && [ ! -d "$CK" ]; then log "would run pnpm install && pnpm run build in $CK"; else
-    # CI=true: the fork's postinstall (scripts/install-lefthook.mjs) returns early under CI; otherwise it
-    # refuses to run inside a freshly cloned submodule ("cannot enable extensions.worktreeConfig while
-    # core.worktree is in the common config"). Git hooks are for developers, not a deployment target.
-    (cd "$CK" && CI=true runq pnpm install) || die "pnpm install failed in $CK"
+    (cd "$CK" && runq pnpm install) || die "pnpm install failed in $CK"
     log "pnpm run build (~2 minutes)"
-    (cd "$CK" && CI=true runq pnpm run build) || die "fork build failed"
+    (cd "$CK" && runq pnpm run build) || die "fork build failed"
     [ -f "$CK/apps/cli/lib/bin.js" ] || die "build reported success but $CK/apps/cli/lib/bin.js is missing"
     fi
     ok "built"
