@@ -170,8 +170,12 @@ through untouched. When a new opaque server message turns up, add a row to
 
 ## Requirements
 
-- **Safari**: Safari Technology Preview 247+ (or Safari 27) with Develop ▸
-  Developer Settings ▸ *Allow Remote Automation*. STP is launched on demand,
+- **Safari**: Safari Technology Preview 247+ (or Safari 27) with *Allow
+  Remote Automation* on — `sudo "/Applications/Safari Technology
+  Preview.app/Contents/MacOS/safaridriver" --enable` (admin password once,
+  per macOS user; the bootstrap runs it) or Develop ▸ Developer Settings in
+  STP. `defaults write` is ignored: the switch lives in a secure per-user
+  store, and `--enable` is Apple's scripted path to it. STP is launched on demand,
   in the background; the user's regular Safari is never touched. There is no
   classic-Safari fallback (stable Safari's driver has no `--mcp`); tools fail
   with an explanatory message when STP is missing.

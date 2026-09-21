@@ -393,6 +393,17 @@ if wants apps && [ "$APPS" = 1 ]; then
       [ "$DRY" = 1 ] || open -ga "Safari Technology Preview" || true
       todo "Safari Technology Preview was launched in the background — accept its licence once, then quit it"
     fi
+    # "Allow Remote Automation" (Develop ▸ Developer Settings) is what safaridriver needs; Apple's
+    # command-line switch for it is `safaridriver --enable` (needs an admin password once, per user).
+    # Verified 2026-09-21: without it every safari_* call fails with WebDriverErrorDomain Code=6.
+    SD="/Applications/Safari Technology Preview.app/Contents/MacOS/safaridriver"
+    if [ "$DRY" = 1 ]; then log "would run: sudo safaridriver --enable (Allow Remote Automation)"
+    elif sudo -n true 2>/dev/null || [ -t 0 ]; then
+      if sudo "$SD" --enable; then ok "Allow Remote Automation enabled for this user (safaridriver --enable)"
+      else warn "safaridriver --enable failed — enable Develop ▸ Developer Settings ▸ Allow Remote Automation in STP by hand"; fi
+    else
+      todo "run: sudo \"$SD\" --enable   (Allow Remote Automation; needed by the safari_* tools)"
+    fi
   fi
 fi
 

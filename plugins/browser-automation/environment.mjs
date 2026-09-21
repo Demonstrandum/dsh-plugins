@@ -28,7 +28,7 @@ export const CHROME_INSTALL_REMEDY = `${ASK_USER}download and install Google Chr
 
 export const STP_INSTALL_REMEDY = `${ASK_USER}download and install Safari Technology Preview (release 247 or newer) from https://developer.apple.com/safari/technology-preview/, then in Safari Technology Preview enable Develop ▸ Developer Settings ▸ "Allow Remote Automation", and retry. Classic Safari cannot be used instead (its safaridriver has no MCP mode). Until then use the chrome_* tools if Google Chrome is available.`
 
-export const STP_REMOTE_AUTOMATION_REMEDY = `${ASK_USER}open Safari Technology Preview, choose Develop ▸ Developer Settings… (enable the Develop menu first under Settings ▸ Advanced ▸ "Show features for web developers" if it is hidden), tick "Allow Remote Automation", then retry. This switch cannot be set by script. Until then use the chrome_* tools if Google Chrome is available.`
+export const STP_REMOTE_AUTOMATION_REMEDY = `${ASK_USER}enable "Allow Remote Automation" for Safari Technology Preview. From a terminal on this machine (admin password asked once, per macOS user): sudo "/Applications/Safari Technology Preview.app/Contents/MacOS/safaridriver" --enable — or in STP choose Develop ▸ Developer Settings… and tick "Allow Remote Automation" (enable the Develop menu first under Settings ▸ Advanced if it is hidden). Then retry. Until then use the chrome_* tools if Google Chrome is available.`
 
 const CHROME_BUNDLES = [
   '/Applications/Google Chrome.app',

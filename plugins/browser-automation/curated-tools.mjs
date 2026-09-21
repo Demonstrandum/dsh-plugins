@@ -1030,7 +1030,7 @@ const FAILURE_HINTS = [
   [/no element matches/i, 'check the selector against the live DOM: safari_get_page_structure lists heading/landmark selectors, or evaluate document.querySelectorAll(...).length with safari_evaluate_expression.'],
   [/element is outside the viewport/i, 'pass scrollTo: true (default) or enlarge the window with safari_set_viewport_size, then retake.'],
   [/does not declare image input/i, 'the current model cannot see images; the screenshot was saved to a file instead — switch to a vision-capable model or inspect it with read_image.'],
-  [/Allow Remote Automation|Remote Automation/i, 'enable Develop ▸ Developer Settings ▸ "Allow Remote Automation" in Safari Technology Preview.'],
+  [/Allow Remote Automation|Remote Automation/i, 'enable "Allow Remote Automation" for Safari Technology Preview: sudo "/Applications/Safari Technology Preview.app/Contents/MacOS/safaridriver" --enable (or Develop ▸ Developer Settings in STP).'],
 ]
 
 /** Append the first matching remedy from FAILURE_HINTS to a message (unchanged when none matches). */

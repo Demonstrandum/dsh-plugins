@@ -170,13 +170,13 @@ HTTPS in identity mode (no tailnet peer was running DSH).
   ("Target closed"): clear the cask's quarantine attr and launch Chrome
   once headfully (`open -a "Google Chrome" --args --no-first-run`) before
   automation.
-- **Safari Technology Preview's "Allow Remote Automation" cannot be set by
-  script**: modern Safari keeps it in a secure per-user store
-  (`DidMigrateWebDriverAllowRemoteAutomation`); `defaults write` is ignored
-  and `safaridriver --enable` needs sudo (password). Toggle it once in the
-  GUI on the host: STP ▸ Develop ▸ Developer Settings ▸ Allow Remote
-  Automation. Until then `safari_*` tools error with WebDriverErrorDomain 6;
-  `chrome_*` work regardless.
+- **Safari Technology Preview's "Allow Remote Automation" IS scriptable**
+  (correction, 2026-09-21): `defaults write` is ignored (secure per-user
+  store, `DidMigrateWebDriverAllowRemoteAutomation`), but Apple's own
+  `sudo safaridriver --enable` flips it — verified over ssh on a shared machine
+  for a never-logged-in account, a WebDriver session followed at once. The
+  bootstrap runs it after installing STP; until it is run, `safari_*` tools
+  error with WebDriverErrorDomain 6 and their remedy text names the command.
 - **<private>'s first kernel launch took 62 s** on the remote (paclet index +
   licence handshake) — past `<private>_eval`'s 60 s `timeConstraint`, so the
   very first call fails and the retry succeeds; subsequent cold starts are
