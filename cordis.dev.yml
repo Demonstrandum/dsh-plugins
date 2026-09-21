@@ -50,3 +50,8 @@
     # recipes/session-title-slug-plugin.md. Never leave a /tmp row in: it
     # evaporates on reboot and a dsh.client row with a missing lib/client.js
     # fails the boot.)
+    # Under trial (2026-09-21 evening): numbered-switching — badge stylesheet
+    # lost after a plugin re-apply (reconnect / hot-swap); same lib/client.js
+    # as the live bundle, so a rebuild hot-swaps both.
+    - id: tali-numbered-switching
+      name: '/Users/USER/github/tali-dash-plugins/plugins/numbered-switching/index.js'

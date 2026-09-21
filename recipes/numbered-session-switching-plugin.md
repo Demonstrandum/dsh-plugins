@@ -180,6 +180,7 @@ stayed put.
 | Symptom | Cause / fix |
 |---|---|
 | ⌘N does nothing in Chrome / Safari | The browser owns ⌘digit. Use the Dock app (or Electron desktop, untested). |
+| Digits jump to title size and shift the titles right; a reload fixes it (the maintainer, 19:23, after a "reconnecting") | The badge stylesheet was gone: it was a shared `<style id>`, and on a plugin re-apply (reconnect / hot-swap) the NEW instance's `ensureStyle` adopted the old element, then the OLD instance's `dispose` removed it — apply-before-dispose ordering. Reproduced by deleting the sheet: badge `static`, 14px, title +8px. Fixed 2026-09-21 evening: per-install `[data-tns-style]` element, re-appended in `sync` when disconnected, and `position/inset/width/font-size/pointer-events` inlined on the badge (a lost sheet now costs only the state colors). Verified through two consecutive hot-swaps: one sheet, badges absolute, titles in place. **General rule for client plugins that inject a `<style>`: own it per instance, never look it up by a shared id.** |
 | No badges but the console line is present | Row→id failed: React expando renamed, or `SessionNodeItem` no longer takes `node`. Inspect `Object.keys(row)` and the `.return` chain; README "How it works". |
 | Badge overlaps the status dot | Row padding changed (`Rows.module.css`) — update `STYLE_TEXT` width in `badges.ts`. |
 | Newly opened row invisible in a screenshot | DSH's `row-in` mount animation frozen in a hidden/occluded window; unrelated to the plugin. |

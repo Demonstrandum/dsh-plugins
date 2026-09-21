@@ -50,7 +50,8 @@ const POSITIONED_ATTR = 'data-tns-positioned'
 const HIDDEN_ATTR = 'data-tns-hidden'
 /** Width of the rows' status slot (Rows.module.css `.slot`, remote `S.slot`). */
 const SLOT_WIDTH_PX = 16
-const STYLE_ID = 'tali-numbered-switching-style'
+/** Marks this plugin's stylesheet; one element PER INSTALL (see createStyle). */
+const STYLE_ATTR = 'data-tns-style'
 const ROW_SELECTOR = 'div[role="treeitem"][aria-selected]'
 const GHOST_WRAPPER_SELECTOR = '[data-tdsn-ghost]'
 /** dsh-remote-workspaces row identity (`<workspaceId>:<sessionId>`). */
@@ -173,15 +174,38 @@ function sessionRows(): HTMLElement[] {
   return out
 }
 
-function ensureStyle(): HTMLStyleElement {
-  let style = document.getElementById(STYLE_ID) as HTMLStyleElement | null
-  if (style === null) {
-    style = document.createElement('style')
-    style.id = STYLE_ID
-    style.textContent = STYLE_TEXT
-    document.head.append(style)
-  }
+/**
+ * This install's own stylesheet. Never shared by id: when the plugin is
+ * re-applied (a bundle hot-swap, a reconnect) the NEW instance's apply can run
+ * before the OLD instance's dispose, and a shared `<style id>` would be adopted
+ * by the new one and then removed by the old one's disposer — leaving the
+ * badges unstyled: static, title-sized digits pushing the titles right (seen
+ * live 2026-09-21 after a "reconnecting"). Each instance appends and removes
+ * its own element; `sync` re-appends it if anything else took it out.
+ */
+function createStyle(): HTMLStyleElement {
+  const style = document.createElement('style')
+  style.setAttribute(STYLE_ATTR, '')
+  style.textContent = STYLE_TEXT
+  document.head.append(style)
   return style
+}
+
+/**
+ * Layout-critical declarations, inlined on every badge as well: even with no
+ * stylesheet at all the digit stays out of the row's flex flow and small. Only
+ * the state colors and the pulse depend on the sheet.
+ */
+const INLINE_BADGE_STYLE: Readonly<Record<string, string>> = {
+  position: 'absolute',
+  insetBlock: '0',
+  width: `${SLOT_WIDTH_PX}px`,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontSize: '11px',
+  lineHeight: '1',
+  pointerEvents: 'none',
 }
 
 function setBadge(row: HTMLElement, n: number, tooltip: string): void {
@@ -190,6 +214,7 @@ function setBadge(row: HTMLElement, n: number, tooltip: string): void {
     badge = document.createElement('span')
     badge.setAttribute(BADGE_ATTR, '')
     badge.setAttribute('aria-hidden', 'true')
+    Object.assign(badge.style, INLINE_BADGE_STYLE)
     row.prepend(badge)
   }
   const text = String(n)
@@ -253,11 +278,15 @@ function clearBadge(row: HTMLElement): void {
 export function installBadges(inputs: BadgeInputs): { update: () => void; dispose: () => void } {
   let frame: number | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
-  const style = ensureStyle()
+  const style = createStyle()
 
   const sync = (): void => {
     frame = undefined
     timer = undefined
+    // Self-heal: a re-applied sibling instance or a head rewrite may have
+    // removed our sheet; the observer sees the badges lose their styling
+    // through the next row mutation, and here it comes back.
+    if (!style.isConnected) document.head.append(style)
     const rows = sessionRows()
     let titles: ReadonlyMap<string, readonly string[]> | undefined
     const lazyTitles = (): ReadonlyMap<string, readonly string[]> => (titles ??= inputs.titles())

@@ -169,6 +169,7 @@ nine). No runtime config.
 | Symptom | Cause / fix |
 |---|---|
 | Chord does nothing in Chrome/Safari | Expected: the browser owns ⌘digit. Use the Dock app. |
+| Digits suddenly title-sized and titles pushed right (after a "reconnecting" or a bundle hot-swap) | Pre-2026-09-21-evening bundle: the stylesheet was one shared `<style id>`; on a re-apply the new instance adopted it and the old instance's disposer removed it. Now each install owns its own `[data-tns-style]` sheet, re-appends it on every reconcile, and the layout-critical properties are inline on the badge, so a missing sheet can only cost the state colors. Reload fixes an old bundle. |
 | No badges, console line present | Row→id mapping failed: React renamed its fiber expando or `SessionNodeItem` lost its `node` prop; the title fallback then only badges unique titles. Check `fiberSessionId(row)` in the console (`Object.keys(row)` should contain `__reactFiber$…`). |
 | Badges in the wrong place | The badge sits on the 16px slot after the row's leading padding; if Rows.module.css moved or resized the status slot, adjust `SLOT_WIDTH_PX` / `setBadge` in `badges.ts`. |
 | A numbered running session shows no dot | By design: the digit pulses blue instead (`data-state="ongoing"`); green/amber/red likewise replace the dot. |
