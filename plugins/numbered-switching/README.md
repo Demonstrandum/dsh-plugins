@@ -1,15 +1,16 @@
 # tali-numbered-switching
 
 The **five most recently viewed sessions** hold the numbers **1–5**, shown in
-the sidebar gutter left of their titles. **⌘1…⌘5** (Ctrl+digit off macOS)
+the sidebar's status column (the one the Workspace folder icon sits in) left
+of their titles. **⌘1…⌘5** (Ctrl+digit off macOS)
 switch to the holder of that number.
 
 ```
-  dummy2
-1 ● gamma session          5min
-5   beta coding session    5min
-  ● Remote session          5min        ← not in the recent five
-2   Hello                  5min
+📂 dummy2
+ 1 gamma session          5min        ← digit green: finished while you were away
+ 5 beta coding session    5min
+ ● Remote session          5min        ← not in the recent five
+ 2 Hello                  5min
 ```
 
 ## Rules
@@ -115,10 +116,18 @@ while the document is hidden, because a background window gets no frames).
 Geometry: a local session row is `padding-inline-start: calc(8px +
 var(--dsh-workspace-indent))` (`depth * 12px`, 0 under a top-level
 Workspace), a remote row `padding: 0 8px`; then a 16px status slot then the
-title. The badge is `position: absolute` over exactly that padding box (its
-width is copied from the row's computed `padding-inline-start` at reconcile
-time), so the digit sits in the 8px gutter left of the status dot and the
-row's own layout is untouched. Rows
+title. The Workspace header has the same padding and a 16px icon slot, so the
+digit goes **on the status slot** to line up with the folder/chevron: the
+badge is a 16px-wide `position: absolute` span offset by the row's computed
+`padding-inline-start` (read at reconcile time). The row's own layout is
+untouched.
+
+Status under a digit: whatever the slot shows (`StateDot`, the ongoing
+pixel-chase, a remote running dot or spinner) is hidden (`visibility`,
+marked `data-tns-hidden`, restored when the badge goes) and the digit takes
+over its `data-state` color — green done, amber warning, red error, blue
+*pulsing* ongoing — with the same tokens as `StateDot.module.css`. The hover
+card still spells the status out. Rows
 carry `data-tns-positioned` while badged (inline `position: relative`, the
 value Rows.module.css already uses for drag markers) and the badge is
 `<span data-tns-badge aria-hidden title="⌘3">3</span>`. Colours are the
@@ -161,7 +170,8 @@ nine). No runtime config.
 |---|---|
 | Chord does nothing in Chrome/Safari | Expected: the browser owns ⌘digit. Use the Dock app. |
 | No badges, console line present | Row→id mapping failed: React renamed its fiber expando or `SessionNodeItem` lost its `node` prop; the title fallback then only badges unique titles. Check `fiberSessionId(row)` in the console (`Object.keys(row)` should contain `__reactFiber$…`). |
-| Badges in the wrong place | The badge box is the row's leading padding; if Rows.module.css moved the status slot elsewhere, adjust `STYLE_TEXT` / `setBadge` in `badges.ts`. |
+| Badges in the wrong place | The badge sits on the 16px slot after the row's leading padding; if Rows.module.css moved or resized the status slot, adjust `SLOT_WIDTH_PX` / `setBadge` in `badges.ts`. |
+| A numbered running session shows no dot | By design: the digit pulses blue instead (`data-state="ongoing"`); green/amber/red likewise replace the dot. |
 | Remote rows never get a badge | Remote plugin absent, or `data-remote-session` missing from its rows (contract in its README). Console shows `remote workspaces joined the numbering` when the service was found. |
 | Remote slots vanish after ⌘R or a rebuild | Should not happen since the unknown-keeps rule; check `has()` in the remote plugin's `index.tsx` still returns true before the first snapshot. |
 | Numbering reset after ⌘R | `sessionStorage` unavailable (private mode) — numbering is per window and best-effort. |

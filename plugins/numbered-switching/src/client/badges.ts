@@ -26,13 +26,16 @@
  * GEOMETRY — a local session row is `padding-inline-start: calc(8px +
  * var(--dsh-workspace-indent))` (`depth * 12px`; 0 under a top-level
  * Workspace), a remote row `padding: 0 8px`; then a 16px status slot, then
- * the title. The badge is absolutely positioned over exactly that padding
- * box — its width is read from the row's computed `padding-inline-start` at
- * reconcile time, so the digit is centered in the 8px gutter left of the
- * status dot (20px under a nested Workspace) and the row's own layout is
- * untouched. The row gets `position: relative` inline while it carries a
- * badge (Rows.module.css sets the same value for its drag markers, so
- * nothing else changes).
+ * the title. The Workspace header above has the same 8px padding and a 16px
+ * icon slot, so the digit belongs ON the status slot to line up with the
+ * folder/chevron: the badge is absolutely positioned 16px wide, offset by the
+ * row's computed `padding-inline-start` (read at reconcile time), and the
+ * row's own layout is untouched. Whatever indicator the slot shows (StateDot,
+ * the ongoing pixel-chase, a remote running dot or spinner) is hidden under
+ * the digit, which takes over its `data-state` color (and pulses for
+ * ongoing); it is restored when the badge goes. The row gets `position:
+ * relative` inline while it carries a badge (Rows.module.css sets the same
+ * value for its drag markers, so nothing else changes).
  *
  * CSS-module classes are built `[hash]_[local]`, so `[class$="_title"]` is a
  * stable selector; ghost rows from session-title-slug (`data-tdsn-ghost`) are
@@ -43,6 +46,10 @@
 
 const BADGE_ATTR = 'data-tns-badge'
 const POSITIONED_ATTR = 'data-tns-positioned'
+/** Marks a status indicator we hid under the digit (restored on clear). */
+const HIDDEN_ATTR = 'data-tns-hidden'
+/** Width of the rows' status slot (Rows.module.css `.slot`, remote `S.slot`). */
+const SLOT_WIDTH_PX = 16
 const STYLE_ID = 'tali-numbered-switching-style'
 const ROW_SELECTOR = 'div[role="treeitem"][aria-selected]'
 const GHOST_WRAPPER_SELECTOR = '[data-tdsn-ghost]'
@@ -53,8 +60,8 @@ const STYLE_TEXT = `
 [${BADGE_ATTR}] {
   position: absolute;
   inset-block: 0;
-  inset-inline-start: 0;
-  width: 8px; /* overwritten per row from its computed padding */
+  inset-inline-start: 0; /* overwritten per row: the row's leading padding */
+  width: ${SLOT_WIDTH_PX}px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -70,6 +77,19 @@ const STYLE_TEXT = `
 }
 [role="treeitem"][aria-selected="true"] > [${BADGE_ATTR}] {
   color: var(--dsw-alias-label-secondary);
+}
+/* The digit stands in for the status dot it covers: same state colors as
+   ui-primitives StateDot.module.css; the ongoing pixel-chase becomes a pulse. */
+[${BADGE_ATTR}][data-state="done"] { color: var(--dsw-alias-state-success-primary); }
+[${BADGE_ATTR}][data-state="warning"] { color: var(--dsw-alias-state-warn-primary); }
+[${BADGE_ATTR}][data-state="error"] { color: var(--dsw-alias-state-error-primary); }
+[${BADGE_ATTR}][data-state="ongoing"] {
+  color: var(--dsw-static-deepseek-450, var(--dsw-alias-state-business-primary));
+  animation: tns-pulse 1.2s ease-in-out infinite;
+}
+@keyframes tns-pulse { 50% { opacity: 0.4; } }
+@media (prefers-reduced-motion: reduce) {
+  [${BADGE_ATTR}][data-state="ongoing"] { animation: none; }
 }
 `
 
@@ -175,10 +195,23 @@ function setBadge(row: HTMLElement, n: number, tooltip: string): void {
   const text = String(n)
   if (badge.textContent !== text) badge.textContent = text
   if (badge.title !== tooltip) badge.title = tooltip
-  // The gutter is the row's own leading padding (8px on a local row under a
-  // top-level Workspace and on a remote row; 12px more per nesting level).
+  // The digit sits on the 16px status slot, which follows the row's leading
+  // padding (8px under a top-level Workspace and on a remote row; 12px more
+  // per nesting level) — the same column as the Workspace header's icon.
   const gutter = getComputedStyle(row).paddingInlineStart
-  if (gutter !== '' && badge.style.width !== gutter) badge.style.width = gutter
+  if (gutter !== '' && badge.style.insetInlineStart !== gutter) badge.style.insetInlineStart = gutter
+  // Whatever the slot shows (StateDot / pixel-chase, remote running dot or
+  // spinner) hides under the digit, which takes over its state color.
+  const indicator = slotIndicator(row)
+  const state = indicator?.getAttribute('data-state') ?? (indicator === undefined ? '' : 'ongoing')
+  if ((badge.getAttribute('data-state') ?? '') !== state) {
+    if (state === '') badge.removeAttribute('data-state')
+    else badge.setAttribute('data-state', state)
+  }
+  if (indicator !== undefined && !indicator.hasAttribute(HIDDEN_ATTR)) {
+    indicator.setAttribute(HIDDEN_ATTR, indicator.style.visibility)
+    indicator.style.visibility = 'hidden'
+  }
   if (!row.hasAttribute(POSITIONED_ATTR)) {
     // Remember whether we set it, so the clear path restores only our own write.
     if (row.style.position === '') row.style.position = 'relative'
@@ -186,8 +219,28 @@ function setBadge(row: HTMLElement, n: number, tooltip: string): void {
   }
 }
 
+/**
+ * The visible indicator in the row's status slot: the first element child of
+ * the slot span (the slot is the first non-badge child of the row; empty for
+ * an idle local session). Screen-reader-only labels are text siblings of the
+ * dot inside the slot and stay untouched.
+ */
+function slotIndicator(row: HTMLElement): HTMLElement | undefined {
+  const slot = [...row.children].find(child => !child.hasAttribute(BADGE_ATTR))
+  if (slot === undefined || slot.tagName !== 'SPAN') return undefined
+  const first = slot.firstElementChild
+  if (first === null || !(first instanceof HTMLElement || first instanceof SVGElement)) return undefined
+  // Visually-hidden status text (Rows.tsx `visuallyHidden`) is not an indicator.
+  if (first instanceof HTMLElement && first.className.endsWith('_visuallyHidden')) return undefined
+  return first as unknown as HTMLElement
+}
+
 function clearBadge(row: HTMLElement): void {
   row.querySelector(`:scope > [${BADGE_ATTR}]`)?.remove()
+  for (const hidden of row.querySelectorAll<HTMLElement>(`[${HIDDEN_ATTR}]`)) {
+    hidden.style.visibility = hidden.getAttribute(HIDDEN_ATTR) ?? ''
+    hidden.removeAttribute(HIDDEN_ATTR)
+  }
   if (row.getAttribute(POSITIONED_ATTR) === 'ours') row.style.position = ''
   row.removeAttribute(POSITIONED_ATTR)
 }

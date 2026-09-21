@@ -74,11 +74,14 @@ three live frames after the embed guard.
 
 ## Design choices worth remembering
 
-- **Badge in the padding box, not the status slot.** The 16px slot carries
-  the running/pending/completed dot; replacing it would hide status. The
-  digit is `position: absolute` over the row's indent padding
-  (`width: calc(8px + var(--dsh-workspace-indent, 0px))`), so a depth-1 row
-  shows it centred in a 20px gutter, left of the dot, and no layout shifts.
+- **Badge ON the status slot, digit takes the dot's color.** First cut put
+  the digit in the row's leading padding, left of the dot — flush against
+  the row edge (the maintainer's screenshot 00:46), because that padding is only 8px
+  under a top-level Workspace. The header's folder/chevron icon is centred on
+  the 16px slot after the same 8px, so the digit now sits on the slot
+  (`inset-inline-start` = computed padding, width 16px) and whatever the slot
+  showed is hidden under it: StateDot's `data-state` becomes the digit's
+  color (green done / amber warning / red error / blue pulsing ongoing).
 - **Slot table in `sessionStorage`**, not localStorage: per window, survives
   the ⌘R every plugin install needs, and two windows do not fight over one
   numbering. Nothing on the host.
