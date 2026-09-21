@@ -402,13 +402,16 @@ can reproduce or maintain it:
   `repair-session-string-content.mjs` log-repair tool (zstd multi-frame and
   packed-chunk-row traps).
 - `instance-identity.md` — telling the DSH / DSH Preview / DSH Remote windows
-  apart (`instance-identity` plugin, host-only): a `webserver/index-inject`
-  `<style>` row colours the sidebar whale per instance (`fill="currentColor"`;
-  `span[class*="_brandMark"]` + the rail's `_railMark`) and turns the baked-in
-  build-version chip into dim box-less text; why the wordmark/window title
-  cannot be renamed from a plugin (single-occupant `common` locale namespace,
-  `DocumentTitle` rewrites `document.title`), the `<hash>_local` CSS-module
-  selector fact, and per-instance loading (overlay row vs bundle).
+  apart (`instance-identity` plugin, host-only, plus the Dock-app wrapper):
+  a `webserver/index-inject` `<style>` row renames the wordmark via
+  `::before{content}` on the existing span (`display:flex;font-size:0` — the
+  17.5px-strut trap), colours the whale (`fill="currentColor"`;
+  `_brandMark` + the rail's `_railMark`) and dims the baked-in version chip; a
+  body-placed script row rewrites `document.title` behind `DocumentTitle`; why
+  the `common` locale namespace cannot be overridden; the wrapper's own
+  `__DSH_DOCK__` + `!important` copy of the rules so DSH Remote reads right
+  with no plugin on its server; rebuilding the three Dock apps from their
+  `dsh-dock-app.json` specs.
 - `preview-identity.md` — superseded stub (2026-09-05 red favicon + "DSH-dev"
   manifest for the Safari Dock preview; the dev-overlay/profile collision rule).
 - `promotion-loop-and-duplicate-dsh-tools.md` — the two faults that made the

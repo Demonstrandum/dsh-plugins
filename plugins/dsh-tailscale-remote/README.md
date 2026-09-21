@@ -212,6 +212,22 @@ reload, Reconnect, zoom, full screen, ⌘⇧O open in browser, ⌘⇧C copy addr
 frame autosave, a one-shot `open-panel` hint from the page (`dshDock` message: start directory, hidden files, prompt — used by `/import-api-keys` to open in `~/.pi/agent`), `isInspectable` (Safari ▸ Develop ▸ this Mac), downloads to
 ~/Downloads. Not Safari: no Web Notifications, no Safari extensions.
 
+**Identity (2026-09-21).** The wrapper carries its own name and icon colour
+into the page: a document-start script sets `globalThis.__DSH_DOCK__ =
+{ name, glyphColor }` and appends a `<style>` (all rules `!important`) that
+renames the sidebar wordmark "DSH Local Build" → the app name
+(`span[class*="_localBuildTitle"]{display:flex;font-size:0}` +
+`::before{content:"<name>"}`), colours the whale like the Dock icon
+(`_brandMark`/`_railMark`, skipped for `#000000` = stock), and quietens the
+build-version chip; the window title substitutes the app name for the client's
+generic product title. `glyphColor` is written into `dsh-dock-app.json` by the
+installer. These are the same rules the `tali-instance-identity` DSH plugin
+injects server-side (that plugin's title script defers to `__DSH_DOCK__.name`),
+so a remote whose server lacks the plugin still reads right inside its Dock
+app, and inside the app the app's name always wins. Rebuild + reinstall after
+editing `main.swift`: `pnpm dock-app:install …` / `pnpm remote-app …` with the
+existing spec (`dock-app:build` alone only refreshes `dock-app/build/`).
+
 `dock-app.mjs` builds it (`xcrun swiftc`, cached by mtime, ~5 s cold;
 `Tools/make-icon.swift` renders `icon.svg` onto a rounded tile → `.icns`),
 assembles `Info.plist` + executable + icon + `dsh-dock-app.json`, ad-hoc signs

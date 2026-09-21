@@ -1,7 +1,7 @@
 // node --test: the plugin against a fake webServer/ctx — no DSH boot needed.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { apply, identityStyle, isSafeColor, normalizeConfig } from '../index.js'
+import { GENERIC_PRODUCT_TITLE, apply, identityStyle, isSafeColor, isSafeLabel, normalizeConfig, titleScript } from '../index.js'
 
 function fakeContext(port = 3088) {
   const routes = new Map()
@@ -37,22 +37,55 @@ async function get(handler, method = 'GET') {
   return { status, headers, body }
 }
 
-test('defaults: subtle badge only, no whale colour, no routes', () => {
+test('defaults: "DSH" wordmark + title script, subtle badge, no whale colour, no routes', () => {
   const { ctx, routes, listeners } = fakeContext()
   apply(ctx, undefined)
   assert.equal(routes.size, 0)
   const table = []
   listeners.get('webserver/index-inject')(table)
-  assert.equal(table.length, 1)
-  assert.equal(table[0].kind, 'style')
+  assert.deepEqual(table.map(row => row.kind), ['style', 'script'])
   assert.match(table[0].text, /_buildVersion.*opacity:\.4/)
+  assert.match(table[0].text, /_localBuildTitle"\]::before\{content:"DSH";font-size:12px/)
+  assert.match(table[0].text, /_fallbackBrandName"\]::before\{content:"DSH";font-size:17px/)
   assert.doesNotMatch(table[0].text, /_brandMark/)
+  assert.equal(table[1].placement, 'body')
+  assert.doesNotMatch(table[1].text, /<\/script/i)
 })
 
-test('versionBadge: stock and no colour injects nothing', () => {
+test('label "DSH Local Build" opts out of renaming; stock badge and no colour then inject nothing', () => {
   const { ctx, listeners } = fakeContext()
-  apply(ctx, { versionBadge: 'stock' })
+  apply(ctx, { label: GENERIC_PRODUCT_TITLE, versionBadge: 'stock' })
   assert.equal(listeners.has('webserver/index-inject'), false)
+})
+
+/** Run the title script against a minimal document whose <title> mutates like a browser's. */
+function runTitleScript(script, initialTitle, dock) {
+  let observer
+  const titleEl = {}
+  const doc = {
+    _title: initialTitle,
+    get title() { return this._title },
+    set title(v) { this._title = v; observer?.() },
+    querySelector: (sel) => sel === 'title' ? titleEl : null,
+  }
+  const MutationObserver = class { constructor(fn) { this.fn = fn } observe() { observer = this.fn } }
+  // eslint-disable-next-line no-new-func
+  new Function('globalThis', 'document', 'MutationObserver', script)({ __DSH_DOCK__: dock }, doc, MutationObserver)
+  return doc
+}
+
+test('titleScript substitutes the label now and on later title changes', () => {
+  const doc = runTitleScript(titleScript({ label: 'DSH Preview' }), 'DSH Local Build', undefined)
+  assert.equal(doc.title, 'DSH Preview')
+  doc.title = 'my session — DSH Local Build'
+  assert.equal(doc.title, 'my session — DSH Preview')
+  doc.title = 'unrelated'
+  assert.equal(doc.title, 'unrelated')
+})
+
+test('titleScript defers to a Dock app\'s own name', () => {
+  const doc = runTitleScript(titleScript({ label: 'DSH' }), 'x — DSH Local Build', { name: 'DSH Remote' })
+  assert.equal(doc.title, 'x — DSH Remote')
 })
 
 test('brandColor colours the whale and serves a recoloured favicon', async () => {
@@ -86,7 +119,14 @@ test('dockLabel replaces the manifest with a port-scoped app id', async () => {
 test('malformed config fails loudly', () => {
   assert.throws(() => normalizeConfig({ brandColor: 'red;}</style><script>' }), /brandColor/)
   assert.throws(() => normalizeConfig({ versionBadge: 'loud' }), /versionBadge/)
-  assert.deepEqual(normalizeConfig(null), { brandColor: '', versionBadge: 'subtle', dockLabel: '' })
+  assert.throws(() => normalizeConfig({ label: 'x";}</style>' }), /label/)
+  assert.throws(() => normalizeConfig({ label: '' }), /label/)
+  assert.deepEqual(normalizeConfig(null), { label: 'DSH', brandColor: '', versionBadge: 'subtle', dockLabel: '' })
+})
+
+test('isSafeLabel', () => {
+  for (const ok of ['DSH', 'DSH Remote', 'DSH-dev', 'v0.1_x']) assert.equal(isSafeLabel(ok), true, ok)
+  for (const bad of ['', ' DSH', 'a"b', 'x\\y', 'a'.repeat(33)]) assert.equal(isSafeLabel(bad), false, bad)
 })
 
 test('isSafeColor accepts hex and names only', () => {
@@ -94,8 +134,8 @@ test('isSafeColor accepts hex and names only', () => {
   for (const bad of ['', '#12345', 'rgb(1,2,3)', 'url(x)', 'red }', '#E5484D;']) assert.equal(isSafeColor(bad), false, bad)
 })
 
-test('identityStyle composes both rules', () => {
-  assert.equal(identityStyle({ brandColor: '', versionBadge: 'stock' }), '')
-  const both = identityStyle({ brandColor: 'red', versionBadge: 'subtle' })
-  assert.equal(both.split('\n').length, 2)
+test('identityStyle composes the rule groups', () => {
+  assert.equal(identityStyle({ label: GENERIC_PRODUCT_TITLE, brandColor: '', versionBadge: 'stock' }), '')
+  assert.equal(identityStyle({ label: GENERIC_PRODUCT_TITLE, brandColor: 'red', versionBadge: 'subtle' }).split('\n').length, 2)
+  assert.equal(identityStyle({ label: 'DSH', brandColor: 'red', versionBadge: 'subtle' }).split('\n').length, 5)
 })

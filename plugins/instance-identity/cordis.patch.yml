@@ -1,9 +1,10 @@
 # Bundle patch (used when installed with `dsh plugin --profile <name> add`).
-# Defaults: stock whale colour, subtle build-version badge, stock manifest.
-# Override `config` in the profile's cordis.patch.yml (a later layer replaces
-# the whole value):
+# Defaults: "DSH" wordmark/title, stock whale colour, subtle build-version
+# badge, stock manifest. Override `config` in the profile's cordis.patch.yml
+# (a later layer replaces the whole value):
 #   - id: tali-instance-identity
 #     config:
+#       label: DSH Remote        # wordmark + window-title product name
 #       brandColor: '#0090FF'   # sidebar whale + /favicon.svg; '' = stock
 #       versionBadge: subtle    # subtle | stock
 #       dockLabel: ''           # non-empty: replace /manifest.webmanifest (Safari "Add to Dock" installs)

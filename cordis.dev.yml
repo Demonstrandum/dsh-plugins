@@ -17,13 +17,15 @@
 # Paths MUST be absolute (a patch contributes config; it does not move the
 # loader's module-resolution root). Machine-specific by design.
 - insert:
-    # Instance identity: red sidebar whale + favicon and a "DSH-dev" web-app
-    # manifest so the preview is never confused with the live server; the
-    # build-version chip is quiet (default). Live/remote profiles get the same
-    # plugin as a BUNDLE (pnpm install-plugins) — never both for one home.
+    # Instance identity: "DSH Preview" wordmark + window title, red sidebar
+    # whale + favicon and a "DSH-dev" web-app manifest so the preview is never
+    # confused with the live server; the build-version chip is quiet
+    # (default). Live/remote profiles get the same plugin as a BUNDLE
+    # (pnpm install-plugins) — never both for one home.
     - id: tali-instance-identity
       name: '/Users/USER/github/tali-dash-plugins/plugins/instance-identity/index.js'
       config:
+        label: DSH Preview
         brandColor: '#E5484D'
         dockLabel: DSH-dev
     # symba-dsh under trial (2026-09-21): the Symba CLI as symba_* tools. Lives

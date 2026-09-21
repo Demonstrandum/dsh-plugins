@@ -11,6 +11,15 @@
 //   - sets `globalThis.__DSH_TRANSPORT__ = { ownsHost: true }` at document
 //     start so the shell treats the page as the operator's machine
 //     (`ctx.connection.isLoopback`: Settings persist on the host);
+//   - carries its own identity into the page: `globalThis.__DSH_DOCK__ =
+//     { name, glyphColor }` plus a `<style>` that renames the sidebar wordmark
+//     ("DSH Local Build" → the app name) and colours the whale like the Dock
+//     icon, and titles the window with the app name instead of the client's
+//     generic product title. The same rules the tali-instance-identity DSH
+//     plugin injects server-side (plugins/instance-identity/index.js), so an
+//     instance whose server lacks that plugin (a remote Mac) still reads
+//     right inside its Dock app; the wrapper's rules are `!important`, so
+//     the app name wins over the server's label inside the app;
 //   - opens links that leave the DSH mount (other ports, other hosts, and
 //     every window.open) in the default browser instead of a new window;
 //   - persistent data store, standard menu bar (⌘R reload, zoom, full screen,
@@ -20,7 +29,8 @@
 // Configuration is `Contents/Resources/dsh-dock-app.json`, written by the
 // installer (dock-app.mjs):
 //   { "name": "DSH", "url": "https://node.ts.net/dsh/",
-//     "fallbackUrl": "http://127.0.0.1:3083/", "tokenFile": "/Users/me/.dsh/tailscale-remote.json" }
+//     "fallbackUrl": "http://127.0.0.1:3083/", "tokenFile": "/Users/me/.dsh/tailscale-remote.json",
+//     "glyphColor": "#0090FF" }   // icon glyph colour; absent or #000000 = stock whale in the page
 //
 // Built by dock-app/build.mjs with swiftc (Command Line Tools suffice; no Xcode).
 
@@ -32,6 +42,35 @@ struct DockConfig: Decodable {
     var url: String
     var fallbackUrl: String?
     var tokenFile: String?
+    var glyphColor: String?
+
+    /// Product title the shipped client uses for the wordmark and `document.title`.
+    static let genericProductTitle = "DSH Local Build"
+
+    /// Document-start script: publish the app's identity and restyle the
+    /// sidebar brand row to match it. Mirrors tali-instance-identity's CSS
+    /// (the client's CSS modules compile to `<hash>_<local>` class names; the
+    /// whale is `fill="currentColor"`). Only a hex colour is ever spliced in.
+    func identityScript() -> String {
+        let safeName = name.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || " ._-".unicodeScalars.contains($0) }
+        let label = String(String.UnicodeScalarView(safeName)).trimmingCharacters(in: .whitespaces)
+        let colour = (glyphColor ?? "").uppercased()
+        let hex = colour.range(of: "^#[0-9A-F]{6}$", options: .regularExpression) != nil && colour != "#000000" ? colour : ""
+        var css = "span[class*=\"_localBuildTitle\"],span[class*=\"_fallbackBrandName\"]{display:flex!important;font-size:0!important}"
+        css += "span[class*=\"_localBuildTitle\"]::before{content:\"\(label)\"!important;font-size:12px!important;line-height:13px!important}"
+        css += "span[class*=\"_fallbackBrandName\"]::before{content:\"\(label)\"!important;font-size:17px!important;line-height:24px!important}"
+        // The build-version chip: no inverted box, dim text (tali-instance-identity's `versionBadge: subtle`).
+        css += "span[class*=\"_buildVersion\"]{color:inherit!important;background:none!important;opacity:.4!important;padding:0!important;border-radius:0!important}"
+        if !hex.isEmpty {
+            css += "span[class*=\"_brandMark\"],span[class*=\"_railMark\"]{color:\(hex)!important}"
+        }
+        let payload = (try? JSONSerialization.data(withJSONObject: ["name": label, "glyphColor": hex]))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let cssLiteral = (try? JSONSerialization.data(withJSONObject: [css])).flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
+        return """
+        (function(){globalThis.__DSH_DOCK__=\(payload);var s=document.createElement('style');s.id='dsh-dock-identity';s.textContent=\(cssLiteral)[0];(document.head||document.documentElement).appendChild(s);})();
+        """
+    }
 
     static func load() -> DockConfig {
         if let url = Bundle.main.url(forResource: "dsh-dock-app", withExtension: "json"),
@@ -39,7 +78,7 @@ struct DockConfig: Decodable {
            let config = try? JSONDecoder().decode(DockConfig.self, from: data) {
             return config
         }
-        return DockConfig(name: "DSH", url: "http://127.0.0.1:3080/", fallbackUrl: nil, tokenFile: nil)
+        return DockConfig(name: "DSH", url: "http://127.0.0.1:3080/", fallbackUrl: nil, tokenFile: nil, glyphColor: nil)
     }
 }
 
@@ -99,6 +138,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true)
         configuration.userContentController.addUserScript(ownsHost)
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: config.identityScript(),
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true))
         configuration.userContentController.add(self, name: "dshDock")
 
         webView = WKWebView(frame: .zero, configuration: configuration)
@@ -109,7 +152,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if #available(macOS 13.3, *) { webView.isInspectable = true }
         titleObservation = webView.observe(\.title, options: [.new]) { [weak self] view, _ in
             guard let self else { return }
-            let title = (view.title ?? "").trimmingCharacters(in: .whitespaces)
+            // The client titles the page "<session> — DSH Local Build"; this window is
+            // named after the app (servers without tali-instance-identity still say so).
+            let title = (view.title ?? "")
+                .replacingOccurrences(of: DockConfig.genericProductTitle, with: self.config.name)
+                .trimmingCharacters(in: .whitespaces)
             self.window.title = title.isEmpty ? self.config.name : title
         }
 

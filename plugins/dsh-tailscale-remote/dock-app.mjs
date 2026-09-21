@@ -237,7 +237,7 @@ export function infoPlist(spec) {
 
 /**
  * Write a complete, signed bundle at `dest` (which must not exist).
- * @param {{ dest: string, name: string, url: string, fallbackUrl?: string, tokenFile?: string,
+ * @param {{ dest: string, name: string, url: string, fallbackUrl?: string, tokenFile?: string, glyphColor?: string,
  *   executable: string, icns: string, version?: string, bundleId?: string }} spec
  */
 export async function assembleBundle(spec) {
@@ -250,7 +250,8 @@ export async function assembleBundle(spec) {
   await cp(spec.executable, join(contents, 'MacOS', EXECUTABLE))
   await chmod(join(contents, 'MacOS', EXECUTABLE), 0o755)
   await cp(spec.icns, join(contents, 'Resources', 'AppIcon.icns'))
-  const config = { name: spec.name, url: spec.url, fallbackUrl: spec.fallbackUrl, tokenFile: spec.tokenFile }
+  // glyphColor lets the wrapper colour the page's sidebar whale like its icon (main.swift identityScript).
+  const config = { name: spec.name, url: spec.url, fallbackUrl: spec.fallbackUrl, tokenFile: spec.tokenFile, glyphColor: spec.glyphColor }
   await writeFile(join(contents, 'Resources', 'dsh-dock-app.json'), `${JSON.stringify(config, null, 2)}\n`)
   await execFileAsync('/usr/bin/codesign', ['--force', '--sign', '-', '--identifier', bundleId, spec.dest])
   return spec.dest
@@ -406,7 +407,7 @@ export async function installDockApp(spec) {
   await mkdir(applicationsDir(), { recursive: true })
   const staging = join(applicationsDir(), `.${name}.app.staging-${String(process.pid)}`)
   await rm(staging, { recursive: true, force: true })
-  await assembleBundle({ dest: staging, name, url: spec.url, fallbackUrl: spec.fallbackUrl, tokenFile: spec.tokenFile, executable: built.executable, icns: built.icns, version: spec.version, bundleId: bundleIdFor(spec.instance ?? '') })
+  await assembleBundle({ dest: staging, name, url: spec.url, fallbackUrl: spec.fallbackUrl, tokenFile: spec.tokenFile, glyphColor: spec.glyphColor ?? '#000000', executable: built.executable, icns: built.icns, version: spec.version, bundleId: bundleIdFor(spec.instance ?? '') })
   if (existing.kind !== 'none') {
     log(`dock-app: replacing ${existing.kind} at ${dest}${existing.url === undefined ? '' : ` (${existing.url})`}`)
     await quitBundle(dest)
