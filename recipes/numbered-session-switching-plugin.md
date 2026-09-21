@@ -191,9 +191,17 @@ stayed put.
 - Built, typechecked, unit-tested; verified end to end on the preview
   (badges, MRU/eviction, synthetic chords in STP, **real** ⌘digit keystrokes
   in `DSH Preview.app`).
-- Remote workspaces integrated (optional service); `cordis.dev.yml` also
-  carries `tali-remote-workspaces` for the preview, which mirrors itself.
-- Row lives in `cordis.dev.yml` (preview). **Not installed live** — needs
-  the maintainer's confirmation; the row for `~/.dsh/profiles/web/cordis.patch.yml` is
-  in the README (then reload the GUI page once; remove the `cordis.dev.yml`
-  row at the same time — duplicate id fails the preview boot).
+- Remote workspaces integrated (optional service); trialed on the preview
+  with `tali-remote-workspaces` in `cordis.dev.yml`, the preview mirroring
+  itself.
+- **Live since 2026-09-21** as a bundle, the house way: `numbered-switching`
+  added to `PLUGINS` in `tools/install-plugins.sh`, then
+  `pnpm dsh plugin --profile web add …/plugins/numbered-switching` from the
+  checkout (`~/.dsh/profiles/web/package.json` backed up as
+  `package.json.bak-<stamp>`). No server restart was needed: the HMR watcher
+  re-reads the bundle selection, and the running :3080 server's boot page
+  listed `tali-numbered-switching` (bundle HTTP 200) seconds later. The open
+  GUI page still needs one ⌘R (it fetches only the graph it booted with).
+  Both trial rows were then removed from `cordis.dev.yml` (the preview is a
+  separate home, so a duplicate would not have failed anything — the overlay
+  is just for plugins under trial).

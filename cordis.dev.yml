@@ -21,11 +21,8 @@
     # never confused with the live server.
     - id: tali-preview-identity
       name: '/Users/USER/github/tali-dash-plugins/plugins/preview-identity/index.js'
-    # Under trial: ⌘1…⌘5 switch between the five most recent sessions
-    # (numbers in the sidebar gutter). Recipe: recipes/numbered-session-switching-plugin.md
-    - id: tali-numbered-switching
-      name: '/Users/USER/github/tali-dash-plugins/plugins/numbered-switching/index.js'
-    # Under trial alongside it: remote workspaces (the preview mirrors itself
-    # as a remote, added through the GUI/control channel; no seeded servers).
-    - id: tali-remote-workspaces
-      name: '/Users/USER/github/tali-dash-plugins/plugins/dsh-remote-workspaces/index.js'
+    # (numbered-switching was trialed here 2026-09-21 together with
+    # dsh-remote-workspaces — the preview mirrored itself as a remote via the
+    # control channel; state persists in ~/.dsh-preview/remote-workspaces.json.
+    # Both promoted to the live profile as bundles; re-add rows here to trial
+    # further changes. Recipe: recipes/numbered-session-switching-plugin.md)
