@@ -27,6 +27,7 @@
 #                         Serve path /dsh-NAME and Dock app DSH-NAME, written as a row override into
 #                         ~/.dsh/profiles/web/cordis.patch.yml. Everything else is per-user already.
 #   --port-base N         web port (relay = N+3, proxy = N+4); default 3080, or auto-picked with --instance
+#   --mount PATH          Serve path for this install (default /dsh, or /dsh-NAME with --instance)
 #   --allow LOGIN[,LOGIN] tailnet logins admitted to this instance by identity (besides the node's own); e.g. the
 #                         person a --instance is for, when the Mac is logged in to Tailscale as someone else
 #   --repo URL            clone URL (default https://github.com/taliesinb/dsh-plugins)
@@ -73,6 +74,7 @@ REPLACE=0
 INSTANCE=""
 PORT_BASE=""
 ALLOW=""
+MOUNT_OPT=""
 TS_TIMEOUT=""
 SKIP=""
 ONLY=""
@@ -98,6 +100,8 @@ while [ $# -gt 0 ]; do
     --instance=*) INSTANCE="${1#--instance=}"; shift ;;
     --port-base) PORT_BASE="$2"; shift 2 ;;
     --allow) ALLOW="$ALLOW,$2"; shift 2 ;;
+    --mount) MOUNT_OPT="$2"; shift 2 ;;
+    --mount=*) MOUNT_OPT="${1#--mount=}"; shift ;;
     --allow=*) ALLOW="$ALLOW,${1#--allow=}"; shift ;;
     --port-base=*) PORT_BASE="${1#--port-base=}"; shift ;;
     --tailscale-timeout) TS_TIMEOUT="$2"; shift 2 ;;
@@ -112,6 +116,7 @@ done
 [ -n "$TS_TIMEOUT" ] || TS_TIMEOUT=10
 case "$INSTANCE" in ""|[a-z0-9]*) ;; *) echo "--instance must be lowercase alphanumeric (got '$INSTANCE')" >&2; exit 2 ;; esac
 if [ -n "$INSTANCE" ]; then MOUNT="/dsh-$INSTANCE"; DOCK_NAME="DSH-$INSTANCE"; else MOUNT="/dsh"; DOCK_NAME="DSH"; fi
+[ -z "$MOUNT_OPT" ] || MOUNT="/${MOUNT_OPT#/}"; MOUNT="${MOUNT%/}"
 # Ports are fixed in set_ports (after the marker is consulted) so a resumed run keeps the same decade.
 WEB_PORT=""; RELAY_PORT=""; PROXY_PORT=""
 
@@ -735,7 +740,7 @@ if wants tailnet && [ "$TAILNET" = 1 ]; then
       START="pnpm dsh web --no-open --port $WEB_PORT"
       # 1. Non-default ports / route / Dock app name: override the bundle row's config in the profile patch
       #    (a patch row replaces the whole config; unset keys fall back to the plugin's schema defaults).
-      if [ "$WEB_PORT" != 3080 ] || [ -n "$INSTANCE" ]; then
+      if [ "$WEB_PORT" != 3080 ] || [ -n "$INSTANCE" ] || [ "$MOUNT" != /dsh ]; then
         PATCH="$DSH_HOME_DIR/profiles/web/cordis.patch.yml"
         YAMLPKG="$(ls -d "$CK"/node_modules/.pnpm/yaml@*/node_modules/yaml 2>/dev/null | sort -V | tail -1 || true)"
         if [ "$DRY" = 1 ]; then log "would set tali-tailscale-remote {listenPort $PROXY_PORT, publishPort $RELAY_PORT, mountPath $MOUNT, dockAppName $DOCK_NAME} in $PATCH"
