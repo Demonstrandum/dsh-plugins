@@ -7,7 +7,8 @@
 #                                                        # install, keep ~/.dsh, install Path C from scratch
 #   pnpm bootstrap-remote user@host --dry-run --replace
 #
-# How: scp the script to /tmp on the host, then run it there. With a local
+# How: scp the script into the target user's home (~/.bootstrap-mac.sh — /tmp is shared
+# between users and a previous user's copy is not writable), then run it there. With a local
 # terminal the ssh session gets a tty (-t) so the script can prompt, ask for
 # sudo, and print/open the Tailscale login URL; without one (an agent, cron)
 # it runs non-interactively with --yes. The script is copied rather than piped
@@ -31,12 +32,12 @@ SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10)
 REMOTE_OS="$("${SSH[@]}" "$TARGET" 'uname -sm')"
 [ "$REMOTE_OS" = "Darwin arm64" ] || { echo "$TARGET is $REMOTE_OS; bootstrap-mac.sh needs Darwin arm64" >&2; exit 1; }
 
-scp -q "$SCRIPT" "$TARGET:/tmp/bootstrap-mac.sh"
+scp -q "$SCRIPT" "$TARGET:.bootstrap-mac.sh"
 ARGS=""; for a in "$@"; do ARGS="$ARGS $(printf '%q' "$a")"; done
 
 if [ -t 0 ] && [ -t 1 ]; then
-  exec ssh -t "$TARGET" "bash /tmp/bootstrap-mac.sh$ARGS"
+  exec ssh -t "$TARGET" "bash ~/.bootstrap-mac.sh$ARGS"
 else
   case " $* " in *" --yes "*|*" -y "*) ;; *) ARGS=" --yes$ARGS" ;; esac
-  exec "${SSH[@]}" "$TARGET" "bash /tmp/bootstrap-mac.sh$ARGS"
+  exec "${SSH[@]}" "$TARGET" "bash ~/.bootstrap-mac.sh$ARGS"
 fi
