@@ -127,8 +127,11 @@ runq() {
   if [ "$DRY" = 1 ]; then printf '  %swould run:%s %s\n' "$DIM" "$NC" "$*" | tee -a "$LOG"; return 0; fi
   printf '  $ %s\n' "$*" >>"$LOG"
   local out; out="$(mktemp)"
-  if "$@" >"$out" 2>&1; then cat "$out" >>"$LOG"; rm -f "$out"; return 0; fi
-  local rc=$?; cat "$out" >>"$LOG"; tail -25 "$out" | sed 's/^/    │ /'; rm -f "$out"; return $rc
+  local rc=0
+  "$@" >"$out" 2>&1 || rc=$?        # not `if cmd; then …; fi; rc=$?` — that reads the if's status (0) and masks failures
+  cat "$out" >>"$LOG"
+  [ "$rc" = 0 ] || tail -25 "$out" | sed 's/^/    │ /'
+  rm -f "$out"; return $rc
 }
 # ask VAR "prompt" default  — reads an answer from the terminal (/dev/tty, so it
 # works under `curl | bash`); takes the default with --yes or without a terminal.
@@ -439,12 +442,32 @@ if wants clone; then
   DIR="${DIR/#\~/$HOME}"
   if [ -d "$DIR/.git" ] || [ -f "$DIR/.git" ]; then
     ok "existing clone at $DIR — adopting it"
-    run git -C "$DIR" submodule update --init || die "submodule checkout failed"
+    # A redeploy means "the current main": fast-forward when that is possible, leave local work alone otherwise.
+    if [ "$DRY" = 0 ] && [ -z "$(git -C "$DIR" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+      git -C "$DIR" pull --ff-only -q 2>&1 | sed 's/^/    │ /' || warn "could not fast-forward $DIR (diverged from origin?) — continuing with what is checked out"
+      ok "$DIR at $(git -C "$DIR" log -1 --format='%h %s' 2>/dev/null)"
+    fi
   else
-    log "cloning $REPO → $DIR (~2 GB with the fork's history; a few minutes)"
+    log "cloning $REPO → $DIR (a few minutes; the fork comes next as a submodule)"
     [ "$DRY" = 1 ] || mkdir -p "$(dirname "$DIR")"
-    run git clone --recurse-submodules "$REPO" "$DIR" || die "clone failed"
+    run git clone "$REPO" "$DIR" || die "clone failed"
   fi
+  # .gitmodules points at the fork over ssh (git@github.com:…), which needs a GitHub key on this Mac —
+  # a fresh machine has none (<remote>: "Host key verification failed"). The fork is public, so fetch the
+  # submodule over https by overriding the URL in this clone's config only; .gitmodules stays as is.
+  if [ "$DRY" = 0 ] || [ -d "$DIR/.git" ]; then
+    [ "$DRY" = 1 ] || git -C "$DIR" submodule init >/dev/null 2>&1 || true
+    for name in $(git -C "$DIR" config -f .gitmodules --name-only --get-regexp 'submodule\..*\.url' 2>/dev/null | sed -E 's/^submodule\.(.*)\.url$/\1/'); do
+      sshurl="$(git -C "$DIR" config -f .gitmodules --get "submodule.$name.url" || true)"
+      case "$sshurl" in
+        git@github.com:*)
+          https="https://github.com/${sshurl#git@github.com:}"
+          log "submodule $name: fetching over https ($https) instead of ssh"
+          [ "$DRY" = 1 ] || git -C "$DIR" config "submodule.$name.url" "$https" ;;
+      esac
+    done
+  fi
+  run git -C "$DIR" submodule update --init || die "submodule checkout failed"
 else
   [ -n "$DIR" ] || DIR="$HOME/github/tali-dash-plugins"; DIR="${DIR/#\~/$HOME}"
 fi
@@ -459,9 +482,13 @@ if wants fork; then
   else
     log "pnpm install (the fork pins pnpm via packageManager; pnpm fetches that version itself)"
     if [ "$DRY" = 1 ] && [ ! -d "$CK" ]; then log "would run pnpm install && pnpm run build in $CK"; else
-    (cd "$CK" && runq pnpm install) || die "pnpm install failed in $CK"
+    # CI=true: the fork's postinstall (scripts/install-lefthook.mjs) returns early under CI; otherwise it
+    # refuses to run inside a freshly cloned submodule ("cannot enable extensions.worktreeConfig while
+    # core.worktree is in the common config"). Git hooks are for developers, not a deployment target.
+    (cd "$CK" && CI=true runq pnpm install) || die "pnpm install failed in $CK"
     log "pnpm run build (~2 minutes)"
-    (cd "$CK" && runq pnpm run build) || die "fork build failed"
+    (cd "$CK" && CI=true runq pnpm run build) || die "fork build failed"
+    [ -f "$CK/apps/cli/lib/bin.js" ] || die "build reported success but $CK/apps/cli/lib/bin.js is missing"
     fi
     ok "built"
   fi
@@ -489,7 +516,9 @@ if wants plugins; then
     isclient="$(pkg_field "$pdir" 'p.dsh?.client ? "yes" : ""' || true)"
     hasbuild="$(pkg_field "$pdir" 'p.scripts?.build ? "yes" : ""' || true)"
     if [ "$ndeps" != 0 ] && { [ ! -d "$pdir/node_modules" ] || [ "$REBUILD" = 1 ]; }; then
-      (cd "$pdir" && runq pnpm install) || die "pnpm install failed in plugins/$p"
+      # pnpm ≥ 12 makes ignored dependency build scripts (esbuild, sharp) a hard error instead of a warning;
+      # the plugins pin no pnpm, so brew's latest runs here. Allow builds for these small trees.
+      (cd "$pdir" && runq pnpm install --config.dangerouslyAllowAllBuilds=true) || die "pnpm install failed in plugins/$p"
     fi
     if [ -n "$hasbuild" ] && { [ ! -f "$pdir/lib/client.js" ] || [ "$REBUILD" = 1 ]; }; then
       (cd "$pdir" && runq pnpm build) || die "build failed in plugins/$p"
