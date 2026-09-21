@@ -35,7 +35,8 @@ for arg in "$@"; do
     *) TARGET="$arg" ;;
   esac
 done
-TARGET="${TARGET:-${DSH_REMOTE_TARGET:-<user>@192.168.0.10}}"
+TARGET="${TARGET:-${DSH_REMOTE_TARGET:-}}"
+[ -n "$TARGET" ] || { echo "no target: pnpm deploy-remote user@host (or set DSH_REMOTE_TARGET)" >&2; exit 2; }
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"                       # tali-dash-plugins
 CHECKOUT="${DSH_CHECKOUT:-$HERE/deepseek-harness}"  # the fork, as the submodule of this repo

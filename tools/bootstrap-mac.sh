@@ -455,7 +455,7 @@ if wants clone; then
     run git clone "$REPO" "$DIR" || die "clone failed"
   fi
   # .gitmodules points at the fork over ssh (git@github.com:…), which needs a GitHub key on this Mac —
-  # a fresh machine has none (<remote>: "Host key verification failed"). The fork is public, so fetch the
+  # a fresh machine has none ("Host key verification failed" on the first remote). The fork is public, so fetch the
   # submodule over https by overriding the URL in this clone's config only; .gitmodules stays as is.
   if [ "$DRY" = 0 ] || [ -d "$DIR/.git" ]; then
     [ "$DRY" = 1 ] || git -C "$DIR" submodule init >/dev/null 2>&1 || true

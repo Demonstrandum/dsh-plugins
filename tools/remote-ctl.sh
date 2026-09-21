@@ -2,7 +2,8 @@
 # remote-ctl.sh <logs|status|restart|stop> [user@host] — day-to-day control of the
 # LaunchAgent that deploy-remote.sh installs.
 set -euo pipefail
-CMD="${1:-status}"; TARGET="${2:-${DSH_REMOTE_TARGET:-<user>@192.168.0.10}}"
+CMD="${1:-status}"; TARGET="${2:-${DSH_REMOTE_TARGET:-}}"
+[ -n "$TARGET" ] || { echo "usage: remote-ctl.sh <logs|status|restart|stop> user@host   (or set DSH_REMOTE_TARGET)" >&2; exit 2; }
 LABEL="ai.symbolica.dsh-remote"
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 "$TARGET")
 case "$CMD" in

@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { ASK_USER, CHROME_INSTALL_REMEDY, STP_REMOTE_AUTOMATION_REMEDY, environmentRemedy } from '../environment.mjs'
 import { explainFailure } from '../curated-tools.mjs'
 
-// The exact texts seen on the remote (2026-09-18) before the apps / settings were in place.
+// The exact texts seen on a freshly set-up remote Mac (2026-09-18) before the apps / settings were in place.
 const STP_CODE_6 = 'safari_get_page_content: server tool navigate_to_url failed: Tool error: Error Domain=WebDriverErrorDomain Code=6 "Could not create a session: You must enable \'Allow remote automation\' in the Developer section of Safari Settings to control Safari via WebDriver."'
 const CHROME_TARGET_CLOSED = 'chrome_get_page_content: Chrome could not open https://example.com: Protocol error (Target.setDiscoverTargets): Target closed'
 

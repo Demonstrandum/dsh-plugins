@@ -153,7 +153,7 @@ HTTPS in identity mode (no tailnet peer was running DSH).
 | Group says "gone" | The remote deleted that workspace; Remove it locally |
 | WebSocket in frame never connects | Check the exact upgrade route `/remote/<id>/api/remote.mux` exists in `status` (`localBase`) and the remote accepts `Origin` = its own origin |
 
-## Deploying app-backed plugins to a remote (<remote>, 2026-09-18)
+## Deploying app-backed plugins to a remote (2026-09-18)
 
 `tools/deploy-remote.sh` ships `browser-automation` and
 `<private-plugin>` when the apps exist on the host. Facts learned:

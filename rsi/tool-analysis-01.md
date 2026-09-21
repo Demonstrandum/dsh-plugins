@@ -37,7 +37,7 @@ Programs were tallied once per call, per pipeline segment. Rows overlap
 | `~/.dsh` inspection (`zstd -dc session.v3.jsonl.zstd \| python3 …`) | 48 | now: `transcript_*` |
 | `for i in …; do sleep 3; curl -s -o /dev/null -w "%{http_code}" …; done` readiness polls | 21 (+13 commands starting with bare `sleep N`) | — |
 | `cat > file <<'EOF'` file creation | 20 | `write` |
-| `ssh <remote>@… 'tailscale …'` | 20 | — |
+| `ssh user@remote 'tailscale …'` | 20 | — |
 | `\| head -N` / `\| tail -N` defensive output clipping | 360 / 84 | — |
 
 Other shape facts: median command 300 chars, p90 1.7 KB, max **15.4 KB**;

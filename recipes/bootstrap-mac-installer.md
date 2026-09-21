@@ -11,7 +11,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/taliesinb/dsh-plugins/ma
 #               [--tailscale-timeout S] [--repo URL] [--list]
 # on another Mac over ssh (copies the script, runs it with a tty when you have one, --yes otherwise):
 pnpm bootstrap-remote user@host [same flags]
-pnpm bootstrap-remote <user>@<remote> --replace        # redeploy <remote> (see § Redeploying a deploy-remote host)
+pnpm bootstrap-remote user@host --replace          # redeploy a Path B host (see § Redeploying a deploy-remote host)
 ```
 
 `bash -c "$(curl …)"` rather than `curl | bash`: when bash reads the script from
@@ -63,18 +63,18 @@ Dock app and the Remotes feature all hang off it, and installing a Mac
 without it produces exactly the half-working state INSTALLING.md's
 troubleshooting table is full of.
 
-## Redeploying a deploy-remote host (`--replace`; <remote>)
+## Redeploying a deploy-remote host (`--replace`)
 
-the remote was set up by `tools/deploy-remote.sh` (INSTALLING.md Path B; sessions
-`deepseek-harness/hybrid-local-remote` T15–T17/T39–T43, `laptop/<remote>-setup`,
-`deepseek-harness/deploy-to-<remote>`): rsynced checkout at `~/dsh/checkout`,
+The first remote Mac was set up by `tools/deploy-remote.sh` (INSTALLING.md
+Path B; sessions `deepseek-harness/hybrid-local-remote` T15–T17/T39–T43 and
+the remote-setup sessions): rsynced checkout at `~/dsh/checkout`,
 plugins at `~/dsh/plugins`, Node at `~/.local/node`, LaunchAgent
 `ai.symbolica.dsh-remote` (KeepAlive, `zsh -lc`), `~/.dsh/deploy/remote.cordis.yml`
 inserting the plugins by absolute path, listeners on `:3080`/`:3084`
 (`publishPort: 0`), `~/Applications/DSH.app` with fallback `:3084`, and a
 `~/.dsh` with settings, credentials, sessions and `tailscale-remote.json`
-(standing token + `user@example.com` allowlisted — the Air's Remotes registry
-stores that token). `--replace` turns such a host into a Path C install:
+(standing token + the deployer's login allowlisted — the deploying Mac's
+Remotes registry stores that token). `--replace` turns such a host into a Path C install:
 
 1. confirms (auto with `--yes`), then `launchctl bootout` + removes both
    LaunchAgent plists (`ai.symbolica.dsh-remote`, `io.github.taliesinb.dsh-web-relay`),
@@ -84,10 +84,11 @@ stores that token). `--replace` turns such a host into a Path C install:
 2. **keeps `~/.dsh`** entirely — so the `home` step skips (profile exists),
    the credentials to-do is suppressed (the file has real records), the
    `tailnet` step re-uses the token/allowlist and just sets `enabled: true` and
-   adds the node's own login; the Remotes entry on the Air keeps working because
-   the URL (`https://<remote>.example.ts.net/dsh/`) and token are unchanged;
-3. runs the normal steps (brew node/pnpm were missing on the remote — Path B never
-   needed them; CLT, Homebrew, STP, Chrome, afm 0.9.19 were present);
+   adds the node's own login; the Remotes entry on the deploying Mac keeps
+   working because the URL (`https://<remote>.<tailnet>.ts.net/dsh/`) and token
+   are unchanged;
+3. runs the normal steps (brew node/pnpm were missing on the remote — Path B
+   never needed them; CLT, Homebrew, STP, Chrome, afm 0.9.19 were present);
 4. **rebuilds the Dock app** even though `DSH.app` exists (its fallback moves
    from `:3084` to the relay `:3083`).
 
@@ -96,14 +97,14 @@ plugins as bundles, and duplicate `tali-*` row ids fail the boot. Why the
 Path B checkout must go: nothing else references it, and 1.7 GB.
 
 **Done for real on 2026-09-21** (`pnpm bootstrap-remote <user>@<remote> --replace`,
-no local tty → `--yes`; <remote> needed no sudo since brew and the CLT were
+no local tty → `--yes`; the host needed no sudo since brew and the CLT were
 there). Result: relay LaunchAgent `io.github.taliesinb.dsh-web-relay` running
 `pnpm dsh web` from `~/github/tali-dash-plugins/deepseek-harness` (2.7 GB),
 Serve `/dsh` → `:3083`, 12 `tali-` rows, afm answering, Dock app rebuilt
 (`fallbackUrl` now `:3083`, still pinned), `~/dsh` and `~/.dsh/deploy` gone,
-`~/.dsh` intact (token + 3 allowlisted users), `https://<remote>.example.ts.net/dsh/`
-→ 200 from the Air by identity. Over ssh the GUI-dependent parts worked as
-expected because the user is logged into the remote's GUI session (`launchctl
+`~/.dsh` intact (token + 3 allowlisted users), `https://<remote>.<tailnet>.ts.net/dsh/`
+→ 200 from the deploying Mac by identity. Over ssh the GUI-dependent parts
+worked as expected because the user is logged into the remote's GUI session (`launchctl
 bootstrap gui/$UID`, the Tailscale CLI, `xcrun swiftc`, launching the app).
 
 It took **five runs**; each failure resumed via the marker, and each found a
@@ -183,12 +184,12 @@ script — not logic inside `postinstall`.
   unknown` for exactly that reason). python3 comes with the CLT (step 2).
 - **`set -e` + `VAR="$(a | b)"`**: a failing pipeline inside a command
   substitution makes the *assignment* fail, and `set -e` exits silently — the
-  <remote> dry run died after "afm present" because `ls -d …/yaml@*` had no match.
+  remote dry run died after "afm present" because `ls -d …/yaml@*` had no match.
   Every piped substitution now ends in `|| true`; dry-run paths that `cd` into
   directories that do not exist yet go through `run_in`.
 - **Homebrew on the login-shell PATH**: the relay LaunchAgent runs `zsh -lc
   "pnpm dsh web"`, so the brew step appends `brew shellenv` to `~/.zprofile`
-  even when Homebrew pre-existed (<remote> already had it).
+  even when Homebrew pre-existed (the remote already had it).
 - **bash 3.2**: a fresh machine has only `/bin/bash` 3.2.57. The script avoids
   `${arr[@]}` on possibly-empty arrays under `set -u` (guards with `${#arr[@]}`),
   associative arrays, `;;&`, `mapfile`. `bash -n` under `/bin/bash` passes.
@@ -202,12 +203,12 @@ script — not logic inside `postinstall`.
   propose no action (both paid-app plugins correctly detected as installable).
   No real run has been made on that machine on purpose — it would
   re-clone/rebuild the live checkout.
-- **Real `--replace` run on the remote, 2026-09-21: success** on the fifth attempt
-  (see § Redeploying for the four bugs the first four found). <remote> is now a
-  Path C install driven by the relay; `deploy-remote.sh`/`remote-ctl.sh` no
+- **Real `--replace` run on the remote Mac, 2026-09-21: success** on the fifth
+  attempt (see § Redeploying for the four bugs the first four found). It is
+  now a Path C install driven by the relay; `deploy-remote.sh`/`remote-ctl.sh` no
   longer apply to it (`pnpm remote-status` looks for `ai.symbolica.dsh-remote`).
-- **Clean-machine run: pending.** Plan: a pristine macOS guest on **<remote>**
-  (macOS 27.0, 366 GB free; the Air has 30 GB free, too little for a
+- **Clean-machine run: pending.** Plan: a pristine macOS guest on the remote
+  Mac (macOS 27.0, 366 GB free; the Air has 30 GB free, too little for a
   20–25 GB guest image) with **Tart** (`brew install cirruslabs/cli/tart`;
   `tart clone ghcr.io/cirruslabs/macos-tahoe-vanilla:latest dsh-test`,
   `tart run dsh-test --no-graphics`, `tart ssh dsh-test`), driving the script

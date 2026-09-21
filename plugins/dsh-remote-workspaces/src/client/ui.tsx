@@ -721,7 +721,7 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
     const workspaceName = pick === 'new'
       ? (path.trim().replace(/\/+$/, '').split('/').pop() ?? '')
       : (probe.workspaces.find(candidate => candidate.workspaceId === pick)?.title ?? '')
-    // The server label may carry `:port` / `/path` (localhost:3082, <remote>/dsh); a workspace name wants plain dashes.
+    // The server label may carry `:port` / `/path` (localhost:3082, studio/dsh); a workspace name wants plain dashes.
     const serverPart = probe.label.replace(/[:/]+/gu, '-').replace(/^-+|-+$/gu, '')
     return workspaceName === '' ? '' : `${serverPart}-${workspaceName}`
   }, [probe, pick, path])

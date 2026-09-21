@@ -3,9 +3,9 @@
 # bootstrap-remote.sh — run tools/bootstrap-mac.sh on another Mac over ssh.
 #
 #   pnpm bootstrap-remote user@host [bootstrap flags…]
-#   pnpm bootstrap-remote <user>@<remote> --replace          # redeploy <remote>: stop its deploy-remote.sh
+#   pnpm bootstrap-remote user@host --replace            # redeploy a deploy-remote.sh host: stop its
 #                                                        # install, keep ~/.dsh, install Path C from scratch
-#   pnpm bootstrap-remote <user>@<remote> --dry-run --replace
+#   pnpm bootstrap-remote user@host --dry-run --replace
 #
 # How: scp the script to /tmp on the host, then run it there. With a local
 # terminal the ssh session gets a tty (-t) so the script can prompt, ask for

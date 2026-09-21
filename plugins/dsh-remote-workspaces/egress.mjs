@@ -62,8 +62,8 @@ export function parseRemoteUrl(url) {
 
 /**
  * A human-friendly default label for a remote: `localhost:3082`,
- * `localhost/dsh` (default port), `<remote>/dsh` for a MagicDNS tailnet name
- * (`<remote>.example.ts.net`), `box.example.com:8443/dsh` otherwise. The port
+ * `localhost/dsh` (default port), `studio/dsh` for a MagicDNS tailnet name
+ * (`studio.tail1234.ts.net`), `box.example.com:8443/dsh` otherwise. The port
  * is omitted when it is the scheme's default; the mount path is kept because
  * one host can serve several DSH instances under different paths.
  * @param {string} url

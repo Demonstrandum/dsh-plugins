@@ -2,7 +2,7 @@
 
 Assembled 2026-09-18 from the fork checkout, this repo (tools, recipes, plugin
 READMEs) and the session transcripts `deepseek-harness/hybrid-local-remote` (T15–T17, T39–T43)
-and `laptop/<remote>-setup`, which set up the `<remote>` MacBook Pro (macOS 27.0,
+and the remote-setup sessions, which set up a remote MacBook Pro (macOS 27.0,
 Apple Silicon) on 2026-09-16/17.
 
 **One repo.** This repository carries the plugins, the tooling *and* the DSH
@@ -16,7 +16,7 @@ Two things are called "the app"; this guide installs the first one.
 
 | | What it is | Built by |
 |---|---|---|
-| **`~/Applications/DSH.app`** (what <remote> got) | A ~350-line AppKit/WKWebView wrapper that opens `https://<host>.<tailnet>.ts.net/dsh/`, is admitted by the Mac's own Tailscale identity (no token, no expiring cookie), falls back to `http://127.0.0.1:<port>/?token=…` when Tailscale is down, and gets a Dock tile. Ad-hoc signed, no permissions. | `plugins/dsh-tailscale-remote/dock-app.mjs` in the plugins repo, compiled on the target with `xcrun swiftc` (Command Line Tools are enough; Xcode is not needed). |
+| **`~/Applications/DSH.app`** (what the remote got) | A ~350-line AppKit/WKWebView wrapper that opens `https://<host>.<tailnet>.ts.net/dsh/`, is admitted by the Mac's own Tailscale identity (no token, no expiring cookie), falls back to `http://127.0.0.1:<port>/?token=…` when Tailscale is down, and gets a Dock tile. Ad-hoc signed, no permissions. | `plugins/dsh-tailscale-remote/dock-app.mjs` in the plugins repo, compiled on the target with `xcrun swiftc` (Command Line Tools are enough; Xcode is not needed). |
 | `apps/desktop` (Electron shell in this repo) | DeepSeek's signed/notarised Desktop release with a bundled Node runtime. Requires an Apple Developer ID, Team ID and notarytool credentials (`apps/desktop/README.md`). | Not used in the maintainer's setup. Not covered here. |
 
 The Dock app is a thin client; the real install is the **DSH server** running
@@ -24,7 +24,7 @@ from a built checkout of this fork, plus a handful of out-of-tree plugins.
 There are two ways to get that onto a fresh machine:
 
 - **Path B — deploy from a Mac that already runs DSH** (`pnpm deploy-remote
-  user@host`). This is exactly what <remote> received and is the verified path.
+  user@host`). This is exactly what the first remote received and is the verified path.
   The new Mac becomes a *remote* (headless server + its own Dock app) and
   appears in the deploying Mac's "Remotes" sidebar section.
 - **Path C — standalone install** on the new Mac itself (what the development laptop runs,
@@ -61,15 +61,15 @@ port 3088) is deliberately left out.
 > `--yes` takes every default. The manual steps remain the hand-off list it
 > prints at the end (Apple Intelligence toggle, STP licence, provider keys).
 > Over ssh: `pnpm bootstrap-remote user@host [flags]`; to turn a Path B host
-> into a standalone Path C install (the remote): `pnpm bootstrap-remote <user>@<remote>
+> into a standalone Path C install: `pnpm bootstrap-remote <user>@<remote>
 > --replace` — stops the deploy-remote LaunchAgent, removes `~/dsh`, keeps
 > `~/.dsh`, reinstalls. The rest of this document is the step-by-step it
 > automates and the reference for when a step fails.
 
-## Resulting topology (Path B, as on the remote)
+## Resulting topology (Path B, as on the first remote)
 
 ```
-Dock app / browsers on the tailnet ─▶ https://<remote>.example.ts.net/dsh/
+Dock app / browsers on the tailnet ─▶ https://<remote>.<tailnet>.ts.net/dsh/
   └▶ tailscaled (TLS, injects Tailscale-User-Login) ─▶ dsh-tailscale-remote proxy 127.0.0.1:3084 (inside DSH)
         └▶ DSH web 127.0.0.1:3080   (LaunchAgent ai.symbolica.dsh-remote, KeepAlive, zsh -lc)
 Local fallback: http://127.0.0.1:3084/?token=<standing token>   (Dock app uses it when Tailscale is off)
@@ -88,7 +88,7 @@ Local fallback: http://127.0.0.1:3084/?token=<standing token>   (Dock app uses i
 | Logs (launchd stdout/stderr) | `~/dsh/logs/dsh.log`, `~/dsh/logs/afm.log` |
 | Dock app | `~/Applications/DSH.app` (`Contents/Resources/dsh-dock-app.json` holds url/fallback/tokenFile) |
 
-Path C (what **the remote runs since 2026-09-21**, after `pnpm bootstrap-remote <user>@<remote> --replace`) differs: the checkout is this repo's submodule
+Path C (what the remote runs since 2026-09-21, after `pnpm bootstrap-remote <user>@<remote> --replace`) differs: the checkout is this repo's submodule
 `tali-dash-plugins/deepseek-harness` (the plugins link into it relatively) run
 through `pnpm dsh web`, an always-on **relay** LaunchAgent (`io.github.taliesinb.dsh-web-relay`,
 port 3083) starts DSH on demand, and the plugins load from
@@ -99,7 +99,7 @@ port 3083) starts DSH on demand, and the plugins load from
 
 ## Part A — manual prerequisites on the new Mac
 
-Assumes: Apple Silicon, macOS 26 or newer (<remote>: 27.0), Homebrew installed,
+Assumes: Apple Silicon, macOS 26 or newer (the remote: 27.0), Homebrew installed,
 an admin user. Nothing below is automated by the deploy script except
 `brew install rsync`.
 
@@ -108,7 +108,7 @@ an admin user. Nothing below is automated by the deploy script except
 ```sh
 xcode-select --install          # GUI prompt; wait for it to finish
 xcode-select -p                 # → /Library/Developer/CommandLineTools
-xcrun --find swiftc && swift --version   # <remote>: Apple Swift 6.4 (macOS 27)
+xcrun --find swiftc && swift --version   # macOS 27 remote: Apple Swift 6.4
 ```
 
 The deploy script skips the Dock app with "no Swift toolchain" if `xcrun
@@ -121,12 +121,12 @@ called directly says "unable to load standard library") — the plugin does this
    put the CLI at `/Applications/Tailscale.app/Contents/MacOS/Tailscale`, which
    is the path the deploy script and plugin default to). Optional:
    `ln -s /Applications/Tailscale.app/Contents/MacOS/Tailscale /usr/local/bin/tailscale`.
-2. Log in to the **right tailnet as the right user**. The symbolica tailnet's
+2. Log in to the **right tailnet as the right user**. The company tailnet's
    ACL lets a user reach only *their own* devices plus tagged infrastructure;
-   the remote was logged in as `owner@example.com`, so `tali@` could not reach it
-   (all TCP silently dropped over the tailnet, fine over LAN) until the admin
-   added a policy rule (`src: group:research → dst: owner@example.com, all
-   ports`). Options, in order of preference: log in as the same user as the
+   the remote was logged in as its own user (`<user>@<org>`), so the deployer's
+   login could not reach it (all TCP silently dropped over the tailnet, fine
+   over LAN) until the admin added a policy rule (`src: group:<team> → dst:
+   <user>@<org>, all ports`). Options, in order of preference: log in as the same user as the
    deploying Mac; ask for an ACL rule; or tag the node — but **tagged nodes
    carry no `Tailscale-User-Login`**, so identity admission stops working and
    only the token/QR path remains.
@@ -134,7 +134,7 @@ called directly says "unable to load standard library") — the plugin does this
    `<remote>.<tailnet>.ts.net`). Match the OS name if you like:
    `sudo scutil --set HostName <remote>; sudo scutil --set LocalHostName <remote>; sudo scutil --set ComputerName <remote>`.
 4. Tailnet must have **MagicDNS and HTTPS certificates** enabled (they are on
-   symbolica); `tailscale serve` needs them. First HTTPS hit after publishing
+   the company tailnet); `tailscale serve` needs them. First HTTPS hit after publishing
    can take a few seconds while the cert is issued.
 5. Verify from the deploying Mac: `tailscale ping <remote>` and `nc -z -G 4 <tailnet-ip> 22`.
 
@@ -149,8 +149,8 @@ System Settings → General → Sharing → **Remote Login** on. Then from the
 deploying Mac (password prompt once):
 
 ```sh
-ssh-copy-id -i ~/.ssh/id_ed25519.pub <user>@192.168.0.10     # LAN IP or tailnet name
-ssh -o BatchMode=yes <user>@<remote> 'echo ok'                  # must succeed without a prompt
+ssh-copy-id -i ~/.ssh/id_ed25519.pub <user>@<lan-ip>        # LAN IP or tailnet name
+ssh -o BatchMode=yes <user>@<remote> 'echo ok'              # must succeed without a prompt
 ```
 
 `deploy-remote.sh` uses `BatchMode=yes`; it dies with "cannot ssh … (key auth
@@ -160,7 +160,7 @@ wraps brew calls in `zsh -lc` for that reason; do the same when poking around.
 
 ### A4. (Optional) Apple Intelligence + AFM (the `apple/foundation` model)
 
-**Optional.** Remote's default model is Apple's on-device model, reached
+**Optional.** The remote's default model is Apple's on-device model, reached
 through **AFM** (`scouzi1966/maclocal-api`), an OpenAI-compatible server on
 `127.0.0.1:9997` that the `local-model-supervisor` plugin starts on demand.
 It is a free, private, tool-less 4K chat model — useful as a default for a
@@ -181,7 +181,7 @@ release check targets the OS's Swift runtime / FoundationModels framework:
 
    ```sh
    brew trust scouzi1966/afm            # Homebrew ≥ 6 refuses untrusted taps (third-party tap: your call)
-   # macOS 27 or newer — current stable works (<remote>: v0.9.19):
+   # macOS 27 or newer — current stable works (tested: v0.9.19):
    brew install scouzi1966/afm/afm
    # macOS 26.x — stable ≥ 0.9.17 aborts at startup with "503: Apple Foundation Models require the
    # Swift 6.4 toolchain or newer"; pin 0.9.10 and fix its metallib packaging bug:
@@ -206,8 +206,8 @@ release check targets the OS's Swift runtime / FoundationModels framework:
    ```
 
 Skipping this is fine if you never select the Apple model; the deploy still
-succeeds (<remote> ran without afm for a day — "the apple foundation model isn't
-working on the remote" was simply afm not being installed).
+succeeds (the remote ran without afm for a day — "the apple foundation model
+isn't working" was simply afm not being installed).
 
 ### A5. Homebrew rsync (Path B; auto-installed if missing)
 
@@ -231,13 +231,13 @@ deploy's plugin list):
 
 ### A7. Keep a headless remote awake
 
-<remote> reported `sleep 1 (sleep prevented by powerd …)`; for a lid-closed or
+The remote reported `sleep 1 (sleep prevented by powerd …)`; for a lid-closed or
 unattended server set `sudo pmset -a sleep 0 disablesleep 1` (or keep it on
 power with "Prevent automatic sleeping" on).
 
 ---
 
-## Part B — deploy from an existing DSH Mac (verified on the remote)
+## Part B — deploy from an existing DSH Mac (verified on the first remote)
 
 Run on the Mac that already has the fork built (the development laptop). Requirements
 there: `rsync`, `python3`, `tailscale` on PATH (used for `whois` to learn your
@@ -249,7 +249,7 @@ native addons is shipped as-is).
 
 ```sh
 cd ~/github/tali-dash-plugins
-pnpm deploy-remote <user>@<remote>                # tailnet name, or <user>@192.168.0.10 on the LAN
+pnpm deploy-remote <user>@<remote>            # tailnet name, or <user>@<lan-ip> on the LAN; or set DSH_REMOTE_TARGET
 # flags: --no-build (reuse built artifacts)  --credentials (re-copy settings/credentials)  --port=N (default 3080)
 # env:   DSH_REMOTE_TARGET  DSH_CHECKOUT  DSH_REMOTE_PORT  DSH_REMOTE_ALLOWED_USERS
 ```
@@ -277,7 +277,7 @@ What one run does (idempotent; first-run steps only when missing):
    from `~/dsh/logs/dsh.log`, calls the plugin's control channel to add the
    **host's own tailnet login** to the allowlist and `install-dock-app` →
    `~/Applications/DSH.app` built, pinned to the Dock and launched.
-7. Prints `remote GUI: https://<remote>.example.ts.net/dsh/`, the token link,
+7. Prints `remote GUI: https://<remote>.<tailnet>.ts.net/dsh/`, the token link,
    `tailscale serve status`, and probes the URL from your Mac (200/303 = you are
    admitted by identity; 401 = use the token link or fix the allowlist).
 
@@ -297,7 +297,7 @@ pnpm deploy-remote user@host --no-build     # config-only redeploy (~10 s)
 Only the launch line reaches `dsh.log` (`ctx.logger` output does not); plugin
 diagnostics are file traces where the plugin offers one.
 
-What went wrong on the remote and is now handled by the script (keep in mind when
+What went wrong on the first remote and is now handled by the script (keep in mind when
 extending it): openrsync stall (A5); Tailscale CLI under launchd (A2, hence
 `zsh -lc`); the plugin's default `publishPort: 3083` expects a relay LaunchAgent
 the headless host never had → Serve pointed at a dead port (502) — deploy now
@@ -566,7 +566,7 @@ pgrep -fl 'Applications/DSH.app'; defaults read com.apple.dock persistent-apps |
 pgrep -fl 'afm --port 9997'
 ```
 
-## Troubleshooting (consolidated from the <remote> work)
+## Troubleshooting (consolidated from the first remote deployment)
 
 | Symptom | Cause / fix |
 |---|---|
@@ -614,6 +614,6 @@ then `tailscale serve --https=443 --set-path /dsh off` and drop the rows from th
   `remote-workspaces-plugin.md`; `AGENTS.md`, `PREVIEWING.md`
 - transcripts: `deepseek-harness/hybrid-local-remote` T15–T17 (first deploy,
   openrsync, launchd/Tailscale), T39–T40 (tailnet deploy, `publishPort: 0`),
-  T42 (Dock app on the remote), T43 (afm + preset fix); `laptop/<remote>-setup`
+  T42 (Dock app on the remote), T43 (afm + preset fix); the remote-setup session
   (hostname rename, ACL diagnosis, ssh key)
 - `deepseek-harness/apps/desktop/README.md` (why the Electron shell is out of scope)

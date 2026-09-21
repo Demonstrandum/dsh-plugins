@@ -240,9 +240,9 @@ describe('friendlyRemoteName', () => {
   it('names loopback "localhost", drops default ports, keeps the mount path, and shortens tailnet MagicDNS names', () => {
     assert.equal(friendlyRemoteName('http://127.0.0.1:3082/'), 'localhost:3082')
     assert.equal(friendlyRemoteName('http://localhost/dsh/'), 'localhost/dsh')
-    assert.equal(friendlyRemoteName('https://<remote>.example.ts.net/dsh/'), '<remote>/dsh')
-    assert.equal(friendlyRemoteName('https://<remote>.example.ts.net:8443/'), '<remote>:8443')
+    assert.equal(friendlyRemoteName('https://studio.tail1234.ts.net/dsh/'), 'studio/dsh')
+    assert.equal(friendlyRemoteName('https://studio.tail1234.ts.net:8443/'), 'studio:8443')
     assert.equal(friendlyRemoteName('https://box.example.com:8443/dsh'), 'box.example.com:8443/dsh')
-    assert.equal(friendlyRemoteName('http://192.168.0.10:3080/'), '192.168.0.10:3080')
+    assert.equal(friendlyRemoteName('http://10.0.0.5:3080/'), '10.0.0.5:3080')
   })
 })

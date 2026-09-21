@@ -101,14 +101,14 @@ would need a shared dataTransfer type in the fork's rows).
 ## Server names
 
 A remote's default label is `friendlyRemoteName(url)` (egress.mjs): loopback →
-`localhost`, a MagicDNS tailnet host → its first label (`<remote>` for
-`<remote>.example.ts.net`), otherwise the hostname; the port is appended
+`localhost`, a MagicDNS tailnet host → its first label (`studio` for
+`studio.tail1234.ts.net`), otherwise the hostname; the port is appended
 unless it is the scheme's default, and the mount path is kept because one
-host may serve several instances (`localhost:3082`, `<remote>/dsh`,
+host may serve several instances (`localhost:3082`, `studio/dsh`,
 `box.example.com:8443/dsh`). The user's own label (add-modal, rename) wins.
 Servers stored under the old derivation (bare first hostname label, e.g.
 `127`) are relabelled once on load. The add-modal's suggested workspace name
-uses the label with `:`/`/` turned into dashes (`<remote>-dsh-<workspace>`).
+uses the label with `:`/`/` turned into dashes (`studio-dsh-<workspace>`).
 
 ## Titles of framed sessions
 

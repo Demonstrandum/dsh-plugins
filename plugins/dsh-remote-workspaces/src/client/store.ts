@@ -70,7 +70,7 @@ export const FRAME_CAP = 4
  * plugin. A shell served at `https://h/dsh/` (the tailnet route the Dock app
  * opens) must frame `/dsh/remote/<id>/`, not `/remote/<id>/` at the origin
  * root, which the mount does not know and 404s.
- * @param path - root-relative Host path such as `/remote/alpha/?embed=…`.
+ * @param path - root-relative Host path such as `/remote/studio/?embed=…`.
  * @returns the absolute URL under the document's directory.
  */
 export function hostPathUrl(path: string): string {

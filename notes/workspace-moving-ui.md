@@ -215,7 +215,7 @@ visible on first turn after resume, sandbox root in the runtime-context snapshot
 - Run the concrete migration from `workspace-moving-tools.md` against the live home once
   the live server runs `feat/embed-session`: `session.moveMany` of the recipes-workspace
   sessions into `~/github/tali-dash-plugins`.
-- Exercise the real tailnet path against <remote> (asleep at time of writing).
+- Exercise the real tailnet path against the remote Mac (asleep at time of writing).
 
 ## 6. Pointers
 

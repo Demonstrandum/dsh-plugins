@@ -321,7 +321,7 @@ can reproduce or maintain it:
   container, the headless facts it relies on, the macOS-VM landscape
   (Virtualization.framework vs UTM / Tart / VirtualBuddy) and the pending
   clean-VM test plan; `pnpm bootstrap-remote user@host` (ssh runner) and
-  `--replace`, which turned <remote> from a deploy-remote (Path B) host into a
+  `--replace`, which turned the remote Mac from a deploy-remote (Path B) host into a
   standalone install while keeping `~/.dsh` (2026-09-21; the five-run log of
   what only a real run finds: ssh submodule URL, masked `runq` failures,
   lefthook vs a fresh submodule's `core.worktree`, pnpm 12 build scripts).

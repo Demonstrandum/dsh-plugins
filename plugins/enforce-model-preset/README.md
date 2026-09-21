@@ -49,7 +49,7 @@ A session that never picks a model runs on the deployment default
 default — so no `model/selection` event fires for such sessions. The plugin
 therefore also enforces at `agent/created` for fresh top-level sessions,
 using `ctx.agentDefaultModel.currentSelection()`; an explicit selection later
-re-enforces through the event path. (Found on the remote: Apple Foundation as the
+re-enforces through the event path. (Found on a remote Mac: Apple Foundation as the
 default left a blank session on `standard`, 8K of tool schemas on the wire.)
 
 ## Debugging
