@@ -443,8 +443,10 @@ if wants clone; then
   if [ -d "$DIR/.git" ] || [ -f "$DIR/.git" ]; then
     ok "existing clone at $DIR — adopting it"
     # A redeploy means "the current main": fast-forward when that is possible, leave local work alone otherwise.
-    if [ "$DRY" = 0 ] && [ -z "$(git -C "$DIR" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-      git -C "$DIR" pull --ff-only -q 2>&1 | sed 's/^/    │ /' || warn "could not fast-forward $DIR (diverged from origin?) — continuing with what is checked out"
+    # (Local modifications such as the re-pointed cordis.dev.yml do not block a fast-forward; a real
+    # divergence or a conflicting local edit does, and then we keep what is checked out.)
+    if [ "$DRY" = 0 ]; then
+      if ! git -C "$DIR" pull --ff-only -q 2>>"$LOG"; then warn "could not fast-forward $DIR (diverged from origin, or local edits conflict) — continuing with what is checked out"; fi
       ok "$DIR at $(git -C "$DIR" log -1 --format='%h %s' 2>/dev/null)"
     fi
   else
