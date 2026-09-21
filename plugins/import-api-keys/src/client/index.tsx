@@ -30,7 +30,7 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useEffect, useState } from 'react'
 // @ts-expect-error plain ESM without a declaration file; esbuild inlines it
-import { parseKeyFile } from '../../parse.mjs'
+import { PI_PROVIDER_ENV, parseKeyFile } from '../../parse.mjs'
 
 const CHANNEL = '/import-api-keys'
 const COMMAND = 'import-api-keys'
@@ -38,12 +38,14 @@ const COMMAND = 'import-api-keys'
 type PlanStatus = 'new' | 'same' | 'different' | 'readonly' | 'invalid'
 interface PlanEntry { status: PlanStatus, source?: string }
 interface Skipped { name: string, reason: string }
+/** A catalog provider this key would switch on: no profile in settings yet, so the model picker does not list it. */
+interface Enable { provider: string, displayName: string, settingsNs: string, settingsPath: string[] }
 
 type Dialog =
   | { kind: 'error', title: string, message: string }
-  | { kind: 'confirm', fileName: string, format: string, keys: Record<string, string>, plan: Record<string, PlanEntry>, skipped: Skipped[] }
+  | { kind: 'confirm', fileName: string, format: string, keys: Record<string, string>, plan: Record<string, PlanEntry>, skipped: Skipped[], enables: Record<string, Enable> }
   | { kind: 'busy', total: number, done: number }
-  | { kind: 'done', written: string[], failed: { name: string, message: string }[], unchanged: number }
+  | { kind: 'done', written: string[], failed: { name: string, message: string }[], unchanged: number, enabled: string[], enableFailed: { name: string, message: string }[] }
 
 type Listener = (dialog: Dialog | undefined) => void
 
@@ -69,6 +71,15 @@ function hintDockAppPicker(): void {
   try {
     handlers?.dshDock?.postMessage({ type: 'open-panel', file: `${PI_AUTH_DIR}/auth.json`, directory: PI_AUTH_DIR, message: "Choose an API-key file — a DSH ~/.dsh/.credentials.yaml, pi's auth.json, a JSON key map, or a .env file", showsHiddenFiles: true })
   } catch { /* not the Dock app */ }
+}
+
+function getPath(value: unknown, path: readonly string[]): unknown {
+  let cur: unknown = value
+  for (const key of path) {
+    if (typeof cur !== 'object' || cur === null || !(key in (cur as Record<string, unknown>))) return undefined
+    cur = (cur as Record<string, unknown>)[key]
+  }
+  return cur
 }
 
 function pickFile(): Promise<File | undefined> {
@@ -104,13 +115,15 @@ interface Row {
   value?: string
 }
 
+function enableNote(e: Enable | undefined): string { return e === undefined ? '' : ` · enables ${e.displayName}` }
+
 function rowsFor(d: Extract<Dialog, { kind: 'confirm' }>): Row[] {
   const rows: Row[] = []
   for (const [name, value] of Object.entries(d.keys)) {
     const p = d.plan[name]
     switch (p?.status) {
-      case 'new': rows.push({ name, box: 'on', summary: 'new — will be added', value }); break
-      case 'different': rows.push({ name, box: 'off', summary: 'already set with a different value — tick to overwrite', value }); break
+      case 'new': rows.push({ name, box: 'on', summary: `new — will be added${enableNote(d.enables[name])}`, value }); break
+      case 'different': rows.push({ name, box: 'off', summary: `already set with a different value — tick to overwrite${enableNote(d.enables[name])}`, value }); break
       case 'same': rows.push({ name, box: 'none', summary: 'already set with the same value' }); break
       case 'readonly': rows.push({ name, box: 'disabled', summary: `set by the server's environment (${p.source ?? 'env'}) — cannot be overwritten` }); break
       default: rows.push({ name, box: 'disabled', summary: 'invalid name or empty value' })
@@ -185,6 +198,8 @@ function ImportDialog({ store, onImport }: { store: DialogStore, onImport: (keys
         <div style={{ fontSize: 13, lineHeight: 1.5 }}>
           {dialog.written.length > 0 && <div style={{ marginBottom: 8 }}>Stored: <span style={mono}>{dialog.written.join(', ')}</span></div>}
           {dialog.failed.map(f => <div key={f.name} style={{ marginBottom: 4 }}>Failed <span style={mono}>{f.name}</span>: {f.message}</div>)}
+          {dialog.enabled.length > 0 && <div style={{ marginBottom: 8 }}>Enabled providers: {dialog.enabled.join(', ')}</div>}
+          {dialog.enableFailed.map(f => <div key={f.name} style={{ marginBottom: 4 }}>Could not enable {f.name}: {f.message}</div>)}
           {dialog.written.length > 0 && <div style={{ opacity: 0.7 }}>Providers pick new keys up on their next request — no restart needed.</div>}
         </div>
       </Modal>
@@ -194,7 +209,7 @@ function ImportDialog({ store, onImport }: { store: DialogStore, onImport: (keys
 }
 
 export const name = 'import-api-keys'
-export const inject = ['slots', 'commandUi', 'connection', 'remote', 'remote.credentials']
+export const inject = ['slots', 'commandUi', 'connection', 'remote', 'remote.credentials', 'remote.llm', 'remote.settings']
 
 export function apply(ctx: Context): void {
   const store = new DialogStore()
@@ -221,16 +236,56 @@ export function apply(ctx: Context): void {
       return
     }
     try {
-      store.set({ kind: 'confirm', fileName: file.name, format: parsed.format, keys: parsed.keys, plan: await plan(parsed.keys), skipped: parsed.skipped })
+      const [planned, enables] = await Promise.all([plan(parsed.keys), findEnables(Object.keys(parsed.keys))])
+      store.set({ kind: 'confirm', fileName: file.name, format: parsed.format, keys: parsed.keys, plan: planned, skipped: parsed.skipped, enables })
     } catch (error) {
       store.set({ kind: 'error', title: 'Could not check the existing keys', message: error instanceof Error ? error.message : String(error) })
     }
+  }
+
+  /**
+   * Catalog providers a key switches on. A stored key alone does not put a
+   * provider in the model picker: the picker lists providers with a profile
+   * in settings (Settings ▸ Models "add"). For each imported ref, find the
+   * shipped route whose key name it is — the name the host actually resolves
+   * is pi-ai's env table, `DERIVED_API_KEY` as the fallback — and which has no
+   * profile yet; those get an empty profile written after the keys land, the
+   * same `set [...settingsPath] {}` the Models pane writes.
+   */
+  const findEnables = async (refs: string[]): Promise<Record<string, Enable>> => {
+    const out: Record<string, Enable> = {}
+    if (refs.length === 0) return out
+    const [directory, described] = await Promise.all([ctx.remote.llm.listConfigurableProviders(), ctx.remote.settings.describe()])
+    if (!directory.ok || !described.ok) return out
+    const namespaces = new Map(described.value.namespaces.map(n => [n.ns, n]))
+    for (const entry of directory.value) {
+      if (entry.declared === true || entry.settingsPath.length === 0) continue
+      const ref = (PI_PROVIDER_ENV as Record<string, string>)[entry.provider] ?? `${entry.provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`
+      if (!refs.includes(ref) || out[ref] !== undefined) continue
+      const ns = namespaces.get(entry.settingsNs)
+      const configured = ns !== undefined && getPath(ns.value, entry.settingsPath) !== undefined
+      if (configured) continue
+      out[ref] = { provider: entry.provider, displayName: entry.displayName, settingsNs: entry.settingsNs, settingsPath: [...entry.settingsPath] }
+    }
+    return out
+  }
+
+  const enableProviders = async (enables: Enable[]): Promise<{ enabled: string[], enableFailed: { name: string, message: string }[] }> => {
+    const enabled: string[] = []
+    const enableFailed: { name: string, message: string }[] = []
+    for (const e of enables) {
+      const response = await ctx.remote.settings.mutate(e.settingsNs, [{ op: 'set', path: e.settingsPath, value: {} }], undefined)
+      if (response.ok) enabled.push(e.displayName)
+      else enableFailed.push({ name: e.displayName, message: response.error.message })
+    }
+    return { enabled, enableFailed }
   }
 
   const onImport = async (keys: Record<string, string>): Promise<void> => {
     const names = Object.keys(keys)
     const confirm = store.get()
     const unchanged = confirm?.kind === 'confirm' ? Object.values(confirm.plan).filter(p => p.status === 'same').length : 0
+    const enables = confirm?.kind === 'confirm' ? confirm.enables : {}
     store.set({ kind: 'busy', total: names.length, done: 0 })
     const written: string[] = []
     const failed: { name: string, message: string }[] = []
@@ -240,7 +295,8 @@ export function apply(ctx: Context): void {
       else failed.push({ name: ref, message: response.error.message })
       store.set({ kind: 'busy', total: names.length, done: i + 1 })
     }
-    store.set({ kind: 'done', written, failed, unchanged })
+    const { enabled, enableFailed } = await enableProviders(written.map(ref => enables[ref]).filter((e): e is Enable => e !== undefined))
+    store.set({ kind: 'done', written, failed, unchanged, enabled, enableFailed })
   }
 
   ctx.effect(() => ctx.commandUi.register({

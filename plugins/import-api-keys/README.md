@@ -41,7 +41,17 @@ reach a server they did not type them into.
    read-only and skipped rows (OAuth logins, unknown pi providers) have a
    disabled box with the reason. *Import N* counts the ticks and is disabled
    when nothing is ticked.
-5. Writes go through `ctx.remote.credentials.set` per key — DSH's sanctioned
+5. **Providers are switched on automatically.** A stored key alone does not put
+   a provider in the model picker — the picker lists providers with a profile
+   in settings (what Settings ▸ Models "add" writes). For every imported key,
+   the shipped route whose key name it is (pi-ai's env table, the name the host
+   resolves; `DERIVED_API_KEY` as fallback) and that has no profile yet gets an
+   empty profile (`settings.mutate(ns, [{op:'set', path, value:{}}])`, the
+   Models pane's own write). The confirm row says "· enables Anthropic"; the
+   done modal lists "Enabled providers". User-declared gateways are never
+   touched. Verified: importing GROQ/OPENROUTER keys on a fresh instance wrote
+   `groq: {}` / `openrouter: {}` and the picker listed their catalogues at once.
+6. Writes go through `ctx.remote.credentials.set` per key — DSH's sanctioned
    write path — then a done modal with what was stored and what failed.
    Providers re-resolve credentials per request, so imported keys work at once;
    no restart.
