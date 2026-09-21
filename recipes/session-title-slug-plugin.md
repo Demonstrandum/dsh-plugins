@@ -114,6 +114,35 @@ Expect one event with `"source":{"kind":"user"}` and the slug.
 | Row never previews | The dock entry only renders with a session snapshot; check `window.__DSH_BOOT__` contains `tali-session-title-slug` and the row is `[aria-selected="true"]` with no `_time` span. |
 | Title not applied after send | The rename fires on `blank` → false; a rejected prompt (`promptError`) leaves it armed for the next accepted one. Check the browser console for `session-title-slug: rename failed`. |
 | Typecheck: `SessionId` not exported from `…/client` | It lives in `@deepseek-ai/dsh-session/types`; the plugin derives it as `Parameters<ISessions['binding']>[0]` instead of adding a link. |
+| A dimmed "New Session" ghost appears **above the selected New Session** the moment you type; clicking any ghost does nothing (console: `sessions.open is not a function`) | The pre-2026-09-21 bundle against the rebased DSH — see below. Rebuild `lib/client.js` from current `src/`. |
+
+## Post-rebase breakage (found 2026-09-21, via numbered-switching)
+
+The fork's rebase onto upstream 0.1.6-alpha.2 (2026-09-18,
+`recipes/rebase-fork-on-upstream.md`) moved selection out of the Session
+Controller: `SessionListState.current` and `ISessions.open` no longer exist.
+esbuild does not typecheck, so the bundle kept building; at runtime
+`list.current` became `undefined`, so `deriveGhosts` treated the CURRENT
+blank session as "not current" and drew a ghost for it as soon as its draft
+was non-empty — a duplicate "New Session" row (the maintainer's screenshot: a dimmed
+"New Session" over the selected, numbered one). Clicking a ghost threw. The
+win was invisible until numbered-switching put a badge on the real row and
+made the pair stand out; the same removal is why `dsh-rewind-plugin` is
+disabled in the live patch.
+
+Fix (`src/client/index.tsx`): current = the list row with
+`retainedBy.mainView > 0` (the Workspace browser's own row-highlight
+derivation; `mainView` is declared by ui-session), open =
+`ctx.uiWorkspace.openSession(id)` (inject `uiWorkspace`; type-only import of
+`@deepseek-ai/dsh-client-ui-workspace/client`, new `link:` devDependency).
+Verified on the preview from a `/tmp` copy of the plugin (`cp -R src test lib
+build.mjs index.js package.json tsconfig.json cordis.patch.yml /tmp/sts-preview;
+ln -s <plugin>/node_modules /tmp/sts-preview/node_modules`, row
+`name: /tmp/sts-preview/index.js` in `cordis.dev.yml`) so the live bundle was
+not hot-swapped mid-investigation: typing into the current New Session shows
+no ghost; switching away shows the dimmed ghost; clicking it reopens the
+session with the draft intact, no errors. Lesson: **`pnpm typecheck` every
+client plugin after a DSH rebase** — the bundle builds regardless.
 
 ## Status
 

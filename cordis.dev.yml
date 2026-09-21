@@ -26,3 +26,9 @@
     # control channel; state persists in ~/.dsh-preview/remote-workspaces.json.
     # Both promoted to the live profile as bundles; re-add rows here to trial
     # further changes. Recipe: recipes/numbered-session-switching-plugin.md)
+    # (2026-09-21: session-title-slug's post-rebase ghost bug was reproduced and
+    # fixed here from a /tmp COPY of the plugin — `name: /tmp/sts-preview/index.js`
+    # — so the live bundle was not hot-swapped mid-investigation; see
+    # recipes/session-title-slug-plugin.md. Never leave a /tmp row in: it
+    # evaporates on reboot and a dsh.client row with a missing lib/client.js
+    # fails the boot.)

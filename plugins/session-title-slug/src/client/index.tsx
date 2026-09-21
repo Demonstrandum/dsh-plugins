@@ -38,8 +38,11 @@
  * whose persisted draft is non-empty; clicking it opens the session.
  */
 import type { Context } from '@deepseek-ai/cordis'
-import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { ISessions, SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { IWorkspaces } from '@deepseek-ai/dsh-api-workspace-controller/client'
+// Type-only (erased): `ctx.uiWorkspace` (Context merge) and the `mainView`
+// reference source (SessionReferenceSourceMap merge).
+import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 // Type-only imports (erased): declaration-merge the slot map, the session
 // standard props (useSession) and the composer standard props (useInput).
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -55,6 +58,24 @@ export { parseSlug } from './slug.ts'
 
 /** The branded session id, taken from the Sessions face (avoids linking @deepseek-ai/dsh-session for one type). */
 type SessionId = Parameters<ISessions['binding']>[0]
+
+/**
+ * The session shown in the main view. Since the fork's rebase onto upstream
+ * 0.1.6-alpha.2 (2026-09-18) selection is private to ui-workspace's
+ * UiWorkspaceService — `SessionListState.current` and `ISessions.open` are
+ * gone — but the list still exposes it as the one row retained by the
+ * `mainView` reference source (the Workspace browser's own row-highlight
+ * derivation). Before this the ghost logic read `list.current`, which the
+ * built bundle silently turned into `undefined`: every blank session with a
+ * draft, the CURRENT one included, got a ghost (a duplicate "New Session"
+ * row above the real one), and clicking a ghost threw `sessions.open is not
+ * a function`.
+ * @param list - Session Controller list snapshot.
+ * @returns the current session id, or undefined in the New Session view.
+ */
+export function currentSessionOf(list: SessionListState): SessionId | undefined {
+  return Object.values(list.byId).find(summary => (summary.retainedBy.mainView ?? 0) > 0)?.id
+}
 
 /** Registration inject face: plain callbacks created in apply. */
 interface Injected {
@@ -106,7 +127,7 @@ function SlugWatcher({ sessionId, useInput, useSession, renameSession, setPrevie
 }
 
 export const name = 'session-title-slug-client'
-export const inject = ['slots', 'sessions', 'workspaces']
+export const inject = ['slots', 'sessions', 'workspaces', 'uiWorkspace']
 
 /**
  * Client plugin body: install the sidebar preview patcher and contribute the
@@ -138,12 +159,12 @@ export function apply(ctx: Context): void {
   }, 'session-title-slug: convention global')
 
   // Ghost rows follow the Sessions list (rows + current) and the Workspaces.
-  const ghosts = installGhosts((sessionId) => { sessions.open(sessionId as SessionId) })
+  const ghosts = installGhosts((sessionId) => { ctx.uiWorkspace.openSession(sessionId as SessionId) })
   const feedGhosts = (): void => {
     const list = sessions.list.getSnapshot()
     ghosts.update({
       sessions: list.ids.map(id => list.byId[id]).filter(s => s !== undefined),
-      current: list.current,
+      current: currentSessionOf(list),
       workspaces: workspaces.list.getSnapshot().items,
     })
   }
