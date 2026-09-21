@@ -94,24 +94,72 @@ function pickFile(): Promise<File | undefined> {
   })
 }
 
-function describeFormat(format: string): string {
-  return format === 'pi-auth' ? "pi's auth.json" : format === 'dotenv' ? '.env file' : 'JSON key map'
-}
-
-const rowStyle = { display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 12px', fontSize: 13, lineHeight: 1.45 } as const
 const mono = { fontFamily: 'var(--dsh-font-mono, ui-monospace, monospace)', fontSize: 12 } as const
 
-function Group({ title, names, note }: { title: string, names: string[], note?: (name: string) => string | undefined }) {
-  if (names.length === 0) return null
+interface Row {
+  name: string
+  /** ticked by default and tickable / tickable but off / no box at all / box present but disabled */
+  box: 'on' | 'off' | 'none' | 'disabled'
+  summary: string
+  value?: string
+}
+
+function rowsFor(d: Extract<Dialog, { kind: 'confirm' }>): Row[] {
+  const rows: Row[] = []
+  for (const [name, value] of Object.entries(d.keys)) {
+    const p = d.plan[name]
+    switch (p?.status) {
+      case 'new': rows.push({ name, box: 'on', summary: 'new — will be added', value }); break
+      case 'different': rows.push({ name, box: 'off', summary: 'already set with a different value — tick to overwrite', value }); break
+      case 'same': rows.push({ name, box: 'none', summary: 'already set with the same value' }); break
+      case 'readonly': rows.push({ name, box: 'disabled', summary: `set by the server's environment (${p.source ?? 'env'}) — cannot be overwritten` }); break
+      default: rows.push({ name, box: 'disabled', summary: 'invalid name or empty value' })
+    }
+  }
+  for (const s of d.skipped) rows.push({ name: s.name, box: 'disabled', summary: s.reason })
+  return rows
+}
+
+function ConfirmTable({ dialog, onImport, onClose }: { dialog: Extract<Dialog, { kind: 'confirm' }>, onImport: (keys: Record<string, string>) => Promise<void>, onClose: () => void }) {
+  const rows = rowsFor(dialog)
+  const [ticked, setTicked] = useState<Set<string>>(() => new Set(rows.filter(r => r.box === 'on').map(r => r.name)))
+  const selected = rows.filter(r => ticked.has(r.name) && r.value !== undefined)
+  const toggle = (name: string, on: boolean): void => {
+    setTicked(prev => { const next = new Set(prev); if (on) next.add(name); else next.delete(name); return next })
+  }
+  const cell = { padding: '6px 10px', borderBottom: '1px solid var(--dsh-color-border, rgba(255,255,255,0.08))', verticalAlign: 'top', fontSize: 13, lineHeight: 1.4 } as const
   return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>{title} <span style={{ opacity: 0.6, fontWeight: 400 }}>({names.length})</span></div>
-      <div style={rowStyle}>
-        {names.map(name => (
-          <><span key={`${name}-n`} style={mono}>{name}</span><span key={`${name}-x`} style={{ opacity: 0.7 }}>{note?.(name) ?? ''}</span></>
-        ))}
+    <Modal
+      open
+      title="Import API keys"
+      closeLabel="Cancel"
+      onClose={onClose}
+      width={640}
+      footer={<>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="primary" disabled={selected.length === 0} onClick={() => { void onImport(Object.fromEntries(selected.map(r => [r.name, r.value as string]))) }}>
+          {selected.length === 0 ? 'Import' : `Import ${selected.length}`}
+        </Button>
+      </>}
+    >
+      <div style={{ maxHeight: '55vh', overflow: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+          <tbody>
+            {rows.map(row => (
+              <tr key={row.name} style={{ opacity: row.box === 'disabled' || row.box === 'none' ? 0.65 : 1 }}>
+                <td style={{ ...cell, width: 28, paddingRight: 0 }}>
+                  {row.box !== 'none' && (
+                    <input type="checkbox" aria-label={`import ${row.name}`} checked={ticked.has(row.name)} disabled={row.box === 'disabled'} onChange={e => toggle(row.name, e.target.checked)} />
+                  )}
+                </td>
+                <td style={{ ...cell, ...mono, whiteSpace: 'nowrap' }}>{row.name}</td>
+                <td style={{ ...cell, opacity: 0.8 }}>{row.summary}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -135,41 +183,14 @@ function ImportDialog({ store, onImport }: { store: DialogStore, onImport: (keys
     return (
       <Modal open title="API keys imported" closeLabel="Close" onClose={close} width={480} footer={<Button variant="primary" onClick={close}>OK</Button>}>
         <div style={{ fontSize: 13, lineHeight: 1.5 }}>
-          <Group title="Stored" names={dialog.written} />
-          {dialog.unchanged > 0 && <div style={{ opacity: 0.7, marginBottom: 10 }}>{dialog.unchanged} already had the same value.</div>}
-          <Group title="Failed" names={dialog.failed.map(f => f.name)} note={name => dialog.failed.find(f => f.name === name)?.message} />
+          {dialog.written.length > 0 && <div style={{ marginBottom: 8 }}>Stored: <span style={mono}>{dialog.written.join(', ')}</span></div>}
+          {dialog.failed.map(f => <div key={f.name} style={{ marginBottom: 4 }}>Failed <span style={mono}>{f.name}</span>: {f.message}</div>)}
           {dialog.written.length > 0 && <div style={{ opacity: 0.7 }}>Providers pick new keys up on their next request — no restart needed.</div>}
         </div>
       </Modal>
     )
   }
-  // confirm
-  const by = (status: PlanStatus): string[] => Object.keys(dialog.keys).filter(k => dialog.plan[k]?.status === status)
-  const fresh = by('new'), same = by('same'), different = by('different'), readonly = by('readonly'), invalid = by('invalid')
-  const toWrite = { ...Object.fromEntries([...fresh, ...different].map(k => [k, dialog.keys[k]])) }
-  const nothing = fresh.length + different.length === 0
-  return (
-    <Modal
-      open
-      title={nothing ? 'Nothing to import' : 'Import API keys?'}
-      description={`${dialog.fileName} — ${describeFormat(dialog.format)}`}
-      closeLabel="Cancel"
-      onClose={close}
-      width={520}
-      footer={nothing
-        ? <Button variant="primary" onClick={close}>OK</Button>
-        : <><Button onClick={close}>Cancel</Button><Button variant="primary" onClick={() => { void onImport(toWrite) }}>{different.length > 0 ? `Import and replace ${different.length}` : 'Import'}</Button></>}
-    >
-      <div style={{ maxHeight: '55vh', overflow: 'auto' }}>
-        <Group title="New" names={fresh} />
-        <Group title="Will be replaced" names={different} note={() => 'stored value differs — it will be overwritten'} />
-        <Group title="Unchanged" names={same} note={() => 'same value already stored'} />
-        <Group title="Read-only" names={readonly} note={name => `set by the process environment (${dialog.plan[name]?.source ?? 'env'}); DSH cannot overwrite it`} />
-        <Group title="Invalid" names={invalid} />
-        <Group title="Skipped" names={dialog.skipped.map(s => s.name)} note={name => dialog.skipped.find(s => s.name === name)?.reason} />
-      </div>
-    </Modal>
-  )
+  return <ConfirmTable key={dialog.fileName + Object.keys(dialog.keys).join(',')} dialog={dialog} onImport={onImport} onClose={close} />
 }
 
 export const name = 'import-api-keys'

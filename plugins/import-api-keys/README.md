@@ -27,9 +27,12 @@ reach a server they did not type them into.
    `invalid`. This round trip exists because DSH's wire API never returns a
    stored value (`describe` says configured-or-not only), so only the host can
    say whether an import **would overwrite a different value**.
-4. Confirm modal: **New**, **Will be replaced** (named), **Unchanged**,
-   Read-only, Invalid, Skipped; *Import* / *Import and replace N* / Cancel. If
-   nothing would change it is an info modal.
+4. Confirm modal — one table, `tick | name | summary`: new keys pre-ticked;
+   keys whose stored value differs unticked but tickable ("tick to
+   overwrite"); keys already stored with the same value have no box; invalid,
+   read-only and skipped rows (OAuth logins, unknown pi providers) have a
+   disabled box with the reason. *Import N* counts the ticks and is disabled
+   when nothing is ticked.
 5. Writes go through `ctx.remote.credentials.set` per key — DSH's sanctioned
    write path — then a done modal with what was stored and what failed.
    Providers re-resolve credentials per request, so imported keys work at once;
