@@ -19,7 +19,7 @@ func color(_ hex: String) -> NSColor {
     if text.hasPrefix("#") { text.removeFirst() }
     if text.count == 3 { text = text.map { "\($0)\($0)" }.joined() }
     guard text.count == 6, let value = UInt32(text, radix: 16) else { fail("bad color \(hex)") }
-    return NSColor(srgbRed: CGFloat((value >> 16) & 0xff) / 255, green: CGFloat((value >> 8) & 0xff) / 255, blue: CGFloat(value & 0xff) / 255, <remote>: 1)
+    return NSColor(srgbRed: CGFloat((value >> 16) & 0xff) / 255, green: CGFloat((value >> 8) & 0xff) / 255, blue: CGFloat(value & 0xff) / 255, alpha: 1)
 }
 
 var args = Array(CommandLine.arguments.dropFirst())
@@ -49,7 +49,7 @@ try? FileManager.default.createDirectory(atPath: outDir, withIntermediateDirecto
 
 func render(canvas: Int) -> NSBitmapImageRep {
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: canvas, pixelsHigh: canvas, bitsPerSample: 8, samplesPerPixel: 4,
-                               hasalpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+                               hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
     rep.size = NSSize(width: canvas, height: canvas)
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
