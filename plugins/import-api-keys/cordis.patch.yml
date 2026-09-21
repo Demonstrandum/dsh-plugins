@@ -1,0 +1,5 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# No config: /import-api-keys has no knobs.
+- insert:
+    - id: tali-import-api-keys
+      name: tali-import-api-keys

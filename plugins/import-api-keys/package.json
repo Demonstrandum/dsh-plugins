@@ -1,0 +1,52 @@
+{
+  "name": "tali-import-api-keys",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin: /import-api-keys \u2014 a browser command that opens the native file picker, reads pi's auth.json (or a flat key map / .env), shows what is new, unchanged or would be replaced, and stores the keys as DSH credentials. Works the same in the local app, a hybrid remote frame and a direct-remote app.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "parse.mjs",
+    "lib/client.js",
+    "lib/client.js.map",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check index.js && node --check parse.mjs && node --test tests/*.test.mjs",
+    "prepare": "node build.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-credentials": "link:../../deepseek-harness/packages/credentials/credentials"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:../../deepseek-harness/vendor/cordis",
+    "@deepseek-ai/dsh-api-remotes": "link:../../deepseek-harness/packages/api/remotes",
+    "@deepseek-ai/dsh-client-connection": "link:../../deepseek-harness/packages/client/connection",
+    "@deepseek-ai/dsh-client-ui-commands": "link:../../deepseek-harness/packages/client/ui-commands",
+    "@deepseek-ai/dsh-client-ui-layout": "link:../../deepseek-harness/packages/client/ui-layout",
+    "@deepseek-ai/dsh-client-ui-primitives": "link:../../deepseek-harness/packages/client/ui-primitives",
+    "@deepseek-ai/dsh-client-ui-renderer": "link:../../deepseek-harness/packages/client/ui-renderer",
+    "@deepseek-ai/dsh-client-ui-slots": "link:../../deepseek-harness/packages/client/ui-slots",
+    "@types/react": "~18.3.1",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.2"
+  }
+}
