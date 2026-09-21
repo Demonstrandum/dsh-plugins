@@ -419,13 +419,16 @@ can reproduce or maintain it:
   forces DOM clicks on `[hash]_[local]` class selectors, and how to test a
   chord with a real System Events keystroke instead of a synthetic one.
 - `stuck-loading-history-on-session-switch.md` — "Loading history…" forever
-  when switching to a mid-turn session: the `openState` state machine from
-  `ChatView` down to the multiplexed stream socket, the two holes (a local
-  fault in the opening window rethrown out of `doOpen` and swallowed by the
-  retain path — the assistant-stream baseline is the mid-turn-only step —
-  and a snapshot frame with no deadline), fork commit `1ab8de08d2` (fold
-  local faults into `openState='error'` + `console.error`, 15 s/30 s opening
-  watchdog), what was ruled out, and the hot-swap caveat when rebuilding
+  when switching to a mid-turn session in the Dock app: root cause is
+  `dsh-util-values` comparing `Function.prototype.toString(Object)` to V8's
+  one-line `[native code]` literal, which JavaScriptCore renders multi-line,
+  so every object failed the lossless-JSON test and the mid-turn
+  assistant-stream baseline threw (fork `319dcb8a56`); plus fork
+  `1ab8de08d2` so `doOpen` never leaves `openState='loading'` (local faults
+  → `'error'` + `console.error`, 15 s/30 s opening watchdog). The
+  `openState` state machine down to the multiplexed socket, why Chrome
+  could not reproduce it, the util-values `lib/index.js` host-face
+  rebuild trap, and the hot-swap caveat when rebuilding
   `session-controller/lib/client.js`.
 - `tailscale-remote-plugin.md` — the DSH GUI at `https://<node>/dsh/` over the
   tailnet: the from-scratch `dsh-tailscale-remote` plugin (loopback proxy +
