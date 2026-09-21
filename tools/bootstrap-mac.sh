@@ -387,6 +387,18 @@ if wants apps && [ "$APPS" = 1 ]; then
       todo "install $app yourself (or: brew install --cask $cask)"
     fi
   done
+  if [ -d "/Applications/Google Chrome.app" ] && [ ! -d "$HOME/Library/Application Support/Google/Chrome" ]; then
+    # Chrome's first launch has to complete once per macOS user before chrome-devtools-mcp can drive it
+    # (the plugin otherwise reports "automation session closed immediately on first launch"). Headless in
+    # the background, no first-run/default-browser prompts, quit after the profile exists.
+    if [ "$DRY" = 1 ]; then log "would first-launch Google Chrome once (creates the profile)"
+    else
+      open -ga "Google Chrome" --args --no-first-run --no-default-browser-check || true
+      for i in 1 2 3 4 5 6 7 8 9 10; do [ -d "$HOME/Library/Application Support/Google/Chrome" ] && break; sleep 1; done
+      osascript -e 'tell application "Google Chrome" to quit' >/dev/null 2>&1 || true
+      [ -d "$HOME/Library/Application Support/Google/Chrome" ] && ok "Google Chrome first launch done (profile created)" || warn "Google Chrome did not create a profile — open it once by hand"
+    fi
+  fi
   if [ -d "/Applications/Safari Technology Preview.app" ]; then
     # STP must be launched once to accept its licence before safaridriver --mcp works.
     if [ ! -d "$HOME/Library/Containers/com.apple.SafariTechnologyPreview" ] && [ ! -d "$HOME/Library/Safari Technology Preview" ]; then
