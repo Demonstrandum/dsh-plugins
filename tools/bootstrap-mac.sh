@@ -643,7 +643,14 @@ fi
 if wants preset; then
   banner "User preset minimal-no-tools (used by the Apple rule; harmless otherwise)"
   PRESET="$DSH_HOME_DIR/.agent-presets/minimal-no-tools"
-  if [ -f "$PRESET/agent.cordis.yml" ]; then ok "present"
+  NGT="$DIR/plugins/no-global-tools/index.js"
+  if [ -f "$PRESET/agent.cordis.yml" ]; then
+    ok "present"
+    # Older presets lack the row that hides host plugins' global tools (see plugins/no-global-tools/README.md).
+    if [ -f "$NGT" ] && ! grep -q 'id: no-global-tools' "$PRESET/agent.cordis.yml"; then
+      [ "$DRY" = 1 ] || printf '\n# Hide the host plugins'"'"' globally registered tools too (62 schemas do not fit a 4K window).\n- id: no-global-tools\n  name: %s\n' "$NGT" >>"$PRESET/agent.cordis.yml"
+      ok "added the no-global-tools row to the preset"
+    fi
   elif [ "$DRY" = 1 ]; then log "would write $PRESET/{preset.yml,agent.cordis.yml}"
   else
     mkdir -p "$PRESET"
@@ -660,6 +667,9 @@ EOF
     complete: true
     includeRuntimeContext: false
 EOF
+    if [ -f "$NGT" ]; then
+      printf '\n# Hide the host plugins'"'"' globally registered tools too: the preset only omits the in-tree tool\n# groups, and 62 schemas do not fit a 4K window. Preset rows run in the agent scope, where\n# ctx.tools.restrict({ allow: [] }) is allowed (plugins/no-global-tools/README.md).\n- id: no-global-tools\n  name: %s\n' "$NGT" >>"$PRESET/agent.cordis.yml"
+    fi
     ok "written"
   fi
 fi

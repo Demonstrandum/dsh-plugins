@@ -226,6 +226,24 @@ it carries site-specific defaults). What it does per account, and why:
   `pnpm bootstrap-remote <name>@<mac> --instance <name> --mount /dsh/<name>
   --allow <their tailnet login>`.
 
+### The on-device model answered one token (`Output token limit reached`)
+
+First real use of the Apple model on a fresh instance: `enforce-model-preset`
+did switch the blank session to `minimal-no-tools`, yet the request carried
+**62 tool schemas (62 KB)** — every tool of the out-of-tree plugins — into a
+4K-window model, which answered one token with `stopReason: length`. The
+preset only omits the in-tree tool groups; plugin tools bypass it two ways:
+global registrations (`fs-tools`, `session-introspect`) and per-agent scoped
+registrations on `agent/created` (`browser-automation`,
+`<private-plugin>`). Fix, verified 0 tools on the wire afterwards:
+`plugins/no-global-tools` (a preset row calling `ctx.tools.restrict({ allow:
+[] })`, written into the preset by the bootstrap's `preset` step) for the
+former, and a `skipPresets` gate in the two per-agent plugins for the latter
+(scoped registrations are exempt from `restrict`; and `agentPresets.select`
+*recomposes the same Agent*, so the plugins also detach/attach on
+`agent-preset/selected`). Diagnosed by decoding the session log
+(`zstd -dc session.v3.jsonl.zstd`, `request/header` → `tools.length`).
+
 **Paid apps are never installed.** Dash (Kapeli's docs browser) and
 <private> are not offered; instead `dash-docsets` and
 `<private-plugin>` are left out of the build and of the bundle

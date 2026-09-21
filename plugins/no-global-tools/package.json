@@ -1,0 +1,10 @@
+{
+  "name": "tali-no-global-tools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent-preset row: hide every deployment-global tool from the agents composed under the preset (ctx.tools.restrict({ allow: [] })). For chat-only presets on tiny local models.",
+  "type": "module",
+  "main": "index.js",
+  "exports": { ".": "./index.js" },
+  "license": "MIT"
+}

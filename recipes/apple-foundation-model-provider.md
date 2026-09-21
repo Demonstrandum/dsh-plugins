@@ -259,6 +259,7 @@ Two local artifacts make the preset choice automatic (installed 2026-09-03):
 
 | Symptom | Cause / fix |
 |---|---|
+| `Output token limit reached` after one token on `minimal-no-tools` (`stopReason: length`); the request carries dozens of tool schemas | host plugins' tools bypass the preset: global registrations (fs-tools, session-introspect, …) need the `no-global-tools` preset row (`ctx.tools.restrict({ allow: [] })`), and per-agent registrations (browser-automation, <private-plugin>) are exempt from `restrict` and gate themselves via `skipPresets`. Both shipped 2026-09-21; the bootstrap writes the row. Measured: 62 tools / 62 KB → 0 |
 | `503 ... Swift 6.4 toolchain` at startup | Stable afm on macOS 26 — install `afm@0.9.10` (step 1) |
 | Server dies, `Empty reply from server`, `MLX error: Failed to load the default metallib` | v0.9.10 packaging bug — add the symlinks (step 2), restart afm |
 | `"Apple Intelligence is not enabled"` | OS-level: enable it in System Settings and wait for the model download; also check Siri language support and MDM profiles |
