@@ -1,0 +1,40 @@
+{
+  "name": "tali-reload-on-restart",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH client plugin: when the page reconnects to a RESTARTED server (every client bundle revision re-minted at once), reload the page instead of letting client-hmr hot-swap the whole plugin tree in place — the swap crashes the React root and leaves a black window.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lib/client.js",
+    "lib/client.js.map",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "check": "node --check index.js",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "prepare": "node build.mjs"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:../../deepseek-harness/vendor/cordis",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.2"
+  }
+}

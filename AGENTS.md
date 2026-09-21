@@ -121,7 +121,7 @@ generated API in `docs/cordis-api/`):
    `dsh plugin --profile <name> add ./plugins/<dir>` (pnpm-links the local
    directory; `remove` undoes it). Layer order, git installs, and the pnpm
    `allowBuilds` catch: `docs/user/develop/basic/publish.md`.
-   **All fifteen live plugins at once:** `pnpm install-plugins [--profile web]`
+   **All sixteen live plugins at once:** `pnpm install-plugins [--profile web]`
    (`tools/install-plugins.sh`; `pnpm remove-plugins` undoes it). Rows then
    resolve by package name from the profile's hoisted `node_modules`, so no
    patch carries an absolute path. A "superplugin" package that merely lists
@@ -310,6 +310,15 @@ can reproduce or maintain it:
 - `apple-foundation-model-provider.md` — local models as DSH providers
   (LM Studio + Apple Foundation via AFM), the pi-ai token-budget trap,
   minimal presets, and the `enforce-model-preset` plugin.
+- `black-screen-after-server-restart.md` — a bare dark window in the Dock
+  apps (any browser) after the DSH server restarted: not the wrapper — the
+  client's `/plugins/events` reconnect gets per-process `<nonce>-<n>` bundle
+  revs, `entries.sync` hot-swaps every plugin in place and the React root
+  crashes; the `reload-on-restart` client plugin (wraps
+  `ctx.modules.entries.sync`, reloads the page when *all* known revs changed,
+  passes single-bundle HMR through), the Dock-log/relay-log (local vs UTC)
+  diagnosis trail, the preview-server reproduction, and per-instance
+  deployment with its one-time ⌘R caveat.
 - `bootstrap-mac-installer.md` — `tools/bootstrap-mac.sh`, the one-command
   fresh-machine installer (INSTALLING.md Part A + C1–C5 as sixteen idempotent
   steps: CLT, Homebrew, node/pnpm/git, STP/Chrome casks, the mandatory
