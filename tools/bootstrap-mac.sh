@@ -441,7 +441,7 @@ has_<private>() { [ -d /Applications/<private>.app ] || [ -d /Applications/<priv
 EXCLUDED=()
 has_dash    || EXCLUDED+=(dash-docsets)
 has_<private> || EXCLUDED+=(<private-plugin>)
-excluded() { case " ${EXCLUDED[*]} " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+excluded() { case " ${EXCLUDED[*]-} " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }   # ${arr[*]-}: bash 3.2 + set -u treats an empty array as unbound
 
 # ===========================================================================
 TS=/Applications/Tailscale.app/Contents/MacOS/Tailscale
@@ -545,6 +545,7 @@ if wants clone; then
   if [ "$DRY" = 0 ] || [ -d "$DIR/.git" ]; then
     [ "$DRY" = 1 ] || git -C "$DIR" submodule init >/dev/null 2>&1 || true
     for name in $(git -C "$DIR" config -f .gitmodules --name-only --get-regexp 'submodule\..*\.url' 2>/dev/null | sed -E 's/^submodule\.(.*)\.url$/\1/'); do
+      [ "$name" = extras ] && continue   # private: stays on ssh (an https fetch would prompt for credentials)
       sshurl="$(git -C "$DIR" config -f .gitmodules --get "submodule.$name.url" || true)"
       case "$sshurl" in
         git@github.com:*)
@@ -554,7 +555,19 @@ if wants clone; then
       esac
     done
   fi
-  run git -C "$DIR" submodule update --init || die "submodule checkout failed"
+  run git -C "$DIR" submodule update --init deepseek-harness || die "submodule checkout failed"
+  # `extras/` is an OPTIONAL private layer (symbolica-ai/dsh-extras: deployment inventory, pins of private
+  # plugins). Its existence is public, its contents need org access over ssh. Absent access → warn and
+  # continue; the public plugin set is complete on its own. Inside it, nested pins are fetched recursively.
+  if git -C "$DIR" config -f .gitmodules --get submodule.extras.url >/dev/null 2>&1; then
+    if [ "$DRY" = 1 ]; then log "would try: git submodule update --init extras (optional; skipped without GitHub org access)"
+    elif git -C "$DIR" submodule update --init extras >>"$LOG" 2>&1 && git -C "$DIR/extras" submodule update --init --recursive >>"$LOG" 2>&1; then
+      ok "extras layer checked out ($(git -C "$DIR/extras" log --oneline -1 | cut -c1-7)); private plugins will be layered on"
+    else
+      git -C "$DIR" submodule deinit -f extras >/dev/null 2>&1 || true
+      warn "extras layer not reachable (no access to symbolica-ai/dsh-extras from this Mac?) — continuing with the public plugin set only"
+    fi
+  fi
   # A freshly cloned submodule keeps `core.worktree` in its common config (.git/modules/<name>/config).
   # The fork's pnpm postinstall (scripts/install-lefthook.mjs) refuses that layout — and pnpm re-runs the
   # postinstall before EVERY `pnpm dsh …` (verify-deps-before-run), so nothing in the fork would work.
@@ -612,8 +625,16 @@ if wants plugins; then
     [ "$DRY" = 1 ] || sed -i '' "s#/Users/USER/github/tali-dash-plugins#$DIR#g" "$DIR/cordis.dev.yml"
     ok "cordis.dev.yml re-pointed at $DIR"
   fi
-  for pdir in "$DIR"/plugins/*/; do
+  EXTRA_PDIRS=""
+  if [ -f "$DIR/extras/dsh-extras.yml" ] && [ -f "$DIR/tools/extras-manifest.mjs" ]; then
+    EXTRA_PDIRS="$(node "$DIR/tools/extras-manifest.mjs" "$DIR" 2>/dev/null | while IFS=$'\t' read -r epath ebundle einstall ereq; do
+      if [ "$ereq" != "-" ] && ! command -v "$ereq" >/dev/null 2>&1; then echo "SKIP:$epath:$ereq"; else echo "$epath/"; fi
+    done)"
+  fi
+  for pdir in "$DIR"/plugins/*/ $EXTRA_PDIRS; do
+    case "$pdir" in SKIP:*) warn "extras plugin $(basename "$(echo "$pdir" | cut -d: -f2)") skipped — requires the \`$(echo "$pdir" | cut -d: -f3)\` command, not on this Mac"; continue;; esac
     p="$(basename "$pdir")"; [ -f "$pdir/package.json" ] || continue
+    case "$pdir" in "$DIR"/extras/*) p="extras:$(basename "$(dirname "$(dirname "$pdir")")")/$p" ;; esac
     if excluded "$p"; then
       case "$p" in
         dash-docsets) warn "$p skipped — Dash.app (paid) is not installed" ;;

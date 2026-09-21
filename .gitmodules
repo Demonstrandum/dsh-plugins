@@ -3,3 +3,7 @@
 	url = git@github.com:taliesinb/deepseek-harness.git
 	branch = feat/embed-session
 	ignore = dirty
+[submodule "extras"]
+	path = extras
+	url = git@github.com:symbolica-ai/dsh-extras.git
+	branch = main

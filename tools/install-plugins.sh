@@ -88,9 +88,21 @@ if [ -n "$WITHOUT" ]; then
   PLUGINS=("${KEPT[@]}")
 fi
 
+# The optional private layer (extras/dsh-extras.yml): plugins with `install: true` whose `requires.command`
+# (if any) is present join the set. Absent submodule → nothing added.
+EXTRA_DIRS=()
+if [ -f "$HERE/extras/dsh-extras.yml" ] && [ -f "$HERE/tools/extras-manifest.mjs" ] && [ -z "${NO_EXTRAS:-}" ]; then
+  while IFS=$'\t' read -r epath ebundle einstall ereq; do
+    [ "$einstall" = yes ] || continue
+    if [ "$ereq" != "-" ] && ! command -v "$ereq" >/dev/null 2>&1; then log "extras: $ebundle skipped (requires \`$ereq\`)"; continue; fi
+    [ -f "$epath/package.json" ] || { log "extras: $ebundle skipped (not checked out: $epath)"; continue; }
+    EXTRA_DIRS+=("$epath")
+  done < <(node "$HERE/tools/extras-manifest.mjs" "$HERE" 2>/dev/null)
+fi
+
 DIRS=(); NAMES=()
-for p in "${PLUGINS[@]}"; do
-  dir="$HERE/plugins/$p"
+for p in "${PLUGINS[@]}" "${EXTRA_DIRS[@]}"; do
+  case "$p" in /*) dir="$p"; p="extras:$(basename "$dir")" ;; *) dir="$HERE/plugins/$p" ;; esac
   [ -f "$dir/package.json" ] || die "missing plugin directory: $dir"
   name="$(node -p "require('$dir/package.json').name")"
   bundle="$(node -p "require('$dir/package.json').dsh?.bundle?.patch ?? ''")"
@@ -104,7 +116,7 @@ for p in "${PLUGINS[@]}"; do
   DIRS+=("$dir"); NAMES+=("$name")
 done
 
-log "$ACTION ${#PLUGINS[@]} plugins → profile '$PROFILE' (DSH_HOME=${DSH_HOME:-~/.dsh}) via $CHECKOUT"
+log "$ACTION ${#DIRS[@]} plugins (${#EXTRA_DIRS[@]} from extras) → profile '$PROFILE' (DSH_HOME=${DSH_HOME:-~/.dsh}) via $CHECKOUT"
 if [ "$ACTION" = add ]; then
   CMD=(pnpm dsh plugin --profile "$PROFILE" add "${DIRS[@]}")
 else
@@ -118,5 +130,6 @@ log "composed rows in profile '$PROFILE':"
 if [ "$ACTION" = add ]; then
   n="$(cd "$CHECKOUT" && pnpm dsh --profile "$PROFILE" --dump-config 2>/dev/null | grep -cE '^- id: tali-' || true)"
   [ "$n" -ge "${#PLUGINS[@]}" ] || log "warning: expected ${#PLUGINS[@]} tali- rows, dump shows $n"
+  for d in "${EXTRA_DIRS[@]}"; do (cd "$CHECKOUT" && pnpm dsh --profile "$PROFILE" --dump-config 2>/dev/null | grep -qE "^- id: $(node -p "require('$d/package.json').name")") && log "extras: $(basename "$d") composed" || log "warning: extras plugin $(basename "$d") not in the composed profile"; done
 fi
 log "done"
