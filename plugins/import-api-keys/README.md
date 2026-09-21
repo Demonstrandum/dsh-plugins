@@ -47,7 +47,9 @@ reach a server they did not type them into.
    the shipped route whose key name it is (pi-ai's env table, the name the host
    resolves; `DERIVED_API_KEY` as fallback) and that has no profile yet gets an
    empty profile (`settings.mutate(ns, [{op:'set', path, value:{}}])`, the
-   Models pane's own write). The confirm row says "· enables Anthropic"; the
+   Models pane's own write). The confirm row says "· enables Anthropic"; a key
+   already stored with the same value whose provider is still off gets a
+   pre-ticked "tick to enable" row (no rewrite, just the profile); the
    done modal lists "Enabled providers". User-declared gateways are never
    touched. Verified: importing GROQ/OPENROUTER keys on a fresh instance wrote
    `groq: {}` / `openrouter: {}` and the picker listed their catalogues at once.

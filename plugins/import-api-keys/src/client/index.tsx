@@ -112,7 +112,10 @@ interface Row {
   /** ticked by default and tickable / tickable but off / no box at all / box present but disabled */
   box: 'on' | 'off' | 'none' | 'disabled'
   summary: string
+  /** the key to store when ticked; absent for a row whose only action is enabling its provider */
   value?: string
+  /** provider profile to create when ticked */
+  enable?: Enable
 }
 
 function enableNote(e: Enable | undefined): string { return e === undefined ? '' : ` · enables ${e.displayName}` }
@@ -122,9 +125,15 @@ function rowsFor(d: Extract<Dialog, { kind: 'confirm' }>): Row[] {
   for (const [name, value] of Object.entries(d.keys)) {
     const p = d.plan[name]
     switch (p?.status) {
-      case 'new': rows.push({ name, box: 'on', summary: `new — will be added${enableNote(d.enables[name])}`, value }); break
-      case 'different': rows.push({ name, box: 'off', summary: `already set with a different value — tick to overwrite${enableNote(d.enables[name])}`, value }); break
-      case 'same': rows.push({ name, box: 'none', summary: 'already set with the same value' }); break
+      case 'new': rows.push({ name, box: 'on', summary: `new — will be added${enableNote(d.enables[name])}`, value, enable: d.enables[name] }); break
+      case 'different': rows.push({ name, box: 'off', summary: `already set with a different value — tick to overwrite${enableNote(d.enables[name])}`, value, enable: d.enables[name] }); break
+      case 'same': {
+        const enable = d.enables[name]
+        // Same key, provider still off: the only thing left to do is enable it — a safe default, so pre-ticked.
+        if (enable !== undefined) rows.push({ name, box: 'on', summary: `already set with the same value · tick to enable ${enable.displayName}`, enable })
+        else rows.push({ name, box: 'none', summary: 'already set with the same value' })
+        break
+      }
       case 'readonly': rows.push({ name, box: 'disabled', summary: `set by the server's environment (${p.source ?? 'env'}) — cannot be overwritten` }); break
       default: rows.push({ name, box: 'disabled', summary: 'invalid name or empty value' })
     }
@@ -133,10 +142,13 @@ function rowsFor(d: Extract<Dialog, { kind: 'confirm' }>): Row[] {
   return rows
 }
 
-function ConfirmTable({ dialog, onImport, onClose }: { dialog: Extract<Dialog, { kind: 'confirm' }>, onImport: (keys: Record<string, string>) => Promise<void>, onClose: () => void }) {
+/** What Import applies: keys to store, and providers to switch on (for stored keys and for same-value rows). */
+interface ImportPlan { keys: Record<string, string>, enables: Enable[] }
+
+function ConfirmTable({ dialog, onImport, onClose }: { dialog: Extract<Dialog, { kind: 'confirm' }>, onImport: (plan: ImportPlan) => Promise<void>, onClose: () => void }) {
   const rows = rowsFor(dialog)
   const [ticked, setTicked] = useState<Set<string>>(() => new Set(rows.filter(r => r.box === 'on').map(r => r.name)))
-  const selected = rows.filter(r => ticked.has(r.name) && r.value !== undefined)
+  const selected = rows.filter(r => ticked.has(r.name) && (r.value !== undefined || r.enable !== undefined))
   const toggle = (name: string, on: boolean): void => {
     setTicked(prev => { const next = new Set(prev); if (on) next.add(name); else next.delete(name); return next })
   }
@@ -150,7 +162,7 @@ function ConfirmTable({ dialog, onImport, onClose }: { dialog: Extract<Dialog, {
       width={Math.min(window.innerWidth - 80, 720 + Math.max(0, ...rows.map(r => r.summary.length + r.name.length - 70)) * 6)}
       footer={<>
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="primary" disabled={selected.length === 0} onClick={() => { void onImport(Object.fromEntries(selected.map(r => [r.name, r.value as string]))) }}>
+        <Button variant="primary" disabled={selected.length === 0} onClick={() => { void onImport({ keys: Object.fromEntries(selected.filter(r => r.value !== undefined).map(r => [r.name, r.value as string])), enables: selected.map(r => r.enable).filter((e): e is Enable => e !== undefined) }) }}>
           {selected.length === 0 ? 'Import' : `Import ${selected.length}`}
         </Button>
       </>}
@@ -176,7 +188,7 @@ function ConfirmTable({ dialog, onImport, onClose }: { dialog: Extract<Dialog, {
   )
 }
 
-function ImportDialog({ store, onImport }: { store: DialogStore, onImport: (keys: Record<string, string>) => Promise<void> }) {
+function ImportDialog({ store, onImport }: { store: DialogStore, onImport: (plan: ImportPlan) => Promise<void> }) {
   const [dialog, setDialog] = useState<Dialog | undefined>(store.get())
   useEffect(() => store.subscribe(setDialog), [store])
   if (dialog === undefined) return null
@@ -200,7 +212,7 @@ function ImportDialog({ store, onImport }: { store: DialogStore, onImport: (keys
           {dialog.failed.map(f => <div key={f.name} style={{ marginBottom: 4 }}>Failed <span style={mono}>{f.name}</span>: {f.message}</div>)}
           {dialog.enabled.length > 0 && <div style={{ marginBottom: 8 }}>Enabled providers: {dialog.enabled.join(', ')}</div>}
           {dialog.enableFailed.map(f => <div key={f.name} style={{ marginBottom: 4 }}>Could not enable {f.name}: {f.message}</div>)}
-          {dialog.written.length > 0 && <div style={{ opacity: 0.7 }}>Providers pick new keys up on their next request — no restart needed.</div>}
+          {(dialog.written.length > 0 || dialog.enabled.length > 0) && <div style={{ opacity: 0.7 }}>Takes effect immediately — no restart needed.</div>}
         </div>
       </Modal>
     )
@@ -281,11 +293,10 @@ export function apply(ctx: Context): void {
     return { enabled, enableFailed }
   }
 
-  const onImport = async (keys: Record<string, string>): Promise<void> => {
+  const onImport = async ({ keys, enables }: ImportPlan): Promise<void> => {
     const names = Object.keys(keys)
     const confirm = store.get()
     const unchanged = confirm?.kind === 'confirm' ? Object.values(confirm.plan).filter(p => p.status === 'same').length : 0
-    const enables = confirm?.kind === 'confirm' ? confirm.enables : {}
     store.set({ kind: 'busy', total: names.length, done: 0 })
     const written: string[] = []
     const failed: { name: string, message: string }[] = []
@@ -295,7 +306,11 @@ export function apply(ctx: Context): void {
       else failed.push({ name: ref, message: response.error.message })
       store.set({ kind: 'busy', total: names.length, done: i + 1 })
     }
-    const { enabled, enableFailed } = await enableProviders(written.map(ref => enables[ref]).filter((e): e is Enable => e !== undefined))
+    // Enable for every ticked row whose provider is off, unless that row's key write failed.
+    const refOf = new Map<Enable, string>()
+    if (confirm?.kind === 'confirm') for (const [ref, e] of Object.entries(confirm.enables)) refOf.set(e, ref)
+    const failedNames = new Set(failed.map(f => f.name))
+    const { enabled, enableFailed } = await enableProviders(enables.filter(e => !failedNames.has(refOf.get(e) ?? '')))
     store.set({ kind: 'done', written, failed, unchanged, enabled, enableFailed })
   }
 
@@ -311,5 +326,5 @@ export function apply(ctx: Context): void {
     name: 'shell.overlay',
     id: 'tali-import-api-keys',
     inject: () => ({ store, onImport }),
-  }, ({ store, onImport }: { store: DialogStore, onImport: (keys: Record<string, string>) => Promise<void> }) => <ImportDialog store={store} onImport={onImport} />)), 'import-api-keys: dialog overlay')
+  }, ({ store, onImport }: { store: DialogStore, onImport: (plan: ImportPlan) => Promise<void> }) => <ImportDialog store={store} onImport={onImport} />)), 'import-api-keys: dialog overlay')
 }
