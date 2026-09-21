@@ -955,7 +955,21 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
       try {
         return stripUndefined(await execute(args, exec))
       } catch (error) {
-        throw explainFailure(tool.name, args, error, exec, limits.timeoutMs, { chromeEverOpened })
+        const explained = explainFailure(tool.name, args, error, exec, limits.timeoutMs, { chromeEverOpened })
+        // An environment failure leaves a browser instance behind whose process
+        // read the environment at launch: `safaridriver --mcp` checks "Allow
+        // Remote Automation" once, so after the user runs `safaridriver
+        // --enable` the same process keeps refusing — for up to idleMinutes.
+        // Drop the session's instances so the next call spawns fresh ones.
+        if (explained !== error && /automation is unavailable on this machine/.test(explained.message)) {
+          const agent = agentOf(exec)
+          const browser = tool.name.startsWith('safari_') ? 'safari' : 'chrome'
+          try {
+            if (browser === 'safari') await sessions.closeSafari(agent, undefined, 'environment-failure')
+            else await sessions.closeChrome(agent, undefined, 'environment-failure')
+          } catch { /* best effort */ }
+        }
+        throw explained
       }
     }
   }
