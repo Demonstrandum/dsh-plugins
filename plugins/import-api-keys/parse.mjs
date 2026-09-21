@@ -10,6 +10,12 @@
  *      further config. OAuth entries and unknown providers are reported as skipped.
  *   2. a flat map  { "ANTHROPIC_API_KEY": "sk-…", … }   (ref grammar: [A-Z][A-Z0-9_]*)
  *   3. dotenv text  ANTHROPIC_API_KEY=sk-…  (quotes stripped, `export` allowed, # comments)
+ *   4. DSH's own `~/.dsh/.credentials.yaml` (the store this command writes INTO on
+ *      the other end): the `refs:` block is the key map; `records:` entries are
+ *      reported — `llm-pi-ai/<provider>` `api-key` records import through the
+ *      provider's env name, `grant` records (OAuth logins) and the browser-session
+ *      grant are skipped. Parsed with a purpose-built reader of that file's fixed
+ *      2-space layout, not a YAML library.
  */
 
 /** pi-ai env-api-keys `getApiKeyEnvVars` table (0.85.1), first env var per provider. */
@@ -72,6 +78,7 @@ export function parseKeyFile(text) {
     if (entries.every(([, v]) => typeof v === 'string')) return parseEnvMap(entries)
     throw new Error('Unrecognised JSON: expected pi\'s auth.json ({ provider: { type, key } }) or a flat { "NAME_API_KEY": "value" } map.')
   }
+  if (/^version:\s*1\s*$/m.test(trimmed) && /^(refs|records):\s*$/m.test(trimmed)) return parseDshCredentials(trimmed)
   if (/^\s*(export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/m.test(trimmed)) return parseDotenv(trimmed)
   throw new Error('Unrecognised file: expected pi\'s auth.json, a flat JSON map of API keys, or a .env file.')
 }
@@ -119,4 +126,65 @@ function parseDotenv(text) {
   }
   if (Object.keys(keys).length === 0 && skipped.length === 0) throw new Error('No NAME=value lines found.')
   return { format: 'dotenv', keys, skipped }
+}
+
+/**
+ * `~/.dsh/.credentials.yaml` — DSH's credentials-local store:
+ *   version: 1
+ *   records:
+ *     <scope>/<id>:
+ *       kind: grant | api-key
+ *       payload: {…} | key: …
+ *   refs:
+ *     NAME_API_KEY: value
+ * Only this shape (2-space indent, one scalar per line) — enough for the file
+ * DSH writes, without shipping a YAML parser to the browser.
+ */
+function parseDshCredentials(text) {
+  const keys = {}
+  const skipped = []
+  const lines = text.split(/\r?\n/)
+  let section = ''
+  let record = null // { name, kind, key }
+  const flushRecord = () => {
+    if (record === null) return
+    const [scope, id] = record.name.includes('/') ? [record.name.slice(0, record.name.indexOf('/')), record.name.slice(record.name.indexOf('/') + 1)] : ['', record.name]
+    if (scope === 'llm-pi-ai' && record.kind === 'api-key' && record.key) {
+      const ref = PI_PROVIDER_ENV[id]
+      if (ref) keys[ref] = record.key
+      else skipped.push({ name: record.name, reason: 'unknown pi provider — no DSH credential name' })
+    } else if (scope === 'llm-pi-ai' && record.kind === 'grant') {
+      skipped.push({ name: record.name, reason: 'OAuth login (grant record) — sign in via the provider on the other DSH' })
+    } else if (record.name !== 'client-connection/browser-session') {
+      skipped.push({ name: record.name, reason: `${record.kind || 'record'} record — not an API key` })
+    }
+    record = null
+  }
+  for (const raw of lines) {
+    if (raw.trim() === '' || raw.trim().startsWith('#')) continue
+    const top = /^(records|refs|version):\s*(.*)$/.exec(raw)
+    if (top) { flushRecord(); section = top[1]; continue }
+    if (section === 'refs') {
+      const m = /^ {2}([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/.exec(raw)
+      if (!m) continue
+      const value = unquote(m[2])
+      if (!REF_PATTERN.test(m[1])) { skipped.push({ name: m[1], reason: 'not a credential name (expected UPPER_SNAKE_CASE)' }); continue }
+      if (value === '') { skipped.push({ name: m[1], reason: 'empty value' }); continue }
+      keys[m[1]] = value
+    } else if (section === 'records') {
+      const head = /^ {2}([^\s:][^:]*):\s*$/.exec(raw)
+      if (head) { flushRecord(); record = { name: unquote(head[1]), kind: '', key: '' }; continue }
+      const field = /^ {4}(kind|key):\s*(.*)$/.exec(raw)
+      if (field && record) { if (field[1] === 'kind') record.kind = unquote(field[2]); else record.key = unquote(field[2]) }
+    }
+  }
+  flushRecord()
+  if (Object.keys(keys).length === 0 && skipped.length === 0) throw new Error('No refs or records found in this credentials file.')
+  return { format: 'dsh-credentials', keys, skipped }
+}
+
+function unquote(value) {
+  const v = String(value).trim()
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) return v.slice(1, -1)
+  return v
 }

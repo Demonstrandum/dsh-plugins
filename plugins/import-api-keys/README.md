@@ -20,7 +20,15 @@ reach a server they did not type them into.
      same names DSH's `llm-pi-ai` providers read as `apiKeyEnv`, so nothing else
      needs configuring. OAuth entries and unknown providers are listed as skipped.
    - a flat `{ "OPENAI_API_KEY": "…" }` map (ref grammar `[A-Z][A-Z0-9_]*`);
-   - dotenv text (`export` allowed, quotes stripped, `#` comments).
+   - dotenv text (`export` allowed, quotes stripped, `#` comments);
+   - **another DSH's `~/.dsh/.credentials.yaml`** — the `refs:` block is the key
+     map (this is the file the command writes into on the receiving DSH, so
+     "copy my local keys to the remote" is: pick this file). `records:` are
+     reported: `llm-pi-ai/<provider>` `api-key` records import through the
+     provider's env name; `grant` records (OAuth logins, e.g. Anthropic via
+     `/login`) are skipped — there is no wire path for records, sign in on the
+     other DSH; the browser-session grant is ignored. Read by a purpose-built
+     parser of that file's fixed layout, not a YAML library.
 3. `POST /import-api-keys/plan` (host half): each candidate is compared with the
    credential store and comes back as `new` · `same` · `different` ·
    `readonly` (supplied by the process environment — a write would not take) ·

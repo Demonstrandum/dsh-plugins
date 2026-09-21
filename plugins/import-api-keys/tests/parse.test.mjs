@@ -21,6 +21,17 @@ describe('parseKeyFile', () => {
     assert.deepEqual(d.keys, { ANTHROPIC_API_KEY: 'sk-1', DEEPSEEK_API_KEY: 'dk' })
     assert.equal(d.skipped.length, 1)
   })
+  it("reads DSH's own .credentials.yaml: refs as keys, api-key records via the provider env, grants skipped", () => {
+    const r = parseKeyFile([
+      'version: 1', 'records:', '  client-connection/browser-session:', '    kind: grant', '    payload:', '      version: 1', '      secret: s',
+      '  llm-pi-ai/anthropic:', '    kind: grant', '    payload:', '      type: oauth', '      refresh: r',
+      '  llm-pi-ai/groq:', '    kind: api-key', '    key: gk',
+      'refs:', '  ANTHROPIC_API_KEY: "sk-a"', '  OPENAI_API_KEY: sk-o', '  EMPTY:', '',
+    ].join('\n'))
+    assert.equal(r.format, 'dsh-credentials')
+    assert.deepEqual(r.keys, { GROQ_API_KEY: 'gk', ANTHROPIC_API_KEY: 'sk-a', OPENAI_API_KEY: 'sk-o' })
+    assert.deepEqual(r.skipped.map(s => s.name), ['llm-pi-ai/anthropic', 'EMPTY'])
+  })
   it('rejects garbage with a user-facing message', () => {
     assert.throws(() => parseKeyFile(''), /empty/)
     assert.throws(() => parseKeyFile('{not json'), /Not valid JSON/)

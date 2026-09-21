@@ -67,7 +67,7 @@ const PI_AUTH_DIR = '~/.pi/agent'
 function hintDockAppPicker(): void {
   const handlers = (window as unknown as { webkit?: { messageHandlers?: { dshDock?: { postMessage(body: unknown): void } } } }).webkit?.messageHandlers
   try {
-    handlers?.dshDock?.postMessage({ type: 'open-panel', file: `${PI_AUTH_DIR}/auth.json`, directory: PI_AUTH_DIR, message: "Choose an API-key file — pi's auth.json, a JSON key map, or a .env file", showsHiddenFiles: true })
+    handlers?.dshDock?.postMessage({ type: 'open-panel', file: `${PI_AUTH_DIR}/auth.json`, directory: PI_AUTH_DIR, message: "Choose an API-key file — a DSH ~/.dsh/.credentials.yaml, pi's auth.json, a JSON key map, or a .env file", showsHiddenFiles: true })
   } catch { /* not the Dock app */ }
 }
 
@@ -76,7 +76,7 @@ function pickFile(): Promise<File | undefined> {
   return new Promise((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'
-    input.accept = '.json,.env,application/json,text/plain'
+    input.accept = '.json,.env,.yaml,.yml,application/json,text/plain,application/yaml'
     input.style.display = 'none'
     let settled = false
     const finish = (file: File | undefined): void => {
@@ -246,7 +246,7 @@ export function apply(ctx: Context): void {
   ctx.effect(() => ctx.commandUi.register({
     name: COMMAND,
     label: () => 'import-api-keys',
-    description: () => "Import provider API keys from a file (pi's auth.json, a JSON map, or .env) into this DSH's credentials",
+    description: () => "Import provider API keys from a file — another DSH's ~/.dsh/.credentials.yaml, pi's auth.json, a JSON map, or .env",
     available: () => true,
     ui: { kind: 'action', run: () => { void run() } },
   }), 'import-api-keys: /import-api-keys')
