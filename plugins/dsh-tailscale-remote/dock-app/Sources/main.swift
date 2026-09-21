@@ -142,6 +142,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             source: config.identityScript(),
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true))
+        // Page diagnostics → ~/Library/Logs/DSH Dock/<app>.log: uncaught errors,
+        // unhandled rejections and console.error/warn. The wrapper has no
+        // dev-tools shortcut, so this is how a "it only happens in the app"
+        // report becomes readable (Safari ▸ Develop remains available too).
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: """
+            (() => {
+              const post = (level, text) => { try { webkit.messageHandlers.dshDock.postMessage({ type: 'console', level, text: String(text).slice(0, 2000) }) } catch {} };
+              window.addEventListener('error', e => post('error', (e.message || 'error') + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : '')));
+              window.addEventListener('unhandledrejection', e => post('unhandled', e.reason && (e.reason.stack || e.reason.message || e.reason)));
+              for (const level of ['error', 'warn']) { const orig = console[level]; console[level] = (...a) => { post(level, a.map(x => { try { return typeof x === 'string' ? x : (x && x.stack) || JSON.stringify(x) } catch { return String(x) } }).join(' ')); orig.apply(console, a) } }
+              // Menus: in WKWebView the mousedown default on a Radix menu row moves focus to <body> (the row
+              // is not focused on hover as in Chrome/Safari), the menu's focus-outside guard unmounts it
+              // before pointerup, and nothing is selected (traced 2026-09-21). Suppress that default for
+              // radio/checkbox rows — plain menuitems ("Model ›", which swaps the menu content) work unaided.
+              const rowOf = e => e.target && e.target.closest ? e.target.closest('[role="menuitemradio"],[role="menuitemcheckbox"]') : null;
+              document.addEventListener('mousedown', e => { if (rowOf(e)) e.preventDefault() }, true);
+              // Transport: failed or non-2xx fetches and WebSocket closes — a request the page drops quietly shows up here.
+              const origFetch = window.fetch.bind(window);
+              const urlOf = input => typeof input === 'string' ? input : (input && (input.url || input.href)) || String(input);
+              window.fetch = async (input, init) => { const url = urlOf(input); const method = (init && init.method) || (input && input.method) || 'GET'; try { const res = await origFetch(input, init); if (res.status >= 400) post('net', method + ' ' + url + ' → ' + res.status); else if (method !== 'GET') post('net', method + ' ' + url + ' → ' + res.status); if (res.status < 400 && method !== 'GET' && /application\\/json/.test(res.headers.get('content-type') || '')) { res.clone().text().then(t => { if (/"ok":\\s*false|"error"/.test(t)) post('rpc', method + ' ' + url + ' → ' + t.slice(0, 600)) }).catch(() => {}) } return res } catch (e) { post('net', method + ' ' + url + ' → failed: ' + (e && e.message || e)); throw e } };
+              const OrigWS = window.WebSocket; window.WebSocket = function (url, protocols) { const ws = protocols === undefined ? new OrigWS(url) : new OrigWS(url, protocols); ws.addEventListener('close', ev => post('net', 'ws close ' + url + ' code ' + ev.code + (ev.reason ? ' ' + ev.reason : ''))); ws.addEventListener('error', () => post('net', 'ws error ' + url)); ws.addEventListener('message', ev => { if (typeof ev.data === 'string' && /"ok":\\s*false|"error"/.test(ev.data)) post('rpc', 'ws ← ' + ev.data.slice(0, 600)) }); const origSend = ws.send.bind(ws); ws.send = data => { if (typeof data === 'string' && /selection|model/i.test(data)) post('rpc', 'ws → ' + data.slice(0, 300)); return origSend(data) }; return ws }; window.WebSocket.prototype = OrigWS.prototype; Object.assign(window.WebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
+            })();
+            """,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true))
         configuration.userContentController.add(self, name: "dshDock")
 
         webView = WKWebView(frame: .zero, configuration: configuration)
@@ -260,6 +286,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         retryTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in self?.connect() }
     }
 
+    private lazy var logURL: URL = {
+        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/DSH Dock", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("\(config.name).log")
+    }()
+    private let logStamp: DateFormatter = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"; return f }()
+    func appendLog(_ line: String) {
+        let text = "\(logStamp.string(from: Date())) \(line)\n"
+        if let handle = try? FileHandle(forWritingTo: logURL) { defer { try? handle.close() }; try? handle.seekToEnd(); handle.write(Data(text.utf8)) }
+        else { try? text.write(to: logURL, atomically: true, encoding: .utf8) }
+    }
+
     /// One-shot hint for the next file picker, posted by the page just before it
     /// opens an <input type=file> (`webkit.messageHandlers.dshDock.postMessage(
     /// {type: "open-panel", directory: "~/.pi/agent", message: "…", showsHiddenFiles: true})`).
@@ -270,7 +308,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "dshDock" else { return }
         if (message.body as? String) == "retry" { connect(); return }
-        guard let body = message.body as? [String: Any], body["type"] as? String == "open-panel" else { return }
+        guard let body = message.body as? [String: Any] else { return }
+        if body["type"] as? String == "console" {
+            appendLog("[\(body["level"] as? String ?? "log")] \(body["text"] as? String ?? "")")
+            return
+        }
+        guard body["type"] as? String == "open-panel" else { return }
         var directory: URL?
         // `file` wins when it exists: NSOpenPanel opens the containing folder with
         // that file selected when directoryURL names a file (long-standing AppKit

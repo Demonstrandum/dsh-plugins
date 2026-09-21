@@ -209,7 +209,7 @@ the state file), else an offline page that retries every 5 s. Injects
 `__DSH_TRANSPORT__.ownsHost` itself, opens out-of-scope links and every
 `window.open` in the default browser, persistent data store, menu bar (⌘R
 reload, Reconnect, zoom, full screen, ⌘⇧O open in browser, ⌘⇧C copy address),
-frame autosave, a one-shot `open-panel` hint from the page (`dshDock` message: start directory, hidden files, prompt — used by `/import-api-keys` to open in `~/.pi/agent`), `isInspectable` (Safari ▸ Develop ▸ this Mac), downloads to
+frame autosave, a menu fix (WKWebView's mousedown default on a Radix `menuitemradio`/`menuitemcheckbox` row moves focus to `<body>`, the menu's focus-outside guard unmounts it before `pointerup`, and the click selects nothing — model and reasoning-effort rows were unselectable in every Dock app until 2026-09-21; the wrapper now `preventDefault()`s that mousedown, radio/checkbox rows only, plain `menuitem`s such as "Model ›" work unaided and break when touched), page diagnostics to `~/Library/Logs/DSH Dock/<app>.log` (uncaught errors, unhandled rejections, console.error/warn, failed or non-GET fetches, WebSocket closes, RPC replies carrying `ok:false`), a one-shot `open-panel` hint from the page (`dshDock` message: start directory, hidden files, prompt — used by `/import-api-keys` to open in `~/.pi/agent`), `isInspectable` (Safari ▸ Develop ▸ this Mac), downloads to
 ~/Downloads. Not Safari: no Web Notifications, no Safari extensions.
 
 **Identity (2026-09-21).** The wrapper carries its own name and icon colour
