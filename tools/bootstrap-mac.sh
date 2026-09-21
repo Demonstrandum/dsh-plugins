@@ -22,6 +22,11 @@
 #   --replace             REDEPLOY: stop the existing DSH (both LaunchAgents, the listeners), delete the
 #                         deploy-remote.sh tree (~/dsh, ~/.dsh/deploy) and reinstall from scratch, keeping
 #                         ~/.dsh (settings, credentials, sessions, tailscale-remote.json) and any clone at --dir
+#   --instance NAME       one DSH per macOS user on a shared machine: this user's install gets its own ports
+#                         (a free decade ≥ 3090: web/relay/proxy = base/base+3/base+4; --port-base N to pick),
+#                         Serve path /dsh-NAME and Dock app DSH-NAME, written as a row override into
+#                         ~/.dsh/profiles/web/cordis.patch.yml. Everything else is per-user already.
+#   --port-base N         web port (relay = N+3, proxy = N+4); default 3080, or auto-picked with --instance
 #   --repo URL            clone URL (default https://github.com/taliesinb/dsh-plugins)
 #   --list                list the step names and exit
 #
@@ -63,6 +68,8 @@ APPLE=1
 REBUILD=0
 FORCE=0
 REPLACE=0
+INSTANCE=""
+PORT_BASE=""
 TS_TIMEOUT=""
 SKIP=""
 ONLY=""
@@ -84,16 +91,24 @@ while [ $# -gt 0 ]; do
     --rebuild) REBUILD=1; shift ;;
     --force) FORCE=1; shift ;;
     --replace) REPLACE=1; shift ;;
+    --instance) INSTANCE="$2"; shift 2 ;;
+    --instance=*) INSTANCE="${1#--instance=}"; shift ;;
+    --port-base) PORT_BASE="$2"; shift 2 ;;
+    --port-base=*) PORT_BASE="${1#--port-base=}"; shift ;;
     --tailscale-timeout) TS_TIMEOUT="$2"; shift 2 ;;
     --tailscale-timeout=*) TS_TIMEOUT="${1#--tailscale-timeout=}"; shift ;;
     --repo) REPO="$2"; shift 2 ;;
     --repo=*) REPO="${1#--repo=}"; shift ;;
     --list) printf '%s\n' "${STEPS[@]}"; exit 0 ;;
-    -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
+    -h|--help) sed -n "2,58p" "$0"; exit 0 ;;
     *) echo "unknown argument: $1 (try --help)" >&2; exit 2 ;;
   esac
 done
 [ -n "$TS_TIMEOUT" ] || TS_TIMEOUT=10
+case "$INSTANCE" in ""|[a-z0-9]*) ;; *) echo "--instance must be lowercase alphanumeric (got '$INSTANCE')" >&2; exit 2 ;; esac
+if [ -n "$INSTANCE" ]; then MOUNT="/dsh-$INSTANCE"; DOCK_NAME="DSH-$INSTANCE"; else MOUNT="/dsh"; DOCK_NAME="DSH"; fi
+# Ports are fixed in set_ports (after the marker is consulted) so a resumed run keeps the same decade.
+WEB_PORT=""; RELAY_PORT=""; PROXY_PORT=""
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -160,6 +175,26 @@ wait_http() { # wait_http URL CODE SECONDS
   return 1
 }
 macos_major() { sw_vers -productVersion | cut -d. -f1; }
+# port_busy PORT: something listens on 127.0.0.1:PORT (any user — lsof only shows our own processes).
+port_busy() { nc -z -G 1 127.0.0.1 "$1" >/dev/null 2>&1; }
+# set_ports: fix WEB/RELAY/PROXY from --port-base, else the marker, else 3080 (no instance) or the first
+# free decade ≥ 3090 (instance) — several macOS users on one Mac must not share TCP ports.
+set_ports() {
+  local base="$PORT_BASE"
+  [ -n "$base" ] || base="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("portBase",""))' "$1" 2>/dev/null || true)"
+  if [ -z "$base" ]; then
+    if [ -z "$INSTANCE" ]; then base=3080
+    else
+      base=3090
+      while port_busy "$base" || port_busy $((base+3)) || port_busy $((base+4)); do base=$((base+10)); [ "$base" -lt 3300 ] || die "no free port decade between 3090 and 3300"; done
+    fi
+  fi
+  WEB_PORT="$base"; RELAY_PORT=$((base+3)); PROXY_PORT=$((base+4))
+}
+write_marker() { # write_marker STARTED
+  printf '{ "tool": "tali-dash-plugins/tools/bootstrap-mac.sh", "started": "%s", "dir": "%s", "instance": "%s", "portBase": %s }\n' \
+    "$1" "${DIR:-}" "$INSTANCE" "${WEB_PORT:-null}" >"$MARKER"
+}
 have_brew() { [ -x /opt/homebrew/bin/brew ]; }
 brew_env() { have_brew && eval "$(/opt/homebrew/bin/brew shellenv)"; }
 pkg_field() { node -p "const p=require('$1/package.json'); $2" 2>/dev/null; }
@@ -182,6 +217,8 @@ if wants preflight; then
   DSH_HOME_DIR="${DSH_HOME:-$HOME/.dsh}"
   MARKER="$DSH_HOME_DIR/bootstrap-mac.json"
   [ -n "$DIR" ] && DIR="${DIR/#\~/$HOME}"
+  set_ports "$MARKER"
+  [ -z "$INSTANCE" ] || ok "instance '$INSTANCE': ports web $WEB_PORT / relay $RELAY_PORT / proxy $PROXY_PORT, route $MOUNT, Dock app $DOCK_NAME"
   FOUND=()
   if [ "$REPLACE" = 1 ]; then
     # Redeploy: stop whatever DSH runs here and remove the deploy-remote.sh (Path B) tree; ~/.dsh stays.
@@ -197,37 +234,37 @@ if wants preflight; then
         [ "$DRY" = 1 ] || { launchctl bootout "gui/$(id -u)/$la" 2>/dev/null || true; rm -f "$HOME/Library/LaunchAgents/$la.plist"; }
       fi
     done
-    for port in 3080 3083 3084; do
+    for port in "$WEB_PORT" "$RELAY_PORT" "$PROXY_PORT"; do
       pids="$(lsof -ti tcp:$port -sTCP:LISTEN 2>/dev/null || true)"
       [ -z "$pids" ] || { log "stopping listener on :$port (pid $pids)"; [ "$DRY" = 1 ] || { echo "$pids" | xargs kill 2>/dev/null || true; }; }
     done
     if [ "$DRY" = 0 ]; then
-      for _ in $(seq 1 20); do lsof -ti tcp:3080 -sTCP:LISTEN >/dev/null 2>&1 || lsof -ti tcp:3084 -sTCP:LISTEN >/dev/null 2>&1 || break; sleep 1; done
-      pgrep -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' | xargs kill 2>/dev/null || true
+      for _ in $(seq 1 20); do lsof -ti tcp:"$WEB_PORT" -sTCP:LISTEN >/dev/null 2>&1 || lsof -ti tcp:"$PROXY_PORT" -sTCP:LISTEN >/dev/null 2>&1 || break; sleep 1; done
+      pgrep -u "$(id -u)" -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' | xargs kill 2>/dev/null || true   # this user's only
     fi
     if [ -f "$HOME/dsh/checkout/apps/cli/lib/bin.js" ]; then
       log "removing the deploy-remote.sh tree: ~/dsh (checkout, plugins, deps, logs) and ~/.dsh/deploy"
       [ "$DRY" = 1 ] || rm -rf "$HOME/dsh" "$DSH_HOME_DIR/deploy"
     fi
     if [ "$DRY" = 0 ]; then
-      lsof -ti tcp:3080 -sTCP:LISTEN >/dev/null 2>&1 && die "something still listens on :3080 after the teardown"
-      pgrep -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' >/dev/null 2>&1 && die "a dsh process survived the teardown"
+      port_busy "$WEB_PORT" && die "something still listens on :$WEB_PORT after the teardown"
+      pgrep -u "$(id -u)" -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' >/dev/null 2>&1 && die "a dsh process survived the teardown"
     fi
-    ok "old install stopped and removed; ~/.dsh kept$( [ -d "$HOME/Applications/DSH.app" ] && echo '; the Dock app will be rebuilt' )"
+    ok "old install stopped and removed; ~/.dsh kept$( [ -d "$HOME/Applications/$DOCK_NAME.app" ] && echo '; the Dock app will be rebuilt' )"
   elif [ -f "$MARKER" ]; then
     ok "resuming an earlier bootstrap run ($MARKER)"
     if [ -z "$DIR" ]; then DIR="$(node -p "require('$MARKER').dir" 2>/dev/null || python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["dir"])' "$MARKER" 2>/dev/null || true)"; fi
   else
-    for port in 3080 3083 3084; do
-      pid="$(lsof -ti tcp:$port -sTCP:LISTEN 2>/dev/null | head -1 || true)"
-      [ -n "$pid" ] && FOUND+=("a server is listening on 127.0.0.1:$port (pid $pid: $(ps -o comm= -p "$pid" 2>/dev/null))")
+    for port in "$WEB_PORT" "$RELAY_PORT" "$PROXY_PORT"; do
+      port_busy "$port" && FOUND+=("a server is listening on 127.0.0.1:$port$(pid="$(lsof -ti tcp:$port -sTCP:LISTEN 2>/dev/null | head -1 || true)"; [ -n "$pid" ] && echo " (pid $pid: $(ps -o comm= -p "$pid" 2>/dev/null))")")
     done
-    pgrep -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' >/dev/null 2>&1 && FOUND+=("a dsh process is running ($(pgrep -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' | head -1))")
+    # This user's dsh processes only: on a shared machine other accounts legitimately run their own.
+    pgrep -u "$(id -u)" -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' >/dev/null 2>&1 && FOUND+=("a dsh process of yours is running ($(pgrep -u "$(id -u)" -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' | head -1))")
     [ -d "$DSH_HOME_DIR/profiles" ] && FOUND+=("$DSH_HOME_DIR/profiles exists (DSH home already initialised)")
     for la in io.github.taliesinb.dsh-web-relay ai.symbolica.dsh-remote; do
       [ -f "$HOME/Library/LaunchAgents/$la.plist" ] && FOUND+=("LaunchAgent $la is installed")
     done
-    [ -d "$HOME/Applications/DSH.app" ] && FOUND+=("$HOME/Applications/DSH.app exists")
+    [ -d "$HOME/Applications/$DOCK_NAME.app" ] && FOUND+=("$HOME/Applications/$DOCK_NAME.app exists")
     command -v dsh >/dev/null 2>&1 && FOUND+=("a 'dsh' command is on PATH ($(command -v dsh))")
     CAND="${DIR:-$HOME/github/tali-dash-plugins}"
     [ -f "$CAND/deepseek-harness/apps/cli/lib/bin.js" ] && FOUND+=("a built DSH checkout exists at $CAND")
@@ -249,7 +286,7 @@ if wants preflight; then
   # Resume marker (so a re-run after a mid-way failure passes the gate above).
   if [ "$DRY" = 0 ] && [ ! -f "$MARKER" ]; then
     mkdir -p "$DSH_HOME_DIR"
-    printf '{ "tool": "tali-dash-plugins/tools/bootstrap-mac.sh", "started": "%s", "dir": "%s" }\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${DIR:-}" >"$MARKER"
+    write_marker "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   fi
 fi
 
@@ -497,9 +534,9 @@ CK="$DIR/deepseek-harness"
 [ "$DRY" = 1 ] || [ -f "$CK/package.json" ] || die "fork submodule not present at $CK (run the clone step)"
 # The marker is written before the directory is known; record it now so a bare re-run finds the clone.
 MARKER="${DSH_HOME:-$HOME/.dsh}/bootstrap-mac.json"
+[ -n "$WEB_PORT" ] || set_ports "$MARKER"
 if [ "$DRY" = 0 ] && [ -f "$MARKER" ] && ! grep -q "\"dir\": \"$DIR\"" "$MARKER"; then
-  printf '{ "tool": "tali-dash-plugins/tools/bootstrap-mac.sh", "started": "%s", "dir": "%s" }\n' \
-    "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("started",""))' "$MARKER" 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)" "$DIR" >"$MARKER"
+  write_marker "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("started",""))' "$MARKER" 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)"
 fi
 
 # ===========================================================================
@@ -560,12 +597,12 @@ if wants home; then
   if [ -f "$DSH_HOME_DIR/profiles/web/cordis.patch.yml" ]; then ok "web profile exists"
   elif [ "$DRY" = 1 ]; then log "would launch dsh web once to create $DSH_HOME_DIR/profiles/web"
   else
-    if curl -s -o /dev/null --max-time 2 http://127.0.0.1:3080/; then die "something already listens on :3080 — stop it, then re-run (--only home)"; fi
-    log "first launch of dsh web (creates profiles/web/cordis.patch.yml and .credentials.yaml), then stopping it"
-    (cd "$CK" && pnpm dsh web --no-open --port 3080 >>"$LOG" 2>&1 &)
-    wait_http http://127.0.0.1:3080/ 401 90 || die "dsh web did not come up within 90 s (see $LOG)"
-    # Stop exactly the process listening on :3080 (never a pkill by name — another DSH may be running).
-    lsof -ti tcp:3080 -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null || true
+    if port_busy "$WEB_PORT"; then die "something already listens on :$WEB_PORT — stop it, then re-run (--only home)"; fi
+    log "first launch of dsh web on :$WEB_PORT (creates profiles/web/cordis.patch.yml and .credentials.yaml), then stopping it"
+    (cd "$CK" && pnpm dsh web --no-open --port "$WEB_PORT" >>"$LOG" 2>&1 &)
+    wait_http "http://127.0.0.1:$WEB_PORT/" 401 90 || die "dsh web did not come up within 90 s (see $LOG)"
+    # Stop exactly the process listening on our port (never a pkill by name — another DSH may be running).
+    lsof -ti tcp:"$WEB_PORT" -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null || true
     sleep 2
     [ -f "$DSH_HOME_DIR/profiles/web/cordis.patch.yml" ] || die "profile not created"
     ok "home initialised"
@@ -688,9 +725,31 @@ if wants tailnet && [ "$TAILNET" = 1 ]; then
   if [ "$DRY" = 1 ]; then log "would install the relay, enable the route, build the Dock app"; fi
   {
       PLUG="$DIR/plugins/dsh-tailscale-remote"
-      # 2. Relay LaunchAgent (:3083 → :3084; starts `dsh web` on demand).
+      START="pnpm dsh web --no-open --port $WEB_PORT"
+      # 1. Non-default ports / route / Dock app name: override the bundle row's config in the profile patch
+      #    (a patch row replaces the whole config; unset keys fall back to the plugin's schema defaults).
+      if [ "$WEB_PORT" != 3080 ] || [ -n "$INSTANCE" ]; then
+        PATCH="$DSH_HOME_DIR/profiles/web/cordis.patch.yml"
+        YAMLPKG="$(ls -d "$CK"/node_modules/.pnpm/yaml@*/node_modules/yaml 2>/dev/null | sort -V | tail -1 || true)"
+        if [ "$DRY" = 1 ]; then log "would set tali-tailscale-remote {listenPort $PROXY_PORT, publishPort $RELAY_PORT, mountPath $MOUNT, dockAppName $DOCK_NAME} in $PATCH"
+        elif [ -z "$YAMLPKG" ]; then die "no yaml package in the checkout to edit $PATCH"
+        else
+          node - "$PATCH" "$YAMLPKG" "$PROXY_PORT" "$RELAY_PORT" "$MOUNT" "$DOCK_NAME" "$START" <<'JS'
+const fs = require('fs'); const [file, yamlPath, listenPort, publishPort, mountPath, dockAppName, relayStart] = process.argv.slice(2);
+const YAML = require(yamlPath);
+const text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+const header = text.split('\n').filter(l => /^\s*#/.test(l)).join('\n');
+let rows = YAML.parse(text) ?? []; if (!Array.isArray(rows)) rows = [];
+rows = rows.filter(r => !(r && r.id === 'tali-tailscale-remote'));
+rows.push({ id: 'tali-tailscale-remote', config: { listenPort: Number(listenPort), publishPort: Number(publishPort), mountPath, dockAppName, relayStart } });
+fs.writeFileSync(file, (header ? header + '\n' : '') + YAML.stringify(rows));
+console.log('    ' + file + ': tali-tailscale-remote → proxy :' + listenPort + ', relay :' + publishPort + ', route ' + mountPath + ', Dock app ' + dockAppName);
+JS
+        fi
+      fi
+      # 2. Relay LaunchAgent (relay → proxy; starts `dsh web` on demand).
       if launchctl print "gui/$(id -u)/$RELAY_LABEL" >/dev/null 2>&1; then ok "relay LaunchAgent present"
-      else run_in "$PLUG" pnpm relay:install --cwd "$CK" --start "pnpm dsh web --no-open" || die "relay:install failed"; fi
+      else run_in "$PLUG" pnpm relay:install --cwd "$CK" --listen "127.0.0.1:$RELAY_PORT" --backend "127.0.0.1:$PROXY_PORT" --dsh "127.0.0.1:$WEB_PORT" --start "$START" || die "relay:install failed"; fi
       # 3. Enable the route: the plugin republishes `tailscale serve … --set-path /dsh` on every boot from this state file.
       STATE="$DSH_HOME_DIR/tailscale-remote.json"
       if [ "$DRY" = 1 ]; then log "would write $STATE (enabled: true) and start the relay"
@@ -707,17 +766,19 @@ console.log('    tailscale-remote.json: enabled, allowed users ' + JSON.stringif
 JS
         launchctl kickstart -k "gui/$(id -u)/$RELAY_LABEL" 2>/dev/null || true
         log "poking the relay (starts dsh web; ~10 s on a cold start)"
-        curl -s -o /dev/null --max-time 5 http://127.0.0.1:3083/ || true
-        wait_http http://127.0.0.1:3083/ 401 120 || die "DSH did not come up behind the relay (logs: $DSH_HOME_DIR/logs/{relay,dsh-web}.log)"
-        ok "dsh web is up behind the relay (:3083 → :3084 → :3080)"
-        for _ in $(seq 1 30); do "$TS" serve status 2>/dev/null | grep -q '/dsh' && break; sleep 1; done
-        "$TS" serve status 2>/dev/null | grep -q '/dsh' && ok "tailscale serve publishes /dsh" || warn "no /dsh in tailscale serve status yet (MagicDNS + HTTPS certs must be enabled on the tailnet; see Settings → Tailscale remote)"
+        curl -s -o /dev/null --max-time 5 "http://127.0.0.1:$RELAY_PORT/" || true
+        wait_http "http://127.0.0.1:$RELAY_PORT/" 401 120 || die "DSH did not come up behind the relay (logs: $DSH_HOME_DIR/logs/{relay,dsh-web}.log)"
+        ok "dsh web is up behind the relay (:$RELAY_PORT → :$PROXY_PORT → :$WEB_PORT)"
+        for _ in $(seq 1 30); do "$TS" serve status 2>/dev/null | grep -q "$MOUNT " && break; sleep 1; done
+        "$TS" serve status 2>/dev/null | grep -q "$MOUNT " && ok "tailscale serve publishes $MOUNT" || warn "no $MOUNT in tailscale serve status yet (MagicDNS + HTTPS certs must be enabled on the tailnet; see Settings → Tailscale remote)"
       fi
-      # 4. Dock app (needs swiftc). Rebuilt on --replace: a deploy-remote.sh app points its fallback at :3084, ours at the relay (:3083).
-      if [ -d "$HOME/Applications/DSH.app" ] && [ "$REPLACE" = 0 ]; then ok "Dock app present: ~/Applications/DSH.app"
+      # 4. Dock app (needs swiftc). Rebuilt on --replace: a deploy-remote.sh app points its fallback at the proxy, ours at the relay.
+      DOCK_URL_ARGS=(--name "$DOCK_NAME" --fallback "http://127.0.0.1:$RELAY_PORT/")
+      [ "$MOUNT" = /dsh ] || { dns="$(ts_dns)"; [ -z "$dns" ] || DOCK_URL_ARGS+=(--url "https://$dns$MOUNT/"); }
+      if [ -d "$HOME/Applications/$DOCK_NAME.app" ] && [ "$REPLACE" = 0 ]; then ok "Dock app present: ~/Applications/$DOCK_NAME.app"
       elif xcrun --find swiftc >/dev/null 2>&1; then
-        run_in "$PLUG" pnpm dock-app:install --name DSH --fallback http://127.0.0.1:3083/ || warn "Dock app install failed (Settings → Tailscale remote → Install Dock app works too)"
-      else todo "install the Command Line Tools, then: cd $PLUG && pnpm dock-app:install --name DSH --fallback http://127.0.0.1:3083/"; fi
+        run_in "$PLUG" pnpm dock-app:install "${DOCK_URL_ARGS[@]}" || warn "Dock app install failed (Settings → Tailscale remote → Install Dock app works too)"
+      else todo "install the Command Line Tools, then: cd $PLUG && pnpm dock-app:install ${DOCK_URL_ARGS[*]}"; fi
   }
 fi
 
@@ -725,7 +786,7 @@ fi
 if wants verify; then
   banner "Verification"
   if [ "$DRY" = 0 ]; then
-    for u in http://127.0.0.1:3080/ http://127.0.0.1:3083/; do
+    for u in "http://127.0.0.1:$WEB_PORT/" "http://127.0.0.1:$RELAY_PORT/"; do
       code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$u" || true)"
       case "$code" in 401) ok "$u → 401 (alive, auth wall)" ;; 000) warn "$u → nothing listening" ;; *) warn "$u → HTTP $code" ;; esac
     done
@@ -740,13 +801,13 @@ if wants verify; then
     if [ -x "$TS" ]; then
       DNS="$("$TS" status --self --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).Self.DNSName.replace(/\.$/,""))}catch{}})' 2>/dev/null || true)"
       if [ -n "$DNS" ]; then
-        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://$DNS/dsh/" || true)"
-        case "$code" in 200|303) ok "https://$DNS/dsh/ → $code (admitted by identity)" ;; 401) ok "https://$DNS/dsh/ → 401 (route live; you are not on the allowlist from here)" ;; *) warn "https://$DNS/dsh/ → ${code:-000} (cert issuance can take a few seconds on the first hit)" ;; esac
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://$DNS$MOUNT/" || true)"
+        case "$code" in 200|303) ok "https://$DNS$MOUNT/ → $code (admitted by identity)" ;; 401) ok "https://$DNS$MOUNT/ → 401 (route live; you are not on the allowlist from here)" ;; *) warn "https://$DNS$MOUNT/ → ${code:-000} (cert issuance can take a few seconds on the first hit)" ;; esac
       fi
     fi
-    TOKEN_URL="$(grep -o 'http://127.0.0.1:3080/?token=[^ ]*' "$DSH_HOME_DIR/logs/dsh-web.log" 2>/dev/null | tail -1 || true)"
+    TOKEN_URL="$(grep -o "http://127.0.0.1:$WEB_PORT/?token=[^ ]*" "$DSH_HOME_DIR/logs/dsh-web.log" 2>/dev/null | tail -1 || true)"
     [ -n "$TOKEN_URL" ] && log "GUI (local, tokened): $TOKEN_URL"
-    [ -n "${DNS:-}" ] && log "GUI (tailnet): https://$DNS/dsh/"
+    [ -n "${DNS:-}" ] && log "GUI (tailnet): https://$DNS$MOUNT/"
   fi
   echo
   if [ ${#TODO[@]} -gt 0 ]; then
@@ -754,5 +815,5 @@ if wants verify; then
     for t in "${TODO[@]}"; do printf '  • %s\n' "$t"; done
   fi
   printf '\n%sDone.%s checkout: %s · home: %s · log: %s\n' "$GREEN" "$NC" "$DIR" "$DSH_HOME_DIR" "$LOG"
-  echo "Day-to-day: cd $CK && pnpm dsh web   (or just open the DSH Dock app / the relay: http://127.0.0.1:3083/)"
+  echo "Day-to-day: cd $CK && pnpm dsh web --port $WEB_PORT   (or just open the $DOCK_NAME Dock app / the relay: http://127.0.0.1:$RELAY_PORT/)"
 fi
