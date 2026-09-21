@@ -502,3 +502,7 @@ can reproduce or maintain it:
 | In-tree client house rules | `packages/client/AGENTS.md` |
 | Client bundle preset (format truth) | `packages/client/tsdown.client.ts` |
 | CLI flags, profiles, layer precedence | `apps/cli/reference/README.md` |
+
+## The optional `extras/` submodule
+
+symbolica-ai/dsh-extras (private): deployment inventory, host scripts, pins of private plugins. Everything that names a host, tailnet, login or internal repo goes there, never here. Missing = fine (no org access); the tooling continues without it. Manifest `extras/dsh-extras.yml`, read by `tools/extras-manifest.mjs`; see recipes/bootstrap-mac-installer.md.

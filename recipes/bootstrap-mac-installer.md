@@ -262,6 +262,25 @@ Plugins** panel since the 0.1.6-alpha.2 rebase (not Settings), and an instance
 whose plugin client bundle was built before that fix registers into a slot
 that no longer exists — rebuild `lib/client.js` after pulling.
 
+### The optional `extras/` layer
+
+Anything deployment-specific — host inventories, account scripts, pins of
+private plugins — lives in a **private** repo checked out as the `extras/`
+submodule. Its existence is public (this paragraph, `.gitmodules`); its
+contents need GitHub org access over ssh. The bootstrap inits `deepseek-harness`
+explicitly, then tries `extras` and, on success, its nested pins
+(`--recursive`); on failure it warns *"extras layer not reachable … continuing
+with the public plugin set only"* and deinits the pin, so a colleague without
+access gets a complete public install (verified with `GIT_SSH_COMMAND=false`).
+The https-override for the fork skips `extras` (a private https fetch would
+prompt). What extras contributes is declared in `extras/dsh-extras.yml`
+(`plugins[]`: path, bundle name, `install`, optional `requires.command`),
+read by `tools/extras-manifest.mjs`; the build loop and
+`install-plugins.sh` layer those plugins on. Private plugins that
+self-detect their tool should not use `requires` — the plugin's own remedy
+card is the better message. Moving a pin is a commit in extras, then a
+submodule bump here.
+
 **Paid apps are never installed.** Dash (Kapeli's docs browser) and
 <private> are not offered; instead `dash-docsets` and
 `<private-plugin>` are left out of the build and of the bundle
