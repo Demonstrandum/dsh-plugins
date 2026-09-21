@@ -178,6 +178,54 @@ everything under `~` (clone, build, `~/.dsh`, LaunchAgent, Dock app) was
 exercised from nothing; only the system-level installs (CLT, Homebrew, casks,
 afm) were pre-existing.
 
+### Creating the extra macOS accounts hands-free
+
+Done 2026-09-21 for five colleagues on the shared machine with a root-owned script
+kept **on that Mac** (`/usr/local/bin/dsh-add-user NAME…`, not in this repo:
+it carries site-specific defaults). What it does per account, and why:
+
+- `sysadminctl -addUser NAME -fullName NAME -password … -admin`, then
+  `createhomedir -c -u NAME`; the password is set with `dscl . -passwd` because
+  `sysadminctl -resetPasswordFor` refuses without a Secure-Token holder
+  (accounts created from a root shell get **no Secure Token** — irrelevant
+  unless FileVault is on). `authorized_keys` copied from the caller.
+- **The first-login panes are not Setup Assistant's own `DidSee*` panes.**
+  Seeding `com.apple.SetupAssistant` (the `DidSee*`/`LastSeen*` set copied from
+  an account that had clicked through) removed Siri, Screen Time, Touch ID,
+  privacy, appearance, accessibility — but three screens survived every seed:
+  *Sign in to your Apple Account*, an Apple Intelligence feature offer (Image
+  Playground / notification summaries) and *Your Mac is ready for FileVault*.
+  Traced in the unified log (`log show --predicate 'process == "loginwindow"'`
+  etc.): loginwindow reads a per-user OS stamp from
+  **`~/Library/Preferences/loginwindow.plist`** (no `com.apple.` prefix:
+  `SystemVersionStampAsNumber/AsString`, `BuildVersionStampAsNumber/AsString`).
+  A new account has none → `lastUpdatedSystemVersion = 0` → it launches
+  **UserAccountUpdater** → its `MiniLauncherPlugin` runs
+  `prepareLaunchDecisionForNewUser` ("required = 1, launch reason = New User
+  (13)") and arms `MiniBuddyLaunch` in the user's `com.apple.loginwindow` →
+  loginwindow starts **Setup Assistant as MiniBuddy**, which for reason 13 runs
+  the iCloud flow (first pane `iCloudLogin`, then the Intelligence offer, then
+  `MBTargetUserGetsFDEUpsell YES` — "FDE volume check: is in major OS upgrade
+  flow"). **Fix: copy the caller's `loginwindow.plist` stamp into the new
+  home** (same OS/build) and write `MiniBuddyLaunch = false`. Verified: the
+  next account's log read `shouldLaunchUpdate = NO … MiniBuddyLaunch pref is
+  NOT set` and the login went straight to the desktop.
+- Dead ends, recorded so nobody repeats them: `FDEUpsellStorageLogicalVolumeUUIDs`
+  / `com.apple.siri.setup` / `com.apple.setupassistant.privacypane` seeds (the
+  right domains, but downstream of the launch decision); `com.apple.NewDeviceOutreach`
+  (`ndoagent` — its check-in is disabled while the account is signed out, so it
+  never produced the cards); pre-writing launchd's
+  `/var/db/com.apple.xpc.launchd/disabled.<uid>.plist` (overwritten at the
+  account's first login); the MDM `SkipKeys` (`AppleID`, `FileVault`,
+  `Intelligence`) only act through a DEP cloud configuration; enabling
+  FileVault would remove the upsell but makes every unattended reboot stop at
+  the pre-boot unlock screen — wrong for a headless server.
+- Still manual, by design: one login per account via Fast User Switching (a
+  `gui/<uid>` launchd domain exists only for a GUI session; no CLI creates an
+  Aqua session). With the seeds it is just the password prompt. Then
+  `pnpm bootstrap-remote <name>@<mac> --instance <name> --mount /dsh/<name>
+  --allow <their tailnet login>`.
+
 **Paid apps are never installed.** Dash (Kapeli's docs browser) and
 <private> are not offered; instead `dash-docsets` and
 `<private-plugin>` are left out of the build and of the bundle
