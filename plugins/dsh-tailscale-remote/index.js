@@ -33,6 +33,8 @@
  *   tailscalePath  CLI path override ('' = PATH / app bundle)     ''
  *   stateFile    persisted intent + token ('' = $DSH_HOME/tailscale-remote.json)
  *   cookieName   the proxy's own session cookie                   dsh-tailscale-remote
+ *   identityOperators  identity-admitted users may operate the panes (control channel, ownsHost)   true
+ *                      false = this node's own device only (token holders never operate)
  *   relayStart   shell command the relay runs to start DSH        pnpm dsh web --no-open
  *   relayCwd     where it runs ('' = this process's cwd)           ''
  *   relayLogDir  relay + DSH logs ('' = $DSH_HOME/logs)            ''
@@ -63,6 +65,7 @@ export const Config = Schema.object({
   tailscalePath: Schema.string().default(''),
   stateFile: Schema.string().default(''),
   cookieName: Schema.string().default('dsh-tailscale-remote'),
+  identityOperators: Schema.boolean().default(true),
   relayStart: Schema.string().default('pnpm dsh web --no-open'),
   relayCwd: Schema.string().default(''),
   relayLogDir: Schema.string().default(''),
@@ -213,6 +216,7 @@ export function apply(ctx, config) {
       allowedUsers: () => state.allowedUsers,
       selfLogin: () => lastRoute?.selfLogin,
       selfAddresses: () => lastRoute?.selfAddresses ?? [],
+      identityOperators: () => config.identityOperators,
       publicHosts,
       cookieName: config.cookieName,
       controlPrefix: CONTROL_CHANNEL,

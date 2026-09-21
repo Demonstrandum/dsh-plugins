@@ -112,6 +112,20 @@ export function isSelfRequest(req, selfAddresses) {
 }
 
 /**
+ * Whether the request may operate this DSH (control channel, `ownsHost`):
+ * this node's own device always; with `identityOperators`, also any request
+ * admitted by Tailscale identity (Serve peer whose login is allowlisted).
+ * Token/cookie holders are never operators. On a shared machine the person an
+ * instance belongs to is by construction not "the node itself", so identity
+ * is the only sound operator basis there — it is the same Serve-injected
+ * header admission already trusts.
+ */
+export function isOperatorRequest(req, { selfAddresses, allowedUsers, identityOperators }) {
+  if (isSelfRequest(req, selfAddresses)) return true
+  return identityOperators === true && identityOf(req, allowedUsers) !== undefined
+}
+
+/**
  * Canonical `hostname:port` (port always explicit, so `node:443` over https and
  * `node` are the same authority) for an authority or an absolute URL.
  * @param {unknown} value `host[:port]` or `scheme://host[:port]`
@@ -270,6 +284,7 @@ export function bootstrapUpstreamCookie(connection, authority) {
  *   connection: { authenticatedUrl(base: string): string },
  *   token: () => string, allowedUsers: () => string[],
  *   selfLogin?: () => string | undefined, selfAddresses?: () => string[],
+ *   identityOperators?: () => boolean,
  *   publicHosts?: () => string[],
  *   cookieName: string, controlPrefix: string, mountPath?: string,
  *   log?: (line: string) => void, warn?: (line: string) => void,
@@ -282,7 +297,9 @@ export async function startProxy(spec) {
   const mount = String(spec.mountPath ?? '/').replace(/\/+$/, '') || '/'
   const selfLogin = spec.selfLogin ?? (() => undefined)
   const selfAddresses = spec.selfAddresses ?? (() => [])
+  const identityOperators = spec.identityOperators ?? (() => false)
   const publicHosts = spec.publicHosts ?? (() => [])
+  const isOperator = req => isOperatorRequest(req, { selfAddresses: selfAddresses(), allowedUsers: allowedLogins(), identityOperators: identityOperators() })
   /** Everyone allowed by login: the operator's list plus this node's own login. */
   const allowedLogins = () => {
     const self = normalizeLogin(selfLogin())
@@ -346,10 +363,11 @@ export async function startProxy(spec) {
     const path = pathnameOf(req.url)
     const method = req.method ?? 'GET'
     const isControl = path === spec.controlPrefix || path.startsWith(`${spec.controlPrefix}/`)
-    if (isControl && !isSelfRequest(req, selfAddresses())) {
-      // Another device may look at the panel but not flip the route, read the
-      // token or drive the Server pane. This node itself (the Dock app, Safari
-      // on this Mac) is the operator and passes through below.
+    if (isControl && !isOperator(req)) {
+      // A token/cookie holder (or, without identityOperators, any other device)
+      // may look at the panel but not flip the route, read the token or drive
+      // the Server pane. This node itself — and identity-admitted users when
+      // the policy says so — is the operator and passes through below.
       drain(req)
       sendText(res, 403, 'the Tailscale remote is controlled from the DSH host only\n')
       return
@@ -401,7 +419,7 @@ export async function startProxy(spec) {
   const admissionHeaders = (admitted, req) => ({
     'x-dsh-tailscale-remote-admitted': admitted?.kind ?? 'public',
     ...(admitted?.kind === 'user' ? { 'x-dsh-tailscale-remote-login': admitted.login } : {}),
-    ...(isSelfRequest(req, selfAddresses()) ? { 'x-dsh-tailscale-remote-self': '1' } : {}),
+    ...(isOperator(req) ? { 'x-dsh-tailscale-remote-self': '1' } : {}),
   })
 
   const proxyRequest = (req, res, path, admitted) => {
@@ -433,7 +451,7 @@ export async function startProxy(spec) {
         upRes.on('data', chunk => chunks.push(chunk))
         upRes.on('end', () => {
           const html = Buffer.concat(chunks).toString('utf8')
-          const injected = TRAILING_SLASH_GUARD + (isSelfRequest(req, selfAddresses()) ? OWNS_HOST_SCRIPT : '')
+          const injected = TRAILING_SLASH_GUARD + (isOperator(req) ? OWNS_HOST_SCRIPT : '')
           const body = Buffer.from(html.replace(/<head(?:\s[^>]*)?>/i, open => `${open}${injected}`), 'utf8')
           delete relayed['content-length']
           delete relayed['transfer-encoding']

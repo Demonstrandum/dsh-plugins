@@ -77,14 +77,22 @@ request is `403`. Then exactly one of, in this order:
 Everything else is `401`. `/manifest.webmanifest` and `/favicon.svg` pass
 anonymously (DSH serves them public too; browsers fetch manifests without
 cookies). The plugin's own control channel `/tailscale-remote/*` is answered
-`403` and never forwarded — the remote page can view the section but cannot
-flip the route or read the token.
+`403` and never forwarded for non-operators — they can view the section but
+cannot flip the route or read the token.
 
-Index responses for the node's own requests (rightmost `x-forwarded-for` is
-one of `Self.TailscaleIPs`) also carry
+**Who operates.** This node's own requests (rightmost `x-forwarded-for` is one
+of `Self.TailscaleIPs`) always; and, with `identityOperators: true` (the
+default), every request **admitted by Tailscale identity** — the same
+Serve-injected login the allowlist trusts. Token/cookie holders (QR) are never
+operators. Operator index responses carry
 `globalThis.__DSH_TRANSPORT__ = { ownsHost: true }`, so the shell reports
-`ctx.connection.isLoopback` and Settings persist on the host as they do at
-`http://127.0.0.1:3080/`. Other devices stay memory-only for Settings.
+`ctx.connection.isLoopback`, Settings persist on the host as at
+`http://127.0.0.1:3080/`, and host-settings panes (e.g. the <private> kernel
+card) appear; other devices stay memory-only. Why identity: on a shared machine
+with one DSH per account, the person an instance belongs to is never "the node
+itself", so the self-address rule alone left every owner with a read-only
+panel and no host settings (2026-09-21). Set `identityOperators: false` for
+the old hybrid-era policy where admission and administration are separate.
 
 Admitted requests are forwarded to `http://127.0.0.1:<dsh port>` with
 `Host`/`Origin` rewritten to that authority, `sec-fetch-site: same-origin`,
@@ -117,6 +125,7 @@ not the machine.
 | `relayCwd` | `''` | where it runs; `''` = the cwd of the DSH that installed the agent |
 | `relayLogDir` | `''` | `$DSH_HOME/logs` (`relay.log`, `dsh-web.log`) |
 | `dockAppName` | `DSH` | `~/Applications/<name>.app` |
+| `identityOperators` | `true` | identity-admitted users may use the control channel and get `ownsHost`; `false` = this node's own device only |
 | `dockAppGlyphColor` / `dockAppTileColor` | `#000000` / `#ffffff` | icon: `dock-app/icon.svg` on a rounded tile |
 
 Persisted: `{ enabled, allowedUsers, token }`. tailscaled persists the route
@@ -158,8 +167,9 @@ method, payload:{args}}`: `status`, `enable`, `disable`,
 `set-users {allowedUsers: "a, b"}`, `rotate-token`, `install-dock-app`,
 `uninstall-dock-app`, `install-relay`, `uninstall-relay`, `server-status`,
 `server-act {target, action}`. The proxy forwards the channel for **this
-node's own** admitted requests (Dock app, Safari on the Mac); other devices get
-403 and a read-only panel.
+node's own** admitted requests (Dock app, Safari on the Mac) and, by default
+(`identityOperators`), identity-admitted users; token holders get 403 and a
+read-only panel.
 
 ## The "Server" pane (`server.mjs`)
 

@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict'
 import { createServer, request as httpRequest } from 'node:http'
 import { after, before, describe, it } from 'node:test'
-import { bootstrapUpstreamCookie, canonicalAuthority, cookieValueFor, isSelfRequest, originRejection, startProxy } from '../proxy.mjs'
+import { bootstrapUpstreamCookie, canonicalAuthority, cookieValueFor, isOperatorRequest, isSelfRequest, originRejection, startProxy } from '../proxy.mjs'
 
 const LAUNCH_TOKEN = 'launch-token-xyz'
 const DSH_COOKIE = 'dsh-auth-abc=v1.payload.sig'
@@ -18,6 +18,7 @@ let proxy
 const seen = []
 let token = 'T0kenT0kenT0kenT0ken'
 let allowedUsers = ['alice@example.com']
+let identityOperators = false
 let selfLogin = 'the maintainer@Example.com'
 const SELF_ADDRESS = '100.78.174.43'
 
@@ -83,6 +84,7 @@ before(async () => {
     allowedUsers: () => allowedUsers,
     selfLogin: () => selfLogin,
     selfAddresses: () => [SELF_ADDRESS, 'fd7a:115c:a1e0::e33a:ae2c'],
+    identityOperators: () => identityOperators,
     publicHosts: () => ['node.tailnet.ts.net', 'node.tailnet.ts.net:443'],
     cookieName: 'dsh-tailscale-remote',
     controlPrefix: '/tailscale-remote',
@@ -285,6 +287,30 @@ describe('pure helpers', () => {
     assert.equal(originRejection(fake({ host: 'node.tailnet.ts.net' }), allowed)?.status, 421, 'plain http to the public name is not the published authority')
     assert.equal(originRejection(fake({ ...https, host: 'node.tailnet.ts.net', origin: 'null' }), allowed)?.status, 403)
     assert.equal(originRejection(fake({ ...https, host: 'node.tailnet.ts.net', origin: 'https://node.tailnet.ts.net:8443' }), allowed)?.status, 403)
+  })
+  it('identityOperators: identity-admitted users operate; token holders and other devices never do', async () => {
+    identityOperators = true
+    try {
+      seen.length = 0
+      const alice = await fetchProxy('/tailscale-remote/status', { method: 'POST', headers: { ...servePeer('alice@example.com'), 'content-type': 'application/json' }, body: '{}' })
+      assert.equal(alice.status, 200, 'allowlisted identity: operator')
+      assert.equal(seen.at(-1)?.headers['x-dsh-tailscale-remote-self'], '1', 'forwarded as operator')
+      const page = await fetchProxy('/', { headers: { ...servePeer('alice@example.com'), accept: 'text/html' } })
+      assert.match(page.body, /ownsHost:true/, 'identity-admitted page owns the host (Settings persist, host panes visible)')
+      const stranger = await fetchProxy('/tailscale-remote/status', { method: 'POST', headers: { ...servePeer('mallory@example.com'), 'content-type': 'application/json' }, body: '{}' })
+      assert.equal(stranger.status, 403, 'not allowlisted: the control fence answers first')
+      const bearer = await fetchProxy('/tailscale-remote/status', { method: 'POST', headers: { cookie: `dsh-tailscale-remote=${cookieValueFor(token)}`, origin: `http://127.0.0.1:${proxy.port}`, 'content-type': 'application/json' }, body: '{}' })
+      assert.equal(bearer.status, 403, 'token holder: admitted but never an operator')
+      const bearerPage = await fetchProxy('/', { headers: { cookie: `dsh-tailscale-remote=${cookieValueFor(token)}`, origin: `http://127.0.0.1:${proxy.port}`, accept: 'text/html' } })
+      assert.doesNotMatch(bearerPage.body, /ownsHost:true/)
+    } finally { identityOperators = false }
+  })
+  it('isOperatorRequest: self always; identity only with the policy on', () => {
+    const opts = { selfAddresses: [SELF_ADDRESS], allowedUsers: ['alice@example.com'] }
+    assert.equal(isOperatorRequest(fake({ 'x-forwarded-for': SELF_ADDRESS }), { ...opts, identityOperators: false }), true)
+    assert.equal(isOperatorRequest(fake({ 'x-forwarded-for': '100.100.1.1', 'tailscale-user-login': 'alice@example.com' }), { ...opts, identityOperators: false }), false)
+    assert.equal(isOperatorRequest(fake({ 'x-forwarded-for': '100.100.1.1', 'tailscale-user-login': 'alice@example.com' }), { ...opts, identityOperators: true }), true)
+    assert.equal(isOperatorRequest(fake({ 'x-forwarded-for': '100.100.1.1', 'tailscale-user-login': 'bob@example.com' }), { ...opts, identityOperators: true }), false)
   })
   it('isSelfRequest: Serve peer whose forwarded address is one of ours', () => {
     assert.equal(isSelfRequest(fake({ 'x-forwarded-for': SELF_ADDRESS }), [SELF_ADDRESS]), true)
