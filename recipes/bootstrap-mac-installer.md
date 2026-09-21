@@ -262,6 +262,17 @@ Plugins** panel since the 0.1.6-alpha.2 rebase (not Settings), and an instance
 whose plugin client bundle was built before that fix registers into a slot
 that no longer exists — rebuild `lib/client.js` after pulling.
 
+### <private>: "kernel failed to start … Connection closed" on a colleague's account
+
+<private> activation is per macOS user: the owner account being activated does
+nothing for the others, and the kernel says so on **stdout** (`No valid
+password found.`), which the plugin used to drop. Headless activation that
+works over ssh: `"/Applications/<private>.app/Contents/MacOS/<private>Kernel"
+-activate <key> -noprompt -run 'Exit[]'` → "Automatic Web Activation received a
+password", `~/Library/<private>/Licensing/mathpass`. `<private>script -activate`
+does **not** work with <private>.app (it insists on a <private> Engine install).
+The bootstrap probes the kernel once and adds the command to the to-do list.
+
 **Paid apps are never installed.** Dash (Kapeli's docs browser) and
 <private> are not offered; instead `dash-docsets` and
 `<private-plugin>` are left out of the build and of the bundle

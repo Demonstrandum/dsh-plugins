@@ -419,6 +419,16 @@ if wants apps && [ "$APPS" = 1 ]; then
   fi
 fi
 
+# <private>: activation is per macOS user. A kernel that starts but has no licence for this account makes
+# every <private>_* call fail with "No valid password found"; probe once so it lands in the to-do list.
+if [ -x "/Applications/<private>.app/Contents/MacOS/<private>Kernel" ] && [ "$DRY" != 1 ]; then
+  WK_OUT="$(perl -e 'alarm 60; exec @ARGV' -- "/Applications/<private>.app/Contents/MacOS/<private>Kernel" -noprompt -run 'Print[1+1]; Exit[]' 2>&1 | tr -d '\n' || true)"
+  case "$WK_OUT" in
+    *2*) ok "<private> kernel licensed for this user" ;;
+    *) todo "activate <private> for this macOS user: \"/Applications/<private>.app/Contents/MacOS/<private>Kernel\" -activate <activation-key> -noprompt -run 'Exit[]'   (<private>script -activate refuses a <private> kernel)" ;;
+  esac
+fi
+
 # Plugins that only make sense with a paid app already on the Mac: left out of
 # the build and the bundle install when the app is absent (re-run
 # `pnpm install-plugins` after installing the app to add them).
