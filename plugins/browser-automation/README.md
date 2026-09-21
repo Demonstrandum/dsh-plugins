@@ -218,11 +218,21 @@ layer (what the `web` profile uses):
       name: '/Users/USER/github/tali-dash-plugins/plugins/browser-automation/index.js'
       config:
         subagents: true         # child agents get their own sessions too
+        skipPresets: [minimal, minimal-no-tools]   # chat-only presets never see these tools (see below)
         idleMinutes: 30         # 0 = never auto-close
         chrome:
           headless: false
         # traceFile: /tmp/browser-automation-trace.log   # JSON lifecycle lines
 ```
+
+`skipPresets` (default `['minimal', 'minimal-no-tools']`): sessions on these
+agent presets never get the `safari_*`/`chrome_*` tools. The tools are
+registered **per agent** (scoped), which `ctx.tools.restrict()` deliberately
+exempts, so the gate has to be here; it is re-evaluated on
+`agent-preset/selected` because `enforce-model-preset` switches a blank
+session's preset after `agent/created` and `recompose` keeps the same Agent
+(detach on entering such a preset, attach on leaving). Measured 2026-09-21: a
+4K-window on-device model was sent 62 tool schemas and answered one token.
 
 Full config surface: top of `index.js`. Module code changes need a host
 restart (`dsh web` has module HMR disabled; only the patch file is
