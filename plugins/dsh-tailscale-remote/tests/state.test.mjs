@@ -61,3 +61,33 @@ describe('tailscale helpers', () => {
     assert.equal(isTailscaleAddress('127.0.0.1'), false)
   })
 })
+
+describe('direct-remote Dock app targets', async () => {
+  const { parseRemoteTarget, resolveTailnetHost, remoteAppName, remoteInstance, titleCase } = await import('../dock-app.mjs')
+  const status = {
+    Self: { DNSName: 'air.tail1234.ts.net.' },
+    Peer: { a: { DNSName: 'studio.tail1234.ts.net.' }, b: { DNSName: 'Box.tail1234.ts.net.' } },
+  }
+  it('parses [user@]host[/path]', () => {
+    assert.deepEqual(parseRemoteTarget('me@studio/dsh/me'), { host: 'studio', path: '/dsh/me' })
+    assert.deepEqual(parseRemoteTarget('studio'), { host: 'studio', path: '/dsh' })
+    assert.deepEqual(parseRemoteTarget('studio/'), { host: 'studio', path: '/' })
+    assert.deepEqual(parseRemoteTarget('https://studio.tail1234.ts.net/dsh/me/'), { host: 'studio.tail1234.ts.net', path: '/dsh/me', url: 'https://studio.tail1234.ts.net/dsh/me/' })
+    assert.throws(() => parseRemoteTarget(''))
+    assert.throws(() => parseRemoteTarget('bad host/x'))
+  })
+  it('resolves a bare label through tailscale status (self, peers, then the tailnet suffix)', () => {
+    assert.equal(resolveTailnetHost('studio', status), 'studio.tail1234.ts.net')
+    assert.equal(resolveTailnetHost('box', status), 'Box.tail1234.ts.net')
+    assert.equal(resolveTailnetHost('air', status), 'air.tail1234.ts.net')
+    assert.equal(resolveTailnetHost('other', status), 'other.tail1234.ts.net')
+    assert.equal(resolveTailnetHost('x.example.com', status), 'x.example.com')
+    assert.throws(() => resolveTailnetHost('studio', {}))
+  })
+  it('names and instances', () => {
+    assert.equal(titleCase('studio-two'), 'Studio Two')
+    assert.equal(remoteAppName('studio.tail1234.ts.net'), 'DSH Studio')
+    assert.equal(remoteInstance('studio.tail1234.ts.net', '/dsh/me'), 'remote-studio-dsh-me')
+    assert.equal(remoteInstance('studio', '/'), 'remote-studio')
+  })
+})

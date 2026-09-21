@@ -36,6 +36,74 @@ export function bundleIdFor(instance = '') {
   return instance === '' ? BUNDLE_ID : `${BUNDLE_ID}.${instance}`
 }
 const EXECUTABLE = 'DSH'
+
+// ---------------------------------------------------------------------------
+// Direct-remote apps: a wrapper that opens another Mac's DSH straight over the
+// tailnet — no local relay, no fallback, no token; identity admission only.
+// Blue whale (Radix blue-9), beside the black live app and the red preview.
+export const REMOTE_GLYPH_COLOR = '#0090FF'
+
+/**
+ * `[user@]host[/path]` or an http(s) URL → { host, path, url? }. `host` is the
+ * bare tailnet label or FQDN, `path` the mount path (default `/dsh`), `url` set
+ * only when a full URL was given (then host/path are derived from it).
+ * @param {string} text
+ */
+export function parseRemoteTarget(text) {
+  const raw = String(text ?? '').trim()
+  if (raw === '') throw new Error('remote target must not be empty ([user@]host[/path] or a URL)')
+  if (/^https?:\/\//i.test(raw)) {
+    const u = new URL(raw)
+    const path = u.pathname.replace(/\/+$/, '') || '/'
+    return { host: u.hostname, path, url: `${u.origin}${path === '/' ? '' : path}/` }
+  }
+  const noUser = raw.includes('@') ? raw.slice(raw.indexOf('@') + 1) : raw
+  const slash = noUser.indexOf('/')
+  const host = (slash === -1 ? noUser : noUser.slice(0, slash)).trim().toLowerCase()
+  const path = slash === -1 ? '/dsh' : normalizePath(noUser.slice(slash))
+  if (!/^[a-z0-9][a-z0-9.-]*$/.test(host)) throw new Error(`not a host name: '${host}'`)
+  return { host, path }
+}
+
+function normalizePath(value) {
+  const text = `/${String(value).replace(/^\/+|\/+$/g, '')}`
+  return text === '/' ? '/' : text
+}
+
+/**
+ * Bare label → MagicDNS FQDN using `tailscale status --json`: this node or a
+ * peer whose first label matches; otherwise the label on this tailnet's suffix.
+ * FQDNs pass through.
+ * @param {string} host  @param {any} statusJson
+ */
+export function resolveTailnetHost(host, statusJson) {
+  if (host.includes('.')) return host
+  const names = []
+  const self = String(statusJson?.Self?.DNSName ?? '')
+  if (self) names.push(self)
+  for (const peer of Object.values(statusJson?.Peer ?? {})) if (peer?.DNSName) names.push(String(peer.DNSName))
+  const clean = names.map(n => n.replace(/\.$/, ''))
+  const hit = clean.find(n => n.split('.')[0].toLowerCase() === host)
+  if (hit) return hit
+  const suffix = clean[0]?.split('.').slice(1).join('.')
+  if (suffix) return `${host}.${suffix}`
+  throw new Error(`cannot resolve '${host}' on the tailnet (no MagicDNS names in tailscale status)`)
+}
+
+export function titleCase(label) {
+  return String(label).split(/[-_ ]+/).filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
+}
+
+/** Default app name for a remote: `DSH <Host>` from the host's first label. */
+export function remoteAppName(host) {
+  return `DSH ${titleCase(String(host).split('.')[0])}`
+}
+
+/** Instance tag → bundle id `…dsh-dock-app.remote-<host>-<path>`: one WebKit store per remote. */
+export function remoteInstance(host, path) {
+  const slug = `${String(host).split('.')[0]}${path === '/' ? '' : path}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  return `remote-${slug}`
+}
 const LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
 const SAFARI_WEBAPP_TEMPLATE = 'com.apple.Safari.WebApp'
 

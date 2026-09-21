@@ -144,9 +144,18 @@ export function createTailscaleManager(options) {
     return { ...base, state: 'conflict', mappedTarget: mapped }
   }
 
+  /** Raw `tailscale status --json` (Self, Peer, User …) or undefined when the CLI/backend is unavailable. */
+  const statusJson = async () => {
+    const cli = await resolveBinary()
+    if (cli === undefined) return undefined
+    const node = await run(cli, ['status', '--json'])
+    return node.code === 0 ? parseJson(node.stdout) : undefined
+  }
+
   return {
     mount,
     status,
+    statusJson,
     /** @returns {Promise<'ok'|'unavailable'|'conflict'|'failed'|'verify-failed'>} */
     enable: async () => {
       const target = options.target()

@@ -12,6 +12,9 @@
  *   pnpm dock-app:install [--name DSH] [--url https://node.ts.net/dsh/] [--fallback http://127.0.0.1:3083/]
  *                         [--token-file ~/.dsh/tailscale-remote.json] [--no-launch]
  *   pnpm dock-app:uninstall [--name DSH]
+ *   pnpm dock-app:remote <[user@]host[/path] | URL> [--name "DSH Host"] [--glyph-color #0090FF] [--no-launch]
+ *                         a BLUE app that opens another Mac's DSH directly over the tailnet (no relay, no
+ *                         fallback, no token; identity admission). Default name: DSH <Titlecased host>.
  *   … every command takes `--instance preview` to address a second (preview) DSH's relay/app.
  *
  * `--url` defaults to this node's route (`tailscale status` → https://<fqdn>/dsh/).
@@ -20,7 +23,7 @@
  */
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { buildDockApp, dockAppStatus, installDockApp, uninstallDockApp } from '../dock-app.mjs'
+import { REMOTE_GLYPH_COLOR, buildDockApp, dockAppStatus, installDockApp, parseRemoteTarget, remoteAppName, remoteInstance, resolveTailnetHost, uninstallDockApp } from '../dock-app.mjs'
 import { defaultLogDir, installRelayAgent, relayStatus, uninstallRelayAgent } from '../relay/launch-agent.mjs'
 import { defaultStateFile } from '../state.mjs'
 import { createTailscaleManager } from '../tailscale.mjs'
@@ -55,7 +58,7 @@ async function routeUrl(flags) {
 
 async function main() {
   const [command, ...rest] = process.argv.slice(2)
-  const { flags } = parse(rest)
+  const { flags, positional } = parse(rest)
   if (process.platform !== 'darwin') {
     console.log(`${command ?? 'dsh-tailscale-remote'}: macOS only — nothing to do on ${process.platform}`)
     return
@@ -106,6 +109,31 @@ async function main() {
       console.log(JSON.stringify(result, null, 2))
       return
     }
+    case 'dock-app:remote': {
+      const target = parseRemoteTarget(positional[0] ?? flags.target)
+      let url = target.url
+      let host = target.host
+      if (url === undefined) {
+        const manager = createTailscaleManager({ configuredPath: '', port: 443, mountPath: '/dsh', target: () => '' })
+        const raw = await manager.statusJson()
+        host = resolveTailnetHost(target.host, raw)
+        url = `https://${host}${target.path === '/' ? '' : target.path}/`
+      }
+      const name = String(flags.name ?? remoteAppName(host))
+      const result = await installDockApp({
+        name,
+        instance: remoteInstance(host, target.path),
+        url,
+        fallbackUrl: undefined,
+        tokenFile: undefined,
+        glyphColor: flags['glyph-color'] ?? REMOTE_GLYPH_COLOR,
+        tileColor: flags['tile-color'],
+        launch: flags.launch !== false,
+        log,
+      })
+      console.log(JSON.stringify({ ...result, name, url }, null, 2))
+      return
+    }
     case 'dock-app:uninstall':
       console.log(JSON.stringify(await uninstallDockApp({ name: String(flags.name ?? 'DSH') }), null, 2))
       return
@@ -113,7 +141,7 @@ async function main() {
       console.log(JSON.stringify(await dockAppStatus({ name: String(flags.name ?? 'DSH'), url: typeof flags.url === 'string' ? flags.url : '' }), null, 2))
       return
     default:
-      console.error('usage: cli.mjs relay:install|relay:uninstall|relay:status|dock-app:build|dock-app:install|dock-app:uninstall|dock-app:status [flags]')
+      console.error('usage: cli.mjs relay:install|relay:uninstall|relay:status|dock-app:build|dock-app:install|dock-app:remote <target>|dock-app:uninstall|dock-app:status [flags]')
       process.exit(2)
   }
 }

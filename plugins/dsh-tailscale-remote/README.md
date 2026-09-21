@@ -242,7 +242,21 @@ pnpm relay:status | pnpm relay:uninstall
 pnpm dock-app:build                                                   # compile + icon only
 pnpm dock-app:install [--name DSH] [--url https://node.ts.net/dsh/] [--fallback http://127.0.0.1:3083/]
 pnpm dock-app:status | pnpm dock-app:uninstall
+pnpm dock-app:remote <[user@]host[/path] | URL> [--name "DSH Host"]      # BLUE app straight to another Mac's DSH
 ```
+
+`dock-app:remote` builds a **direct-remote** app: the same wrapper, pointed at
+another Mac's route over the tailnet, with **no relay, no fallback and no
+token** — identity admission or nothing (an offline page if the remote does not
+answer). Target `[user@]host[/path]`: a bare host label is resolved to its
+MagicDNS name through `tailscale status` (this node, a peer, else the tailnet
+suffix); the path defaults to `/dsh`; the `user@` part is accepted and ignored
+(ssh-style spelling). Default name `DSH <Host>` (title-cased first label),
+glyph Radix blue-9 `#0090FF` beside the black live app and the red preview,
+bundle id `io.github.taliesinb.dsh-dock-app.remote-<host>-<path>` so every
+remote keeps its own WebKit cookies and can sit in the Dock next to the others.
+It skips the hybrid Remotes model entirely — no frame, just `dsh web` in a
+window.
 
 The same actions are buttons in Settings → Tailscale remote → *This Mac*.
 Every script takes `--instance preview` to address the preview pair.
