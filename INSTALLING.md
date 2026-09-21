@@ -63,8 +63,12 @@ port 3088) is deliberately left out.
 > Over ssh: `pnpm bootstrap-remote user@host [flags]`; to turn a Path B host
 > into a standalone Path C install: `pnpm bootstrap-remote <user>@<remote>
 > --replace` — stops the deploy-remote LaunchAgent, removes `~/dsh`, keeps
-> `~/.dsh`, reinstalls. The rest of this document is the step-by-step it
-> automates and the reference for when a step fails.
+> `~/.dsh`, reinstalls. Several people on one Mac: give each an Administrator
+> account (logged in once via Fast User Switching) and run it with
+> `--instance <name> --allow <their tailnet login>` — own ports, own
+> `/dsh-<name>` route, own Dock app, one shared Tailscale node. The rest of
+> this document is the step-by-step it automates and the reference for when a
+> step fails.
 
 ## Resulting topology (Path B, as on the first remote)
 

@@ -118,6 +118,66 @@ bug that a dry run cannot (all fixed in `638c95a`…`49d8689`):
 | 4 | `install-plugins` → `pnpm dsh plugin add` fails in the lefthook postinstall | pnpm's verify-deps-before-run re-runs `pnpm install` before **every** `pnpm dsh …`, so `CI=true` on two commands was not enough. Real fix = the migration the error asks for, on the submodule's common config: `core.repositoryFormatVersion 1`, `extensions.worktreeConfig true`, move `core.worktree` into `config.worktree`. (the maintainer's own submodule has an *embedded* `.git` dir and no `core.worktree`, which is why it never showed up locally.) |
 | 5 | — | success |
 
+## One DSH per macOS user on a shared machine (`--instance`)
+
+Tried 2026-09-21 on the remote Mac: a second **Administrator** account, logged
+in once via **Fast User Switching** and left in the background, then
+`pnpm bootstrap-remote <user>@<remote> --instance <name> --allow <login>`.
+Result: a second, fully independent DSH beside the first — own `~/.dsh`
+(sessions, credentials, settings, token), own relay LaunchAgent, own Dock app
+`DSH-<name>`, reachable at `https://<remote>.<tailnet>.ts.net/dsh-<name>/`
+while the first stays at `/dsh`. Facts that make it work:
+
+- **Tailscale (Standalone variant) is one node for the whole Mac.** The tunnel
+  is a system extension running as root with a single machine-wide VPN
+  configuration; the GUI app runs per user and the CLI talks to the backend
+  through it. Measured: a second user's `tailscale status/serve` work from a
+  plain ssh session with **no GUI app of its own** (the console user's app
+  serves it; still exactly one `Tailscale` process). So the gate passes for
+  every account, the node identity/login is shared, and identity admission for
+  the second person is an allowlist entry (`--allow`), not a second login.
+- **Serve config is node-wide but path-additive**: `tailscale serve --set-path
+  /dsh-<name>` adds a handler; the first user's `/dsh` handler survives, and
+  each user's plugin only ever re-publishes its own path on boot.
+- **What must differ per user is only TCP ports, the Serve path and the Dock
+  app name.** `--instance` picks the first free decade ≥ 3090 (web/relay/proxy
+  = base/+3/+4; `--port-base` to choose; recorded in the resume marker),
+  and writes a `tali-tailscale-remote` row override (`listenPort`,
+  `publishPort`, `mountPath`, `dockAppName`, `relayStart … --port N`) into the
+  user's `~/.dsh/profiles/web/cordis.patch.yml` — a patch row replaces the
+  whole config, unset keys fall back to the plugin's defaults. The plugin's
+  own `instance` setting is for two instances in *one* home (live+preview) and
+  is not needed here. `port_busy` uses `nc -z` because `lsof` only shows the
+  caller's own processes: the other user's listeners are invisible but very
+  much there.
+- **The account must be an Administrator** on that Mac: Remote Login was
+  restricted to admins (`com.apple.access_ssh` nests the `admin` group), and
+  Homebrew's prefix is `admin`-group-writable, so admins can `brew install`
+  with no extra group. A dedicated group only earns its keep for Standard
+  users (`chgrp` the brew prefix + add them to `com.apple.access_ssh`).
+- **A LaunchAgent runs only while its user has a GUI session** (`gui/<uid>`
+  domain): enable Fast User Switching, log the account in once, switch back.
+  `launchctl bootstrap`, the Dock-app build and launch all worked over ssh into
+  that background session.
+- **`/tmp` is shared**: the remote runner stages the script in the target
+  user's home (`~/.bootstrap-mac.sh`) — the first user's copy in `/tmp` was not
+  writable by the second (found the hard way).
+- The fresh-machine gate checks *this instance's* ports and *this user's* `dsh`
+  processes (`pgrep -u`), otherwise the first user's servers would trip it.
+- **pnpm 12 build scripts**: `--dangerously-allow-all-builds` (kebab-case).
+  The camelCase `--config.dangerouslyAllowAllBuilds=true` is silently ignored
+  in a plugin directory that has its own `pnpm-workspace.yaml`; it had looked
+  fine earlier only because the affected `node_modules` already existed. Both
+  kebab spellings verified on pnpm 11.7 and 12.5 in a throwaway package.
+- A fresh home's `.credentials.yaml` is not empty: it holds the
+  `client-connection/browser-session` grant; the "add a provider" to-do now
+  keys on other `records:` entries.
+
+This second account also serves as the near-clean-slate test of the script:
+everything under `~` (clone, build, `~/.dsh`, LaunchAgent, Dock app) was
+exercised from nothing; only the system-level installs (CLT, Homebrew, casks,
+afm) were pre-existing.
+
 **Paid apps are never installed.** Dash (Kapeli's docs browser) and
 <private> are not offered; instead `dash-docsets` and
 `<private-plugin>` are left out of the build and of the bundle
