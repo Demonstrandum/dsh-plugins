@@ -213,8 +213,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         retryTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in self?.connect() }
     }
 
+    /// One-shot hint for the next file picker, posted by the page just before it
+    /// opens an <input type=file> (`webkit.messageHandlers.dshDock.postMessage(
+    /// {type: "open-panel", directory: "~/.pi/agent", message: "…", showsHiddenFiles: true})`).
+    /// A web page cannot choose where a picker starts; the wrapper can. Consumed
+    /// by the next runOpenPanel or dropped after 10 s.
+    private var openPanelHint: (directory: URL?, message: String?, showsHiddenFiles: Bool, expires: Date)?
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        if message.name == "dshDock", (message.body as? String) == "retry" { connect() }
+        guard message.name == "dshDock" else { return }
+        if (message.body as? String) == "retry" { connect(); return }
+        guard let body = message.body as? [String: Any], body["type"] as? String == "open-panel" else { return }
+        var directory: URL?
+        if let raw = body["directory"] as? String, !raw.isEmpty {
+            let expanded = NSString(string: raw).expandingTildeInPath
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir), isDir.boolValue { directory = URL(fileURLWithPath: expanded) }
+        }
+        openPanelHint = (directory, body["message"] as? String, body["showsHiddenFiles"] as? Bool ?? false, Date().addingTimeInterval(10))
     }
 
     // MARK: navigation
@@ -285,6 +301,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         panel.allowsMultipleSelection = parameters.allowsMultipleSelection
         panel.canChooseDirectories = parameters.allowsDirectories
         panel.canChooseFiles = true
+        if let hint = openPanelHint, hint.expires > Date() {
+            if let directory = hint.directory { panel.directoryURL = directory }
+            if let text = hint.message { panel.message = text }
+            panel.showsHiddenFiles = hint.showsHiddenFiles
+        }
+        openPanelHint = nil
         panel.beginSheetModal(for: window) { response in
             completionHandler(response == .OK ? panel.urls : nil)
         }

@@ -56,7 +56,23 @@ class DialogStore {
   subscribe(l: Listener): () => void { this.listeners.add(l); return () => { this.listeners.delete(l) } }
 }
 
+/** pi's auth store; also where the Dock app's picker starts when it can. */
+const PI_AUTH_DIR = '~/.pi/agent'
+
+/**
+ * A page cannot choose where the file picker opens. The DSH Dock app (our own
+ * WKWebView wrapper) can, and listens for a one-shot hint on its script
+ * message handler; in an ordinary browser this is a no-op.
+ */
+function hintDockAppPicker(): void {
+  const handlers = (window as unknown as { webkit?: { messageHandlers?: { dshDock?: { postMessage(body: unknown): void } } } }).webkit?.messageHandlers
+  try {
+    handlers?.dshDock?.postMessage({ type: 'open-panel', directory: PI_AUTH_DIR, message: "Choose an API-key file — pi's auth.json, a JSON key map, or a .env file", showsHiddenFiles: true })
+  } catch { /* not the Dock app */ }
+}
+
 function pickFile(): Promise<File | undefined> {
+  hintDockAppPicker()
   return new Promise((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'

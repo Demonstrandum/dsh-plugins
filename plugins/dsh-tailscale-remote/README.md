@@ -209,7 +209,7 @@ the state file), else an offline page that retries every 5 s. Injects
 `__DSH_TRANSPORT__.ownsHost` itself, opens out-of-scope links and every
 `window.open` in the default browser, persistent data store, menu bar (⌘R
 reload, Reconnect, zoom, full screen, ⌘⇧O open in browser, ⌘⇧C copy address),
-frame autosave, `isInspectable` (Safari ▸ Develop ▸ this Mac), downloads to
+frame autosave, a one-shot `open-panel` hint from the page (`dshDock` message: start directory, hidden files, prompt — used by `/import-api-keys` to open in `~/.pi/agent`), `isInspectable` (Safari ▸ Develop ▸ this Mac), downloads to
 ~/Downloads. Not Safari: no Web Notifications, no Safari extensions.
 
 `dock-app.mjs` builds it (`xcrun swiftc`, cached by mtime, ~5 s cold;

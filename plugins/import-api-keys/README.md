@@ -35,6 +35,15 @@ reach a server they did not type them into.
    Providers re-resolve credentials per request, so imported keys work at once;
    no restart.
 
+**Where the picker opens.** A web page cannot choose the picker's start
+directory or pre-select a file. The DSH Dock apps are our own WKWebView
+wrapper, so the plugin posts a one-shot hint to the wrapper's script-message
+handler (`dshDock` → `{type: 'open-panel', directory: '~/.pi/agent',
+showsHiddenFiles: true, message}`) just before opening the input; the wrapper
+applies it to the next `NSOpenPanel` (start in `~/.pi/agent` when it exists,
+hidden files shown, a prompt line). In Safari/Chrome the hint is a no-op and the
+picker opens wherever the browser last was; type `⇧⌘G` and `~/.pi/agent` there.
+
 Values cross the wire twice (plan, set), over the admitted connection, and are
 never written to the attachment store or to disk by the browser. An unreadable
 or unrecognised file gives an error modal with the parser's reason.
