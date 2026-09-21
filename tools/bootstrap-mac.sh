@@ -579,8 +579,9 @@ if wants plugins; then
     hasbuild="$(pkg_field "$pdir" 'p.scripts?.build ? "yes" : ""' || true)"
     if [ "$ndeps" != 0 ] && { [ ! -d "$pdir/node_modules" ] || [ "$REBUILD" = 1 ]; }; then
       # pnpm ≥ 12 makes ignored dependency build scripts (esbuild, sharp) a hard error instead of a warning;
-      # the plugins pin no pnpm, so brew's latest runs here. Allow builds for these small trees.
-      (cd "$pdir" && runq pnpm install --config.dangerouslyAllowAllBuilds=true) || die "pnpm install failed in plugins/$p"
+      # the plugins pin no pnpm, so brew's latest runs here. Allow builds for these small trees
+      # (kebab-case: the camelCase --config.dangerouslyAllowAllBuilds form is ignored by pnpm 12 in a dir with its own pnpm-workspace.yaml).
+      (cd "$pdir" && runq pnpm install --dangerously-allow-all-builds) || die "pnpm install failed in plugins/$p"
     fi
     if [ -n "$hasbuild" ] && { [ ! -f "$pdir/lib/client.js" ] || [ "$REBUILD" = 1 ]; }; then
       (cd "$pdir" && runq pnpm build) || die "build failed in plugins/$p"
