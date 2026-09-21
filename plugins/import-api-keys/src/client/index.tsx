@@ -134,7 +134,7 @@ function ConfirmTable({ dialog, onImport, onClose }: { dialog: Extract<Dialog, {
       title="Import API keys"
       closeLabel="Cancel"
       onClose={onClose}
-      width={640}
+      width={Math.min(window.innerWidth - 80, 720 + Math.max(0, ...rows.map(r => r.summary.length + r.name.length - 70)) * 6)}
       footer={<>
         <Button onClick={onClose}>Cancel</Button>
         <Button variant="primary" disabled={selected.length === 0} onClick={() => { void onImport(Object.fromEntries(selected.map(r => [r.name, r.value as string]))) }}>
@@ -153,7 +153,7 @@ function ConfirmTable({ dialog, onImport, onClose }: { dialog: Extract<Dialog, {
                   )}
                 </td>
                 <td style={{ ...cell, ...mono, whiteSpace: 'nowrap' }}>{row.name}</td>
-                <td style={{ ...cell, opacity: 0.8 }}>{row.summary}</td>
+                <td style={{ ...cell, opacity: 0.8, whiteSpace: 'nowrap' }}>{row.summary}</td>
               </tr>
             ))}
           </tbody>

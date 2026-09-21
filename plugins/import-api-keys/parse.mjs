@@ -81,9 +81,9 @@ function parsePiAuth(entries) {
   const skipped = []
   for (const [provider, entry] of entries) {
     const ref = PI_PROVIDER_ENV[provider]
-    if (entry.type === 'oauth') { skipped.push({ name: provider, reason: 'OAuth login, not an API key — sign in through the provider instead' }); continue }
+    if (entry.type === 'oauth') { skipped.push({ name: provider, reason: 'OAuth login, not an API key — sign in via the provider' }); continue }
     if (entry.type !== 'api_key' || typeof entry.key !== 'string' || entry.key.trim() === '') { skipped.push({ name: provider, reason: `unrecognised entry (type ${JSON.stringify(entry.type ?? null)})` }); continue }
-    if (ref === undefined) { skipped.push({ name: provider, reason: 'no DSH credential name is known for this pi provider' }); continue }
+    if (ref === undefined) { skipped.push({ name: provider, reason: 'unknown pi provider — no DSH credential name' }); continue }
     keys[ref] = entry.key.trim()
   }
   if (Object.keys(keys).length === 0 && skipped.length === 0) throw new Error('No provider entries found.')
