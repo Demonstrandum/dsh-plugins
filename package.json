@@ -5,7 +5,7 @@
   "scripts": {
     "bootstrap": "tools/bootstrap-mac.sh",
     "bootstrap-remote": "tools/bootstrap-remote.sh",
-    "remote-app": "pnpm --dir plugins/dsh-tailscale-remote dock-app:remote --",
+    "remote-app": "node plugins/dsh-tailscale-remote/scripts/cli.mjs dock-app:remote",
     "install-plugins": "tools/install-plugins.sh",
     "remove-plugins": "tools/install-plugins.sh --remove",
     "deploy-remote": "tools/deploy-remote.sh",
@@ -13,5 +13,8 @@
     "remote-status": "tools/remote-ctl.sh status",
     "remote-restart": "tools/remote-ctl.sh restart",
     "remote-stop": "tools/remote-ctl.sh stop"
+  },
+  "pnpm": {
+    "verifyDepsBeforeRun": false
   }
 }
