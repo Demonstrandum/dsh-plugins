@@ -1,3 +1,4 @@
 # Dependencies whose install scripts may run (pnpm >= 10 blocks them otherwise; pnpm >= 12 makes that an error).
 allowBuilds:
-  'esbuild': true
+  'chrome-devtools-mcp': true
+  'sharp': true

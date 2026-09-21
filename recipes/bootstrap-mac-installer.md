@@ -164,7 +164,7 @@ while the first stays at `/dsh`. Facts that make it work:
   writable by the second (found the hard way).
 - The fresh-machine gate checks *this instance's* ports and *this user's* `dsh`
   processes (`pgrep -u`), otherwise the first user's servers would trip it.
-- **pnpm 12 build scripts**: `--dangerously-allow-all-builds` (kebab-case).
+- **pnpm build scripts**: declared per plugin in `pnpm-workspace.yaml` `allowBuilds` (esbuild, sharp, ripgrep, chrome-devtools-mcp); no CLI flag — `--dangerously-allow-all-builds` conflicts with `allowBuilds` on pnpm 10.32 (`CONFLICT_BUILT_DEPENDENCIES`, found on the first colleague install). Verified pnpm 10.32 / 11.7 / 12.5.
   The camelCase `--config.dangerouslyAllowAllBuilds=true` is silently ignored
   in a plugin directory that has its own `pnpm-workspace.yaml`; it had looked
   fine earlier only because the affected `node_modules` already existed. Both
