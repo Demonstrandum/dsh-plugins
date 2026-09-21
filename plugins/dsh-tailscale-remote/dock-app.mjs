@@ -44,9 +44,11 @@ const EXECUTABLE = 'DSH'
 export const REMOTE_GLYPH_COLOR = '#0090FF'
 
 /**
- * `[user@]host[/path]` or an http(s) URL → { host, path, url? }. `host` is the
- * bare tailnet label or FQDN, `path` the mount path (default `/dsh`), `url` set
- * only when a full URL was given (then host/path are derived from it).
+ * `host[/path]` or an http(s) URL → { host, path, url? }. `host` is the bare
+ * tailnet label or FQDN, `path` the mount path (default `/dsh`), `url` set only
+ * when a full URL was given (then host/path are derived from it). An ssh-style
+ * `user@host` is rejected: the app admits by tailnet identity, there is no
+ * account to name, and silently dropping it would hide a mistaken target.
  * @param {string} text
  */
 export function parseRemoteTarget(text) {
@@ -57,10 +59,10 @@ export function parseRemoteTarget(text) {
     const path = u.pathname.replace(/\/+$/, '') || '/'
     return { host: u.hostname, path, url: `${u.origin}${path === '/' ? '' : path}/` }
   }
-  const noUser = raw.includes('@') ? raw.slice(raw.indexOf('@') + 1) : raw
-  const slash = noUser.indexOf('/')
-  const host = (slash === -1 ? noUser : noUser.slice(0, slash)).trim().toLowerCase()
-  const path = slash === -1 ? '/dsh' : normalizePath(noUser.slice(slash))
+  if (raw.includes('@')) throw new Error(`remote target '${raw}' names a user; use host[/path] (e.g. '${raw.slice(raw.indexOf('@') + 1)}') — the app admits by tailnet identity`)
+  const slash = raw.indexOf('/')
+  const host = (slash === -1 ? raw : raw.slice(0, slash)).trim().toLowerCase()
+  const path = slash === -1 ? '/dsh' : normalizePath(raw.slice(slash))
   if (!/^[a-z0-9][a-z0-9.-]*$/.test(host)) throw new Error(`not a host name: '${host}'`)
   return { host, path }
 }

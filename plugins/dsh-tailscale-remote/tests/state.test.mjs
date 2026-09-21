@@ -68,8 +68,9 @@ describe('direct-remote Dock app targets', async () => {
     Self: { DNSName: 'air.tail1234.ts.net.' },
     Peer: { a: { DNSName: 'studio.tail1234.ts.net.' }, b: { DNSName: 'Box.tail1234.ts.net.' } },
   }
-  it('parses [user@]host[/path]', () => {
-    assert.deepEqual(parseRemoteTarget('me@studio/dsh/me'), { host: 'studio', path: '/dsh/me' })
+  it('parses host[/path] and rejects an ssh-style user@', () => {
+    assert.deepEqual(parseRemoteTarget('studio/dsh/me'), { host: 'studio', path: '/dsh/me' })
+    assert.throws(() => parseRemoteTarget('me@studio/dsh/me'), /names a user/)
     assert.deepEqual(parseRemoteTarget('studio'), { host: 'studio', path: '/dsh' })
     assert.deepEqual(parseRemoteTarget('studio/'), { host: 'studio', path: '/' })
     assert.deepEqual(parseRemoteTarget('https://studio.tail1234.ts.net/dsh/me/'), { host: 'studio.tail1234.ts.net', path: '/dsh/me', url: 'https://studio.tail1234.ts.net/dsh/me/' })

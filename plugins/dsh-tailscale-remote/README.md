@@ -242,7 +242,7 @@ pnpm relay:status | pnpm relay:uninstall
 pnpm dock-app:build                                                   # compile + icon only
 pnpm dock-app:install [--name DSH] [--url https://node.ts.net/dsh/] [--fallback http://127.0.0.1:3083/]
 pnpm dock-app:status | pnpm dock-app:uninstall
-pnpm dock-app:remote <[user@]host[/path] | URL> [--name "DSH Host"]      # BLUE app straight to another Mac's DSH
+pnpm dock-app:remote <host[/path] | URL> [--name "DSH Host"]             # BLUE app straight to another Mac's DSH
 ```
 
 `dock-app:remote` builds a **direct-remote** app: the same wrapper, pointed at

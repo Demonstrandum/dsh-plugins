@@ -12,7 +12,7 @@
  *   pnpm dock-app:install [--name DSH] [--url https://node.ts.net/dsh/] [--fallback http://127.0.0.1:3083/]
  *                         [--token-file ~/.dsh/tailscale-remote.json] [--no-launch]
  *   pnpm dock-app:uninstall [--name DSH]
- *   pnpm dock-app:remote <[user@]host[/path] | URL> [--name "DSH Host"] [--glyph-color #0090FF] [--no-launch]
+ *   pnpm dock-app:remote <host[/path] | URL> [--name "DSH Host"] [--glyph-color #0090FF] [--no-launch]
  *                         a BLUE app that opens another Mac's DSH directly over the tailnet (no relay, no
  *                         fallback, no token; identity admission). Default name: DSH <Titlecased host>.
  *   … every command takes `--instance preview` to address a second (preview) DSH's relay/app.
@@ -141,7 +141,7 @@ async function main() {
       console.log(JSON.stringify(await dockAppStatus({ name: String(flags.name ?? 'DSH'), url: typeof flags.url === 'string' ? flags.url : '' }), null, 2))
       return
     default:
-      console.error('usage: cli.mjs relay:install|relay:uninstall|relay:status|dock-app:build|dock-app:install|dock-app:remote <target>|dock-app:uninstall|dock-app:status [flags]')
+      console.error('usage: cli.mjs relay:install|relay:uninstall|relay:status|dock-app:build|dock-app:install|dock-app:remote <host[/path]>|dock-app:uninstall|dock-app:status [flags]')
       process.exit(2)
   }
 }

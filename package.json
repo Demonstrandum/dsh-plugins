@@ -1,7 +1,7 @@
 {
   "name": "tali-dash-plugins",
   "private": true,
-  "description": "the maintainer's DSH plugins, recipes and deployment tooling. Scripts: bootstrap (fresh-machine installer, tools/bootstrap-mac.sh); bootstrap-remote user@host [flags] (same, over ssh; --replace redeploys a deploy-remote host); remote-app <[user@]host[/path]> [--name N] (blue Dock app straight to a remote DSH); install-plugins / remove-plugins [--profile web] (all live plugins as bundles); deploy-remote [user@host] [--no-build] [--credentials] [--port=N]; remote-logs / remote-status / remote-restart [user@host].",
+  "description": "the maintainer's DSH plugins, recipes and deployment tooling. Scripts: bootstrap (fresh-machine installer, tools/bootstrap-mac.sh); bootstrap-remote user@host [flags] (same, over ssh; --replace redeploys a deploy-remote host); remote-app <host[/path]> [--name N] (blue Dock app straight to a remote DSH); install-plugins / remove-plugins [--profile web] (all live plugins as bundles); deploy-remote [user@host] [--no-build] [--credentials] [--port=N]; remote-logs / remote-status / remote-restart [user@host].",
   "scripts": {
     "bootstrap": "tools/bootstrap-mac.sh",
     "bootstrap-remote": "tools/bootstrap-remote.sh",
