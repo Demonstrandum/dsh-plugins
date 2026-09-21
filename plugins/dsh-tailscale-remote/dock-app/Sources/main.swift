@@ -371,12 +371,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         showOffline(reason: nsError.localizedDescription)
     }
 
+    /// Secondary windows opened by the page (window.open / target=_blank on an in-scope URL, e.g. a
+    /// <private>_show image at full size). Each is its own WKWebView sharing this app's data store
+    /// (cookies), so the request is admitted like the main page. Kept alive here; removed on close.
+    private var popups: [NSWindow] = []
+
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        // window.open / target=_blank: in-scope pages open in this window, anything else in the browser.
-        if let url = navigationAction.request.url {
-            if scope.contains(url) { webView.load(URLRequest(url: url)) } else { NSWorkspace.shared.open(url) }
+        guard let url = navigationAction.request.url else { return nil }
+        // Out of scope → the default browser, as before.
+        guard scope.contains(url) else { NSWorkspace.shared.open(url); return nil }
+        // In scope → a real second window. (Until 2026-09-22 this loaded the URL into the MAIN
+        // window: clicking a <private>_show image replaced the whole GUI with the bare image, and
+        // the red button then closed the app's only window.) WebKit requires the returned view to
+        // be created with the configuration it hands us.
+        let popup = WKWebView(frame: .zero, configuration: configuration)
+        popup.navigationDelegate = self
+        popup.uiDelegate = self
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 720),
+                         styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                         backing: .buffered, defer: false)
+        w.title = url.lastPathComponent.isEmpty ? config.name : url.lastPathComponent
+        w.contentView = popup
+        w.isReleasedWhenClosed = false
+        w.tabbingMode = .disallowed
+        w.center()
+        if let main = window { w.setFrameOrigin(NSPoint(x: main.frame.midX - 480, y: main.frame.midY - 360)) }
+        popups.append(w)
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { [weak self] _ in
+            self?.popups.removeAll { $0 === w }
         }
-        return nil
+        w.makeKeyAndOrderFront(nil)
+        return popup
+    }
+
+    /// `window.close()` from a popup page.
+    func webViewDidClose(_ webView: WKWebView) {
+        if let w = popups.first(where: { $0.contentView === webView }) { w.close() }
     }
 
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
