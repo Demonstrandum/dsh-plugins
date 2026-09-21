@@ -193,5 +193,8 @@ so pick 3090+ and stop the server when done.
   hot-swaps the browser without a refresh, and the graph row's `rev` flips
   from a process nonce to a content hash once a rebuild was observed. Host
   modules (`index.js` etc.) are NOT hot-reloaded — restart the instance.
+  Rebuilding a bundle that the **live** server serves swaps it in every open
+  GUI and kills any pending `ask_user_question`/approval prompt there
+  (`NO_PROVIDER`) — see `recipes/client-bundle-rebuild-kills-pending-prompts.md`.
 - **Disposable.** A `/tmp` home evaporates on reboot; treat everything in it
   (sessions, keys copied there) as throwaway state. `~/.dsh-preview` persists.

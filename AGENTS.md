@@ -310,6 +310,13 @@ can reproduce or maintain it:
 - `apple-foundation-model-provider.md` — local models as DSH providers
   (LM Studio + Apple Foundation via AFM), the pi-ai token-budget trap,
   minimal presets, and the `enforce-model-preset` plugin.
+- `bootstrap-mac-installer.md` — `tools/bootstrap-mac.sh`, the one-command
+  fresh-machine installer (INSTALLING.md Part A + C1–C5 as fourteen idempotent
+  steps: CLT, Homebrew, node/pnpm/git, the four app casks, clone, fork +
+  plugin builds, `~/.dsh`, bundles, afm + Apple provider, Tailscale-login
+  wait → relay → route → Dock app); why a `.pkg` is the wrong container, the
+  headless facts it relies on, the macOS-VM landscape (Virtualization.framework
+  vs UTM / Tart / VirtualBuddy) and the pending clean-VM test plan on the remote.
 - `browser-automation-plugin.md` — per-chat Safari Technology Preview /
   Chrome windows and the isolated page reader (`browser-automation` plugin):
   why a plugin and not MCP config, the STP `--mcp` facts that shape it, the
@@ -317,6 +324,14 @@ can reproduce or maintain it:
   silent ≥ 2 MB screenshot spill-to-disk), and the failure-reporting layer
   (`explainFailure` / `FAILURE_HINTS`) every `safari_*`/`chrome_*` error
   passes through.
+- `client-bundle-rebuild-kills-pending-prompts.md` — `ask_user_question`
+  fails with `NO_PROVIDER` ("no user-questions answerer accepted the
+  request") seconds after a live-profile client bundle is rebuilt: the HMR
+  swap tears down every plugin injecting `sessions`, `ui-user-questions`
+  delegates the pending prompt, and the gateway reads a last-client `next`
+  as "nobody can answer". Same for approvals. Not a rebase regression; no
+  fork fix by decision (drafted handover-across-reload approach recorded);
+  just re-ask, and rebuild in the preview server instead.
 - `cloudflare-remote-control.md` — phone remote control via dsh-full-remote
   behind cloudflared: install + profile patch, the 反向代理 locale bug and its
   root cause, the `taliesinb/dsh-full-remote` fork (`~/github/dsh-full-remote`,
