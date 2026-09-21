@@ -225,7 +225,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if (message.body as? String) == "retry" { connect(); return }
         guard let body = message.body as? [String: Any], body["type"] as? String == "open-panel" else { return }
         var directory: URL?
-        if let raw = body["directory"] as? String, !raw.isEmpty {
+        // `file` wins when it exists: NSOpenPanel opens the containing folder with
+        // that file selected when directoryURL names a file (long-standing AppKit
+        // behaviour, not documented — hence the directory fallback).
+        if let raw = body["file"] as? String, !raw.isEmpty {
+            let expanded = NSString(string: raw).expandingTildeInPath
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir), !isDir.boolValue { directory = URL(fileURLWithPath: expanded) }
+        }
+        if directory == nil, let raw = body["directory"] as? String, !raw.isEmpty {
             let expanded = NSString(string: raw).expandingTildeInPath
             var isDir: ObjCBool = false
             if FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir), isDir.boolValue { directory = URL(fileURLWithPath: expanded) }

@@ -67,7 +67,7 @@ const PI_AUTH_DIR = '~/.pi/agent'
 function hintDockAppPicker(): void {
   const handlers = (window as unknown as { webkit?: { messageHandlers?: { dshDock?: { postMessage(body: unknown): void } } } }).webkit?.messageHandlers
   try {
-    handlers?.dshDock?.postMessage({ type: 'open-panel', directory: PI_AUTH_DIR, message: "Choose an API-key file — pi's auth.json, a JSON key map, or a .env file", showsHiddenFiles: true })
+    handlers?.dshDock?.postMessage({ type: 'open-panel', file: `${PI_AUTH_DIR}/auth.json`, directory: PI_AUTH_DIR, message: "Choose an API-key file — pi's auth.json, a JSON key map, or a .env file", showsHiddenFiles: true })
   } catch { /* not the Dock app */ }
 }
 
