@@ -144,6 +144,14 @@ no ghost; switching away shows the dimmed ghost; clicking it reopens the
 session with the draft intact, no errors. Lesson: **`pnpm typecheck` every
 client plugin after a DSH rebase** — the bundle builds regardless.
 
+**How it went live (unplanned but correct):** adding the ui-workspace
+`link:` devDependency needed `pnpm install` in the real plugin directory,
+and the package's `prepare` script (`node build.mjs`) rebuilt `lib/client.js`
+from the fixed source; the live server's HMR watcher hot-swapped it at once
+(the graph row's `rev` flipped to a content hash). Fixed bundle live since
+2026-09-21 15:55; the open GUI page had the new module without a reload.
+Trap recorded in PREVIEWING.md tier 2.
+
 ## Status
 
 - Built, typechecked, unit-tested; verified end to end on the isolated

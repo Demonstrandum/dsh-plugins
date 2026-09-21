@@ -13,7 +13,13 @@
 >    profiles default to `patchReload: 'startup'`.)
 > 2. **Hot for the browser:** the client-bundle HMR watcher is always mounted;
 >    rebuilding the `lib/client.js` of a plugin that is installed in the live
->    profile hot-swaps it into the user's open GUI immediately.
+>    profile hot-swaps it into the user's open GUI immediately. **`pnpm
+>    install` in such a plugin counts as a rebuild**: every client plugin's
+>    `prepare` script is `node build.mjs` (measured 2026-09-21 — adding a
+>    devDependency to session-title-slug shipped its fixed bundle live
+>    unasked). To edit source without shipping it, work in a copy of the
+>    plugin under `/tmp` (see `recipes/session-title-slug-plugin.md`
+>    §Post-rebase breakage) or add the dependency with `pnpm add --ignore-scripts`.
 > 3. **Boot-time:** `dsh plugin add`/`remove` rewrites the profile manifest
 >    and node_modules — composed at next launch, not live, but it still
 >    changes what the user's DSH runs from then on (and the install itself
