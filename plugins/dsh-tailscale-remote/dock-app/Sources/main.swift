@@ -35,6 +35,12 @@
 //     rules on beside their `max-width` media query — and resizes the window
 //     to iPhone content size (390×844) so the media queries fire for real.
 //     Desktop clears the attribute and restores the remembered frame;
+//   - <App> ▸ Settings… (⌘,) toggles the GUI's Settings panel. Safari swallows
+//     ⌘, before the page sees it (why the tali-settings-shortcut plugin ships
+//     ⌘.), but this wrapper owns its menu bar, so the standard macOS chord
+//     can reach the page: the action hands the plugin its ⌘. chord as a
+//     synthetic keydown and, when no plugin claims it, clicks the sidebar's
+//     Settings trigger / the panel's close button itself (same selectors);
 //   - persistent data store, standard menu bar (⌘R reload, zoom, full screen,
 //     "Open in Browser"), remembered window frame, Web Inspector enabled
 //     (Safari ▸ Develop ▸ <this Mac> ▸ DSH), downloads into ~/Downloads.
@@ -716,6 +722,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     // MARK: menu
 
+    /// Toggle the GUI's Settings panel from the page side. Two layers:
+    ///  1. the tali-settings-shortcut plugin, when loaded, owns the toggle — dispatch its ⌘. chord as a
+    ///     synthetic `keydown` on `window` (its capture listener `preventDefault`s → dispatchEvent returns false);
+    ///  2. otherwise click the sidebar's Settings trigger, or the open panel's close button (the shell keeps
+    ///     the open state as component-local React state; the DOM is the only seam — same selectors as the
+    ///     plugin, `[hash]_[local]` CSS-module classes make the `_suffix` stable across rebuilds).
+    static let toggleSettingsScript = """
+    (() => {
+      const chord = new KeyboardEvent('keydown', { key: '.', code: 'Period', metaKey: true, bubbles: true, cancelable: true });
+      if (!window.dispatchEvent(chord)) return 'plugin';
+      const trigger = document.querySelector('[class$="_settingsArea"] button[aria-haspopup="dialog"]')
+        || document.querySelector('button[aria-haspopup="dialog"][class*="_trigger"]');
+      if (!trigger) return 'no-trigger';
+      if (trigger.getAttribute('aria-expanded') === 'true') {
+        const close = document.querySelector('[role="dialog"][class$="_panel"] button[class$="_close"]');
+        if (!close) return 'no-close';
+        close.click();
+        return 'closed';
+      }
+      trigger.click();
+      return 'opened';
+    })()
+    """
+
+    @objc func openSettings() {
+        if showingOfflinePage { NSSound.beep(); return }
+        window.makeKeyAndOrderFront(nil)
+        webView.evaluateJavaScript(AppDelegate.toggleSettingsScript) { [weak self] result, error in
+            let outcome = (result as? String) ?? (error.map { "error: \($0.localizedDescription)" } ?? "unknown")
+            self?.appendLog("settings: \(outcome)")
+            if outcome == "no-trigger" || outcome == "no-close" { NSSound.beep() }
+        }
+    }
+
     @objc func reload() { if showingOfflinePage { connect() } else { webView.reloadFromOrigin() } }
     @objc func openInBrowser() { NSWorkspace.shared.open(webView.url.flatMap { scope.contains($0) ? $0 : nil } ?? remoteURL) }
     @objc func copyURL() {
@@ -739,6 +779,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         main.addItem(appItem)
         let app = NSMenu()
         app.addItem(withTitle: "About \(config.name)", action: #selector(showAbout), keyEquivalent: "")
+        app.addItem(.separator())
+        // The standard macOS chord. Safari cannot give ⌘, to a page (it is Safari's own Settings…);
+        // here the menu bar is ours, so it drives the GUI's Settings panel instead.
+        app.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         app.addItem(.separator())
         app.addItem(withTitle: "Hide \(config.name)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let hideOthers = app.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")

@@ -388,7 +388,9 @@ can reproduce or maintain it:
   GUI-scripting Safari (TCC/cdhash), the relay's "answer first, start DSH,
   self-reloading splash" trick, the proxy's Host/Origin fence and
   `ownsHost` injection, the live rollout order while the old host code still
-  ran, and the Dock-plist `<data>` trap.
+  ran, and the Dock-plist `<data>` trap. The wrapper's menu bar also carries
+  **Settings… (⌘,)**, impossible in Safari — see
+  `settings-keyboard-shortcut-plugin.md`.
 - `fs-tools-plugin.md` — batch filesystem tools beside the built-ins
   (`fs-tools` plugin: `list_dir` with directories, `read_many` that emits
   `fs/observed`, `edit_many` validated-before-write across files, `search` =
@@ -528,7 +530,11 @@ can reproduce or maintain it:
   panel (`settings-shortcut` plugin): why ⌘, is impossible in Safari (the
   app consumes it before the page), the component-local open state that
   forces DOM clicks on `[hash]_[local]` class selectors, and how to test a
-  chord with a real System Events keystroke instead of a synthetic one.
+  chord with a real System Events keystroke instead of a synthetic one —
+  plus (2026-09-22) ⌘, in the WKWebView Dock apps: a real Settings… menu
+  item whose action feeds the plugin its ⌘. chord synthetically, with the
+  DOM-click fallback for servers without the plugin, tested by PID-posted
+  `CGEvent`s.
 - `stuck-loading-history-on-session-switch.md` — "Loading history…" forever
   when switching to a mid-turn session in the Dock app: root cause is
   `dsh-util-values` comparing `Function.prototype.toString(Object)` to V8's

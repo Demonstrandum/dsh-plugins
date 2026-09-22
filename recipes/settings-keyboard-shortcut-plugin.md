@@ -30,6 +30,23 @@ If literal ⌘, in Safari is ever wanted, the only route is a system-level
 remap (Karabiner / BetterTouchTool rule scoped to Safari / the "Web App"
 process) mapping ⌘, → ⌘. — outside DSH.
 
+**Except in the Dock apps (2026-09-22).** The native WKWebView wrapper
+(`plugins/dsh-tailscale-remote/dock-app/Sources/main.swift`,
+`recipes/dock-app-via-tailnet.md`) owns its menu bar, so it has a real
+**<App> ▸ Settings… (⌘,)** item. Its action runs a script in the page that
+first dispatches this plugin's ⌘. chord as a synthetic `keydown` on
+`window` — the capture listener below claims it (`preventDefault` →
+`dispatchEvent` returns false; the plugin does not check `isTrusted`) — and
+only if nothing claims it clicks the same trigger/close selectors itself, so
+remote instances without the plugin work too. Outcome in
+`~/Library/Logs/DSH Dock/<app>.log` (`settings: plugin|opened|closed|no-trigger|no-close`).
+A wrapper change reaches an app only through a reinstall (see "Rebuilding
+the three Dock apps" in `recipes/instance-identity.md`). Test it with a real
+keystroke posted **by PID** (`CGEvent.postToPid`, virtual key 43 = comma;
+never System Events, which resolves every "DSH" process to the live app):
+DSH Preview open→close→open→close on 2026-09-22. So: ⌘, in the Dock apps,
+⌘. everywhere (both work in the Dock apps).
+
 ### 2. DSH has no shortcut system and no "open settings" API
 
 - The client has no keybinding registry; the only `metaKey` handling in
@@ -135,7 +152,7 @@ console for `[settings-shortcut] ⌘. toggles Settings`.
 
 | Symptom | Cause / fix |
 |---|---|
-| ⌘, opens the browser's/web app's settings | Expected in Safari; unfixable from web code. Use ⌘. or a system-level remap. |
+| ⌘, opens the browser's/web app's settings | Expected in Safari; unfixable from web code. Use ⌘. or a system-level remap. In the Dock apps ⌘, is the wrapper's own Settings… menu item (above); if it does nothing there, the app predates 2026-09-22 — reinstall it. |
 | Console: `[settings-shortcut] no-trigger` | Shell markup changed (sidebar `_settingsArea` wrapper or trigger `aria-haspopup`). Update selectors in `src/client/index.ts` after reading `ui-sidebar/SidebarRoot.tsx` + `ui-settings-general/SettingsRoot.tsx`. |
 | Console: `no-close` | Panel close button class changed (`_close` inside `[role=dialog]._panel`). |
 | Chord does nothing right after a live install | The open page predates the row: reload the page once (see above). |

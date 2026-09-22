@@ -284,6 +284,21 @@ Headless test: `dock-app/Tools/ax-drive.swift` (PID-keyed Accessibility
 driver — System Events resolves same-named "DSH" processes to the live one;
 see `recipes/phone-ui.md`).
 
+**<App> ▸ Settings… (⌘,) (2026-09-22).** The standard macOS chord toggles
+the GUI's Settings panel. Safari swallows ⌘, before any page sees it (why
+`tali-settings-shortcut` ships ⌘. — `recipes/settings-keyboard-shortcut-plugin.md`),
+but this wrapper owns its menu bar, so a real menu item carries the key
+equivalent and its action drives the page: `evaluateJavaScript` dispatches
+the plugin's ⌘. chord as a synthetic `keydown` on `window` (the plugin's
+capture listener `preventDefault`s it → `dispatchEvent` returns false → done,
+logged `settings: plugin`); when no plugin claims it, the same script clicks
+the sidebar's Settings trigger / the open panel's close button itself (the
+plugin's selectors; `settings: opened|closed`), so an instance whose server
+lacks the plugin (a remote Mac) works too. `no-trigger`/`no-close` (shell
+markup changed) beeps and logs. Verified with real ⌘, keystrokes posted by
+PID (`CGEvent.postToPid`, virtual key 43) to DSH Preview (fallback path) and
+the script against the live GUI (plugin path), 2026-09-22.
+
 **Identity (2026-09-21).** The wrapper carries its own name and icon colour
 into the page: a document-start script sets `globalThis.__DSH_DOCK__ =
 { name, glyphColor }` and appends a `<style>` (all rules `!important`) that

@@ -20,6 +20,13 @@ hit the same wall for vscode.dev
 and `preventDefault` suppresses the browser's own equivalent (Safari's
 View ▸ Stop).
 
+In the native **Dock apps** (`dsh-tailscale-remote/dock-app`) ⌘, works as
+well: the wrapper owns its menu bar and has a Settings… (⌘,) item whose
+action dispatches this plugin's ⌘. chord as a synthetic `keydown` on
+`window` (falling back to the same DOM clicks when the plugin is absent). The
+listener below therefore must keep accepting untrusted events — do not add an
+`isTrusted` check.
+
 ## How it works
 
 Browser-only plugin; `index.js` (host half) just logs.
