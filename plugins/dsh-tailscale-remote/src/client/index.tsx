@@ -199,6 +199,61 @@ export function apply(ctx: Context): void {
     ]
     return () => { for (const dispose of disposers) dispose() }
   })
+  ctx.effect(() => installDockLoopbackLinks(), 'tailscale-remote: loopback links leave the Dock app')
+}
+
+// ---- Loopback links inside the Dock app ------------------------------------
+
+/** Hosts that name a loopback service — on the DSH host, from the viewer's point of view. */
+export function isLoopbackHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase()
+  return host === 'localhost' || host === '127.0.0.1' || host.startsWith('127.') || host === '[::1]' || host === '::1'
+    || host === '0.0.0.0' || host.endsWith('.localhost')
+}
+
+/**
+ * Decide what a click on an anchor should do inside the Dock app: `window.open`
+ * the loopback URL (the wrapper forwards the port and opens the default
+ * browser), or leave the click alone.
+ * @param anchorHref - the anchor's resolved href
+ * @param pageOrigin - `location.origin` of the GUI
+ * @param modified - non-primary button or any modifier key (those already take the native path)
+ */
+export function dockLoopbackTarget(anchorHref: string, pageOrigin: string, modified: boolean): string | undefined {
+  if (modified) return undefined
+  let url: URL
+  try { url = new URL(anchorHref) } catch { return undefined }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined
+  if (url.origin === pageOrigin) return undefined
+  return isLoopbackHostname(url.hostname) ? url.href : undefined
+}
+
+/**
+ * Inside the Dock app (`globalThis.__DSH_DOCK__`, set by the wrapper at document
+ * start) a plain click on a loopback link must not land in the right-Sidebar
+ * Browser: that pane is an `http://127.0.0.1` iframe inside an `https` page and
+ * WKWebView blocks it as mixed content (measured 2026-09-23 — the port was
+ * forwarded, the pane stayed blank, ⌘-click worked). So the click is taken
+ * before Chat's handler (capture phase on `document`, propagation stopped so
+ * React's root listener never sees it) and turned into `window.open`, which the
+ * wrapper's `createWebViewWith` turns into forward-then-Safari — exactly the
+ * ⌘-click path. Outside the Dock app this installs nothing.
+ */
+export function installDockLoopbackLinks(): () => void {
+  if (typeof document === 'undefined' || (globalThis as { __DSH_DOCK__?: unknown }).__DSH_DOCK__ === undefined) return () => {}
+  const onClick = (event: MouseEvent) => {
+    if (event.defaultPrevented) return
+    const anchor = (event.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null
+    if (anchor === null || anchor === undefined || anchor.hasAttribute('download')) return
+    const modified = event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
+    const target = dockLoopbackTarget(anchor.href, location.origin, modified)
+    if (target === undefined) return
+    event.preventDefault()
+    event.stopPropagation()
+    window.open(target, '_blank', 'noopener,noreferrer')
+  }
+  document.addEventListener('click', onClick, true)
+  return () => document.removeEventListener('click', onClick, true)
 }
 
 // ---- Server pane ---------------------------------------------------------

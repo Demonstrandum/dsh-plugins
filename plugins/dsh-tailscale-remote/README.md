@@ -308,11 +308,12 @@ Dock app                                                       dsh-tailscale-rem
   Listeners live until quit, View ▸ Forwarded Ports ▸ Close, or an idle hour.
 - **Where the app intercepts (`main.swift`).** `decidePolicyFor
   navigationAction` (fires for **subframes** too — the GUI's Sidebar Browser
-  iframe) and `createWebViewWith` (target=_blank, `window.open`, the Browser
-  tab's "Open in system browser"): a loopback URL outside the app's own entry
-  points → `forwardLoopback` → then the iframe is allowed to load (same port)
-  or the URL goes to the default browser (top-level / popup / substitute
-  port). A `reserved` refusal means "the remote DSH itself": the link is
+  iframe, kept as a fallback although WKWebView then blocks the mixed-content
+  load) and `createWebViewWith` (target=_blank, `window.open`, the Browser
+  tab's "Open in system browser", and — via the browser half — every plain
+  click on a loopback link): a loopback URL outside the app's own entry
+  points → `forwardLoopback` → the URL goes to the default browser (or the
+  iframe is allowed to proceed for the subframe path). A `reserved` refusal means "the remote DSH itself": the link is
   mapped onto the app's mount (`$DSH_WEB_URL/…` → `https://node/dsh/user/…`)
   and loaded in the app. Other refusals show one sheet per port per 30 s and
   are logged to `~/Library/Logs/DSH Dock/<app>.log`.
@@ -325,14 +326,20 @@ real route: refusal codes reach Swift, the listener binds (on a substitute
 port here, since the echo target is on the same Mac), 3 MiB round-trips in
 order, target close propagates. Needs swiftc.
 
-**Not yet measured (2026-09-23).** (a) WKWebView mixed content: does an
-`http://127.0.0.1:N` iframe load inside the `https://…/dsh/` page? WebKit
-treats loopback as potentially trustworthy, so it should; if not, the Sidebar
-Browser's "Open in system browser" path still works. (b) The full chain
-through Serve + proxy on a real remote (the proxy's upgrade passthrough is
-tested against a fake DSH; `/api/remote.mux` uses the same path in
-production). (c) `lsof -F` output on the remote's macOS version — the parser
-accepts the documented field letters.
+**Measured on the real remote (2026-09-23).** The chain through Serve + proxy
+works for every server shape tried (IPv4-only, **IPv6-only** — the guard reads
+the `[::1]` binding from `lsof` and connects there — wildcard, Vite + HMR, a
+hand-rolled WebSocket page, an 8 s slow reply, a 20 MB download); `lsof -F`
+on the remote's macOS matches the parser. **WKWebView blocks the
+`http://127.0.0.1:N` iframe inside the `https://…/dsh/` page as mixed content**:
+the port was forwarded (View ▸ Forwarded Ports listed it) but the Sidebar
+Browser pane stayed blank, while ⌘-click → Safari worked through the same
+tunnel. Hence the browser half now takes plain clicks on loopback links
+**before** Chat does when `__DSH_DOCK__` is present (capture-phase `click` on
+`document`, propagation stopped, `window.open`) so they follow the ⌘-click
+path and no blank pane is created (`installDockLoopbackLinks` in
+`src/client/index.tsx`). The first probe on a port also surfaced a proxy bug:
+refused upgrades lost their `X-Dsh-Forward-Error` header (fixed, relayed now).
 
 ## The relay (`relay/`)
 

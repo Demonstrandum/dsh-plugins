@@ -213,15 +213,30 @@ Things that only a real run found:
 | multi-file `swiftc` build: "statements are not allowed at the top level" | only `main.swift` may hold top-level code; the smoke harness is staged under that name (`scripts/forward-smoke.mjs`); `dock-app.mjs` now compiles every `Sources/*.swift` |
 | smoke test forwarded on a substitute port | expected on one Mac: the echo target already holds the port locally — the `EADDRINUSE → free port` path is what got exercised |
 
-Verified: `pnpm check` (64 tests incl. real `lsof` and the route end to end
+Verified: `pnpm check` (65 tests incl. real `lsof` and the route end to end
 with Node's `WebSocket`), `pnpm forward:smoke` (Swift ↔ Node: refusal codes,
-bind, 3 MiB in order, close propagation). **Not yet measured:** WKWebView
-mixed content for an `http://127.0.0.1` iframe inside the HTTPS page; the
-chain through Serve + proxy on a real remote; the Dock app was **built, not
-installed** (`pnpm dock-app:build`) — install with the existing spec when
-ready (`pnpm dock-app:install …` / `pnpm remote-app …`). The host route ships
-with the next restart of any instance that has the plugin linked; it adds a
-route and nothing else, `loopbackForward: off` disables it.
+bind, 3 MiB in order, close propagation), and then **the real thing**:
+deployed to one instance on the shared remote machine (`extras/bin/sync-host
+<host> --restart --only <user>`), the Dock app rebuilt with `pnpm remote-app
+<host>/dsh/<user> --name …`, and an agent in that instance asked to start six
+servers (IPv4-only, IPv6-only, wildcard, Vite + HMR, hand-rolled WebSocket
+echo, 8 s slow reply) and post the links in varied Markdown forms. Every link
+forwarded (View ▸ Forwarded Ports listed the port; ⌘-click → Safari loaded
+through the tunnel, HMR and WebSocket included). Two findings only a real run
+gave: (1) **WKWebView blocks the `http://127.0.0.1` iframe inside the HTTPS
+page as mixed content** — the Sidebar Browser pane stays blank — so the
+plugin's browser half now takes plain clicks on loopback links before Chat
+does (capture-phase listener, `window.open`) whenever `__DSH_DOCK__` is
+present; no blank pane, same path as ⌘-click. (2) The proxy answered refused
+upgrades with its own bare head, losing `X-Dsh-Forward-Error`; it relays
+DSH's headers now. Also noticed: a bare `http://[::1]:8002/` is not
+linkified by GFM (IPv6 literal), the Markdown-link form of it is.
+
+Operational notes: the host route ships with the next restart of any
+instance that has the plugin linked (`loopbackForward: off` disables it); the
+browser half hot-swaps on the next `sync-host` build without a restart. The
+remote agent's sandbox refused `~/.npm`, so Vite needed `npm_config_cache`
+under its work dir; `ps` is blocked there while `lsof` is not.
 
 ## Troubleshooting (symptoms this audit explains)
 
