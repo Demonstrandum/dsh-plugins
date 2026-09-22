@@ -28,7 +28,7 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { renderSVG } from 'uqr'
-import { Checkbox, Tooltip, useDismissOnOutsidePointer, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Tooltip, useDismissOnOutsidePointer, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only (erased at build): the `conversation.session.header.utilities` slot declaration.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -135,6 +135,9 @@ const styles = {
   caption: { fontSize: 11.5, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)' } as CSSProperties,
   qrWrap: { alignSelf: 'center', width: 208, height: 208, padding: 8, boxSizing: 'border-box', borderRadius: 12, background: '#fff', border: '0.5px solid var(--dsw-alias-border-l4)', cursor: 'copy' } as CSSProperties,
   row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 22 } as CSSProperties,
+  // The primitives' Checkbox pins its label at 14px; this one matches the title.
+  check: (disabled: boolean): CSSProperties => ({ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, lineHeight: '18px', color: 'var(--dsw-alias-label-primary)', cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1 }),
+  checkInput: { flex: '0 0 auto', width: 14, height: 14, margin: 0, accentColor: 'var(--dsw-alias-brand-primary)', cursor: 'inherit' } as CSSProperties,
   error: { color: 'var(--dsw-alias-state-error-primary)' } as CSSProperties,
 }
 
@@ -235,15 +238,21 @@ export function SessionQrAction({ sessionId, api, documentBase }: SessionQrActio
                     />
                   )}
               <div style={styles.row}>
-                <Checkbox
-                  checked={token === undefined ? true : onlyMe}
-                  onChange={setOnlyMe}
-                  disabled={token === undefined}
-                  label="Only you"
+                <label
+                  style={styles.check(token === undefined)}
                   title={token === undefined
                     ? 'The link relies on the device’s Tailscale login (the access token is readable from the DSH host only).'
                     : 'Ticked: only a device whose Tailscale login is on the allow list can open the link. Unticked: the access token rides along, and any device that scans is let in — with the same full access as the Settings QR code.'}
-                />
+                >
+                  <input
+                    type="checkbox"
+                    style={styles.checkInput}
+                    checked={token === undefined ? true : onlyMe}
+                    disabled={token === undefined}
+                    onChange={(event) => { setOnlyMe(event.target.checked) }}
+                  />
+                  <span>Only you</span>
+                </label>
                 <span style={{ ...styles.caption, visibility: copied ? 'visible' : 'hidden' }} aria-live="polite">Link copied</span>
               </div>
             </>
