@@ -33,6 +33,11 @@
  *                   Default true.
  *   halfRadius      halve the corner radius of code blocks (12→6px) and of
  *                   the user's own message bubbles (22→11px). Default true.
+ *   compactBlocks   less padding inside the transcript's boxed blocks: code
+ *                   blocks 16 → 8/10px, tool-card IN/OUT sections and
+ *                   command-card bodies 12/16 → 8/10px, context-injection
+ *                   bodies, table cells 10/16 → 6/10px, blockquote indent
+ *                   14 → 8px, user bubbles 10/16 → 8/12px. Default true.
  *
  * HOW. One `<style>` row through the webserver's structured
  * `webserver/index-inject` table, no client bundle (the sibling
@@ -97,6 +102,7 @@ export const MAX_SIDE_MARGIN = 64
  * @property {boolean} codeHeaders - hide the code-block banner row (language + Copy).
  * @property {boolean} halfRadius - halve the corner radius of code blocks (12→6)
  *   and user bubbles (22→11).
+ * @property {boolean} compactBlocks - less padding inside boxed blocks.
  */
 
 /**
@@ -126,6 +132,7 @@ export function normalizeConfig(raw) {
     sideMargin: int('sideMargin', DEFAULT_SIDE_MARGIN, 0, MAX_SIDE_MARGIN),
     codeHeaders: flag('codeHeaders'),
     halfRadius: flag('halfRadius'),
+    compactBlocks: flag('compactBlocks'),
   }
 }
 
@@ -153,6 +160,30 @@ export const MOBILE_FLAG_SELECTOR = 'html[data-dsh-view="mobile"]'
 /** The user/steering bubble inside `userRow > userStack` (attachments row excluded). */
 export const USER_BUBBLE_SELECTOR =
   ':is([data-chat-flow-kind="user"],[data-chat-flow-kind="steering"]) > [data-slot="conversation.chat.node"] > div > div:first-child > div:not([data-message-attachments])'
+
+/**
+ * Padding overrides for the boxed blocks inside the transcript, as
+ * [selector, declarations]. Hooks are unhashed attributes where the client
+ * has them; the two `[class*="_…"]` fallbacks name CSS-module locals the
+ * way instance-identity does (`<hash>_<local>`), scoped under an attribute
+ * so they cannot match outside their card.
+ */
+export const COMPACT_BLOCK_RULES = Object.freeze([
+  // ui-primitives CodeBlock: `.block :where(pre){padding:16px}`.
+  ['[data-chat-flow] .md-code-block pre', 'padding:8px 10px'],
+  // ui-chat ContextInjectionRow `.body` (System prompt / injected context): 10 16 12 12.
+  ['[data-chat-flow] [data-context-injection-body]', 'padding:6px 10px 8px 8px'],
+  // ui-tool ToolRow / bash-sample `.ioSection` (the IN / OUT grid of a tool card): 12 16.
+  ['[data-chat-flow] [data-tool] [class*="_ioSection"]', 'padding:8px 10px'],
+  // ui-chat GenericCommandCard `pre.body` (slash-command output): 12 16.
+  ['[data-chat-flow] [data-variant="others"] pre[class*="_body"]', 'padding:8px 10px'],
+  // Markdown tables (`.tableScroll th/td`): 10 16.
+  ['[data-chat-flow] table :is(th,td)', 'padding:6px 10px'],
+  // Markdown blockquote: 14px indent beside the 2px bar.
+  ['[data-chat-flow] blockquote', 'padding-left:8px'],
+  // User bubble: 10 16.
+  [USER_BUBBLE_SELECTOR, 'padding:8px 12px'],
+])
 
 /**
  * The style row's text for a configuration.
@@ -184,6 +215,9 @@ export function phoneStyle(config) {
     rules.push({ selectors: ['[data-chat-flow] .md-code-block'], declarations: '--dsl-code-block-border-radius:6px' })
     rules.push({ selectors: [USER_BUBBLE_SELECTOR], declarations: 'border-radius:11px' })
   }
+  if (config.compactBlocks) {
+    for (const [selector, declarations] of COMPACT_BLOCK_RULES) rules.push({ selectors: [selector], declarations })
+  }
   if (rules.length === 0) return ''
   const render = (/** @type {string} */ prefix) =>
     rules.map(rule => `${rule.selectors.map(selector => prefix + selector).join(',')}{${rule.declarations}}`).join('')
@@ -205,7 +239,7 @@ export function apply(ctx, rawConfig) {
       table.push({ kind: 'style', text: `/* tali-phone-ui */\n${style}` })
     })
   }
-  const groups = /** @type {const} */ (['header', 'messageActions', 'stats', 'codeHeaders', 'halfRadius'])
+  const groups = /** @type {const} */ (['header', 'messageActions', 'stats', 'codeHeaders', 'halfRadius', 'compactBlocks'])
     .filter(group => config[group])
   if (config.sideMargin !== STOCK_SIDE_MARGIN) groups.push(`sideMargin ${config.sideMargin}px`)
   ctx.logger.info(`phone-ui: ≤${config.maxWidth}px → ${style === '' ? 'nothing (disabled)' : groups.join(', ')}`)

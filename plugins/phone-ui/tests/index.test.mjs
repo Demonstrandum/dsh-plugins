@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  DEFAULT_MAX_WIDTH, DEFAULT_SIDE_MARGIN, MAX_MAX_WIDTH, MAX_SIDE_MARGIN, MIN_MAX_WIDTH, MOBILE_FLAG_SELECTOR,
+  COMPACT_BLOCK_RULES, DEFAULT_MAX_WIDTH, DEFAULT_SIDE_MARGIN, MAX_MAX_WIDTH, MAX_SIDE_MARGIN, MIN_MAX_WIDTH, MOBILE_FLAG_SELECTOR,
   SELECTORS, STOCK_SIDE_MARGIN, USER_BUBBLE_SELECTOR, apply, normalizeConfig, phoneStyle,
 } from '../index.js'
 
@@ -22,7 +22,7 @@ function fakeContext() {
 
 const ALL_ON = {
   maxWidth: DEFAULT_MAX_WIDTH, header: true, messageActions: true, stats: true,
-  sideMargin: DEFAULT_SIDE_MARGIN, codeHeaders: true, halfRadius: true,
+  sideMargin: DEFAULT_SIDE_MARGIN, codeHeaders: true, halfRadius: true, compactBlocks: true,
 }
 
 test('defaults: 640px, every group on, 8px side margin', () => {
@@ -37,6 +37,13 @@ test('defaults: 640px, every group on, 8px side margin', () => {
   assert.match(css, /\.md-code-block pre\{border-top-left-radius/)
   assert.match(css, /\.md-code-block\{--dsl-code-block-border-radius:6px\}/)
   assert.ok(css.includes(`${USER_BUBBLE_SELECTOR}{border-radius:11px}`))
+  for (const [selector, declarations] of COMPACT_BLOCK_RULES) assert.ok(css.includes(`${selector}{${declarations}}`), selector)
+})
+
+test('compactBlocks off keeps the stock padding', () => {
+  const css = phoneStyle({ ...ALL_ON, compactBlocks: false })
+  assert.doesNotMatch(css, /padding:8px 10px|\[data-context-injection-body\]|_ioSection/)
+  assert.ok(css.includes(`${USER_BUBBLE_SELECTOR}{border-radius:11px}`), 'radius group untouched')
 })
 
 test('every rule is emitted twice: inside the media query and under the html[data-dsh-view="mobile"] flag', () => {
@@ -64,7 +71,7 @@ test('sideMargin: integer 0-64; the stock value emits no padding rules', () => {
     assert.throws(() => normalizeConfig({ sideMargin: bad }), /sideMargin must be an integer/, String(bad))
   }
   const css = phoneStyle({ ...ALL_ON, sideMargin: STOCK_SIDE_MARGIN })
-  assert.doesNotMatch(css, /side-clearance|padding-left/)
+  assert.doesNotMatch(css, /side-clearance|div:has\(> \[data-chat-flow\]\)/)
 })
 
 test('codeHeaders off keeps the banner and adds no pre radius; halfRadius off keeps 12px/22px', () => {
@@ -81,7 +88,7 @@ test('config: maxWidth integer 320-1200, flags boolean, everything else rejected
   for (const bad of [MIN_MAX_WIDTH - 1, MAX_MAX_WIDTH + 1, 400.5, '640', null, NaN]) {
     assert.throws(() => normalizeConfig({ maxWidth: bad }), /maxWidth must be an integer/, String(bad))
   }
-  for (const key of ['header', 'messageActions', 'stats', 'codeHeaders', 'halfRadius']) {
+  for (const key of ['header', 'messageActions', 'stats', 'codeHeaders', 'halfRadius', 'compactBlocks']) {
     assert.equal(normalizeConfig({ [key]: false })[key], false)
     assert.throws(() => normalizeConfig({ [key]: 'yes' }), new RegExp(`${key} must be a boolean`))
   }
@@ -103,12 +110,12 @@ test('apply pushes one style row into the index-inject table', () => {
   assert.equal(table[0].kind, 'style')
   assert.match(table[0].text, /^\/\* tali-phone-ui \*\//)
   assert.match(table[0].text, /max-width:480px/)
-  assert.match(logs[0], /≤480px → header, messageActions, stats, codeHeaders, halfRadius, sideMargin 8px/)
+  assert.match(logs[0], /≤480px → header, messageActions, stats, codeHeaders, halfRadius, compactBlocks, sideMargin 8px/)
 })
 
 test('all groups off disables the rule: no listener, no style', () => {
   const { ctx, listeners, logs } = fakeContext()
-  const off = { header: false, messageActions: false, stats: false, codeHeaders: false, halfRadius: false, sideMargin: STOCK_SIDE_MARGIN }
+  const off = { header: false, messageActions: false, stats: false, codeHeaders: false, halfRadius: false, compactBlocks: false, sideMargin: STOCK_SIDE_MARGIN }
   apply(ctx, off)
   assert.equal(phoneStyle(normalizeConfig(off)), '')
   assert.equal(listeners.has('webserver/index-inject'), false)

@@ -42,6 +42,7 @@ bubbles (22→11px) is halved.
 | `sideMargin` | `8` | transcript and composer-card side padding, CSS px, integer `0`–`64`. Stock is 32 (text) / 16 (card); `32` leaves both alone |
 | `codeHeaders` | `true` | hide the code-block banner row (language label + Copy) |
 | `halfRadius` | `true` | halve the corner radius of code blocks (12→6px) and user bubbles (22→11px) |
+| `compactBlocks` | `true` | less padding inside boxed blocks: code blocks 16→8/10px, tool-card IN/OUT sections and command-card bodies 12/16→8/10px, context-injection bodies, table cells 10/16→6/10px, blockquote indent 14→8px, user bubbles 10/16→8/12px |
 
 All flags `false` and `sideMargin: 32` disables the plugin (no style row).
 

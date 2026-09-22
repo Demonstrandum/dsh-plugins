@@ -19,6 +19,13 @@ phone), hide the message action row, hide the stats line. Second round
 32px): 8px side margins, no `python … Copy` banner row on fenced blocks
 (incl. language-less ones such as an "Output (example)" block), and half
 the corner rounding on code blocks and on the user's own message bubbles.
+Fourth round (iterating against the STP window at 390×844 on the embed
+URL from the QR code): less padding inside code and other boxed blocks —
+`compactBlocks`, see `COMPACT_BLOCK_RULES` in the plugin for the per-block
+hooks; two of them (`_ioSection`, GenericCommandCard's `_body`) fall back to
+`[class*="_local"]` scoped under `[data-tool]` / `[data-variant="others"]`
+because those cards carry no attribute of their own, and could not be seen
+on the preview (its sessions have no tool calls) — verify on the live app.
 Third round: a **View ▸ Desktop / Mobile** switch in the DSH Dock apps so
 the maintainer can trial the phone view on the Mac without a phone or a browser
 automation session.
