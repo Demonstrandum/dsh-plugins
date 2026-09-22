@@ -124,12 +124,14 @@ const styles = {
   buttonOpen: { background: 'var(--dsw-alias-interactive-bg-hover)' } as CSSProperties,
   panel: {
     position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 100, boxSizing: 'border-box',
-    width: 300, maxWidth: 'calc(100vw - 24px)', padding: 14, display: 'flex', flexDirection: 'column', gap: 10,
+    // Exactly the QR tile plus the padding: no side margins around the code.
+    width: 208 + 2 * 14, maxWidth: 'calc(100vw - 24px)', padding: 14, display: 'flex', flexDirection: 'column', gap: 10,
     borderRadius: 16, background: 'var(--dsw-specific-menu, var(--dsw-alias-bg-module-platform))',
     border: '0.5px solid var(--dsw-alias-border-l3, var(--dsw-alias-border-l4))', boxShadow: '0 8px 28px rgba(0,0,0,0.28)',
     color: 'var(--dsw-alias-label-primary)', fontSize: 12, lineHeight: '18px', textAlign: 'left', cursor: 'default',
   } as CSSProperties,
-  title: { fontSize: 13, lineHeight: '20px', fontWeight: 500 } as CSSProperties,
+  // Bold, but sized so the title fits the 208px tile on one line.
+  title: { fontSize: 12.5, lineHeight: '18px', fontWeight: 600, whiteSpace: 'nowrap' } as CSSProperties,
   caption: { fontSize: 11.5, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)' } as CSSProperties,
   qrWrap: { alignSelf: 'center', width: 208, height: 208, padding: 8, boxSizing: 'border-box', borderRadius: 12, background: '#fff', border: '0.5px solid var(--dsw-alias-border-l4)', cursor: 'copy' } as CSSProperties,
   row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 22 } as CSSProperties,
