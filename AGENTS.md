@@ -401,6 +401,15 @@ can reproduce or maintain it:
   (and their project memory) into DSH sessions: why Supacode keeps no
   transcripts, the session-log frame contract, the converter tool in
   `tools/`, and the installed `dsh-import-agents` plugin alternative.
+- `inline-links-remote-audit.md` — audit (no code) of what the client
+  auto-links in agent output (GFM allowlist, inline-code URLs, `#L` file
+  links, produced-file mentions, `WebBlock`) and what a click does, then what
+  becomes of `127.0.0.1`/`localhost` links from a DSH Remote session viewed in
+  the Dock app and from a `dsh-remote-workspaces` hybrid frame: loopback is
+  always the *client's*, `localWebUrl` hard-codes the server's, the Browser's
+  `application-origin` check is against the local origin inside the frame,
+  file links stay correct via the document-relative API; the seams a fix
+  would use.
 - `install-rewind-plugin.md` — session rewind plugin install.
 - `model-titles-not-slugs-on-new-instance.md` — model-generated session
   titles come out as natural phrases instead of `foo-bar-baz` on a freshly
