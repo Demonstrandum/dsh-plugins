@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  COMPACT_BLOCK_RULES, DEFAULT_MAX_WIDTH, DEFAULT_SIDE_MARGIN, MAX_MAX_WIDTH, MAX_SIDE_MARGIN, MIN_MAX_WIDTH, MOBILE_FLAG_SELECTOR,
+  COMPACT_BLOCK_RULES, DEFAULT_MAX_WIDTH, DEFER_HMR_STREAM_SCRIPT, DEFAULT_SIDE_MARGIN, MAX_MAX_WIDTH, MAX_SIDE_MARGIN, MIN_MAX_WIDTH, MOBILE_FLAG_SELECTOR,
   SELECTORS, STOCK_SIDE_MARGIN, USER_BUBBLE_SELECTOR, apply, normalizeConfig, phoneStyle,
 } from '../index.js'
 
@@ -22,14 +22,14 @@ function fakeContext() {
 
 const ALL_ON = {
   maxWidth: DEFAULT_MAX_WIDTH, header: true, messageActions: true, stats: true,
-  sideMargin: DEFAULT_SIDE_MARGIN, codeHeaders: true, halfRadius: true, compactBlocks: true,
+  sideMargin: DEFAULT_SIDE_MARGIN, codeHeaders: true, halfRadius: true, compactBlocks: true, deferHmrStream: true,
 }
 
 test('defaults: 640px, every group on, 8px side margin', () => {
   assert.deepEqual(normalizeConfig(undefined), ALL_ON)
   assert.deepEqual(normalizeConfig({}), ALL_ON)
   const css = phoneStyle(ALL_ON)
-  assert.match(css, /^@media \(max-width:640px\)\{/)
+  assert.match(css, /^:root\{--tali-phone-ui-max-width:640px\}@media \(max-width:640px\)\{/)
   for (const selector of Object.values(SELECTORS).flat()) assert.ok(css.includes(selector), selector)
   assert.match(css, /\{display:none\}/)
   assert.match(css, /\[data-conversation-content\]\[data-content-phase\]\{--dsh-composer-side-clearance:8px\}/)
@@ -47,7 +47,7 @@ test('compactBlocks off keeps the stock padding', () => {
 })
 
 test('every rule is emitted twice: inside the media query and under the html[data-dsh-view="mobile"] flag', () => {
-  const css = phoneStyle(ALL_ON)
+  const css = phoneStyle(ALL_ON).replace(/^:root\{[^}]*\}/, '')
   const close = css.indexOf('}}')
   assert.ok(close > 0, 'media block closes')
   const inMedia = css.slice(0, close + 2)
@@ -101,21 +101,29 @@ test('groups switch off independently', () => {
   for (const selector of SELECTORS.messageActions) assert.ok(!css.includes(selector), selector)
 })
 
-test('apply pushes one style row into the index-inject table', () => {
+test('apply pushes one style row and the HMR-deferral head script into the index-inject table', () => {
   const { ctx, listeners, logs } = fakeContext()
   apply(ctx, { maxWidth: 480 })
   const table = []
   listeners.get('webserver/index-inject')(table)
-  assert.equal(table.length, 1)
+  assert.equal(table.length, 2)
   assert.equal(table[0].kind, 'style')
   assert.match(table[0].text, /^\/\* tali-phone-ui \*\//)
   assert.match(table[0].text, /max-width:480px/)
-  assert.match(logs[0], /≤480px → header, messageActions, stats, codeHeaders, halfRadius, compactBlocks, sideMargin 8px/)
+  assert.deepEqual([table[1].kind, table[1].placement], ['script', 'head'])
+  assert.equal(table[1].text.replace(/^\/\* tali-phone-ui \*\/\n/, ''), DEFER_HMR_STREAM_SCRIPT)
+  assert.match(logs[0], /≤480px → header, messageActions, stats, codeHeaders, halfRadius, compactBlocks, sideMargin 8px, deferHmrStream/)
 })
 
-test('all groups off disables the rule: no listener, no style', () => {
+test('the HMR-deferral script parses and only wraps the /plugins/events URL', () => {
+  assert.doesNotThrow(() => new Function(DEFER_HMR_STREAM_SCRIPT))
+  assert.match(DEFER_HMR_STREAM_SCRIPT, /\/\\\/plugins\\\/events\(\\\?\|\$\)\//)
+  assert.match(DEFER_HMR_STREAM_SCRIPT, /addEventListener\('load'/)
+})
+
+test('everything off disables the plugin: no listener, no rows', () => {
   const { ctx, listeners, logs } = fakeContext()
-  const off = { header: false, messageActions: false, stats: false, codeHeaders: false, halfRadius: false, compactBlocks: false, sideMargin: STOCK_SIDE_MARGIN }
+  const off = { header: false, messageActions: false, stats: false, codeHeaders: false, halfRadius: false, compactBlocks: false, sideMargin: STOCK_SIDE_MARGIN, deferHmrStream: false }
   apply(ctx, off)
   assert.equal(phoneStyle(normalizeConfig(off)), '')
   assert.equal(listeners.has('webserver/index-inject'), false)

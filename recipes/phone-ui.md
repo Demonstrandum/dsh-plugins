@@ -29,6 +29,10 @@ on the preview (its sessions have no tool calls) — verify on the live app.
 Third round: a **View ▸ Desktop / Mobile** switch in the DSH Dock apps so
 the maintainer can trial the phone view on the Mac without a phone or a browser
 automation session.
+Fifth round: the composer itself — replaced on mobile by a bottom **tongue**
+and a full-screen text entry (the plugin gains a browser half; see §The
+mobile composer), and two real-iPhone findings: the entry's button bar
+vanished under the keyboard, and the page "never finished loading".
 The collapsed sidebar rail in the full GUI is out of scope here.
 
 ## Answer: one media-queried `<style>` row, no fork, no client bundle
@@ -213,6 +217,72 @@ without a permission prompt). Measured on DSH Preview.app: Mobile → window
 applied (the flag path); View ▸ Reload in Mobile → still applied (the
 re-registered user script).
 
+## The mobile composer (2026-09-23, browser half)
+
+Asked for: bypass the composer card on mobile in favour of a grey "tongue"
+flush with the bottom, centre; tapping it opens a full-screen text entry with
+no `+` / permission / model controls, no ghost text, no slash completion,
+Enter = newline, an explicit submit, a minimise button, and a red stop while
+a turn runs. Iterated in the STP window at 390×844 on the QR-code embed URL
+(`…/dsh-preview/?embed=session-…`), one rebuild per tweak, nothing committed
+until the shape settled. What it became is in `plugins/phone-ui/README.md`
+§The mobile composer; the facts that shaped it:
+
+- **Programmatic surface.** Any session-scoped slot component gets
+  `inputActions` (`setDraft`, `submit`, … —
+  `packages/client/ui-conversation/src/client/contract/input.ts`) and
+  `useInput` / `useSession`; that is the whole send path, and it inherits
+  admission, busy-enter queueing and steering. Stop is
+  `ctx.sessions.scope(id).get('conversation').cancel()` (what ui-conversation
+  binds to the stock stop button, `apply.ts`); components never see `ctx`,
+  so it is handed in through the slot `inject`. The seat is
+  `conversation.input.dock` (list, session scope), inside the composer
+  stack — the component portals to `<body>` so its geometry is its own.
+- **Hiding the stock card safely.** The slot outlet
+  `[data-slot="conversation.composer.bar"]` carries an inline
+  `display:contents`, so `display:none` on it loses; hide its child
+  (`> *`). The rule keys on `<html data-tali-phone-composer>`, which only
+  the mounted component stamps: no bundle → stock composer.
+  `[data-composer-seat]{min-height:48px}` keeps the tongue's clearance.
+- **Back-to-bottom control.** ChatView's `.toBottomSlot` is the sibling
+  after `[data-chat-flow]`; on mobile it goes to the bottom-right corner
+  (`justify-content:flex-end; bottom:8px`), first tried bottom-left.
+- **Caret memory.** Minimise stores `selectionStart/End`; expand focuses and
+  `setSelectionRange`s them. Local text survives minimise (only an empty
+  local state seeds from the session draft), so the exact string comes
+  back; the draft is still written for persistence. The editor's draft
+  projection ends with `\n` — stripped on seed.
+- **React and synthetic input.** `ta.value = …; dispatchEvent(new
+  Event('input'))` does NOT reach a controlled textarea's `onChange` (React's
+  value tracker sees no change) — Send stayed disabled in the first test and
+  looked like a bug. `safari_type_text` (real key events) does. Use the
+  prototype setter or real typing when driving React inputs.
+- **iOS keyboard.** On the phone the bottom bar disappeared when the
+  keyboard rose: iOS Safari covers the layout viewport instead of shrinking
+  it, so `position:fixed; inset:0` keeps its bottom under the keys. Size the
+  sheet to `window.visualViewport` (`offsetTop` + `height`, on its
+  `resize`/`scroll` events); `keyboard = innerHeight - vv.height > 120`
+  drops the safe-area padding while the keys are up. The ↑ ↓ ✓ strip above
+  the keyboard is Safari's form-accessory bar — not removable by web content.
+- **"Never finishes loading".** Every resource completed (Resource Timing
+  showed nothing pending), yet the phone's progress bar never filled. Cause:
+  `client-hmr` opens an `EventSource` on `/plugins/events` in its `apply`,
+  i.e. during load, and iOS Safari keeps the indicator alive while an SSE
+  stream opened mid-load is open (EventSources do not appear in Resource
+  Timing, which is why the first look found nothing). Fix without touching
+  the fork: a head `<script>` row from the host half wraps `EventSource` and,
+  for that URL only while `document.readyState !== 'complete'`, returns a
+  stand-in that opens the real stream 250 ms after `load` and forwards
+  listeners/`close`/`on*` (`DEFER_HMR_STREAM_SCRIPT`, config
+  `deferHmrStream`). Trap: giving the stand-in `EventSource.prototype` makes
+  `self.readyState = 0` hit a brand-checked accessor — plain prototype.
+  Verified in the STP page by faking `document.readyState`: deferred while
+  "loading", connected and received the graph frame after `load`, later
+  EventSources are the real class.
+- **Tooling.** Client-bundle rebuilds (`node build.mjs`) hot-swap into the
+  preview in ~2 s — the loop for all of this; only the host-half changes
+  (the head script, the `:root` width variable) needed a relay restart.
+
 ## Alternatives considered
 
 - **`(pointer: coarse)` / `(hover: none)` instead of width** — would spare
@@ -236,11 +306,14 @@ re-registered user script).
 ## Rollout
 
 - Preview: overlay row in `cordis.dev.yml` (host row → relay restart).
-- Live: not installed by this recipe. To promote: `dsh plugin --profile web
-  add ./plugins/phone-ui`, restart `dsh web`, add `phone-ui` to `PLUGINS`
-  in `tools/install-plugins.sh`, and drop the overlay row (duplicate id
-  fails the boot). The shared remote machine gets it the same way
-  (`extras/bin/sync-host`).
+- Live + remote (2026-09-23, on the maintainer's go-ahead): `phone-ui` added to
+  `PLUGINS` in `tools/install-plugins.sh`; live via `dsh plugin --profile
+  web add ./plugins/phone-ui` + a `dsh web` restart (the restart kills the
+  agent session that runs it — schedule it detached, after the final
+  message); the shared remote machine via `extras/bin/sync-host <host>` (pull,
+  build, install-plugins) and `--restart --only <user>` for the instance
+  that should pick it up now. The preview keeps its overlay row (different
+  home; never both in one home — duplicate id fails the boot).
 
 ## Not done / next steps of the phone pass
 

@@ -1,25 +1,47 @@
 {
   "name": "tali-phone-ui",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "DSH plugin: a chat-only Session on phone-width viewports — hides the Session header (title row + Chat/Trajectory tabs), the per-message icon rows and the composer stats dock below a configurable width. Host-only, no client bundle.",
+  "description": "DSH plugin: a chat-only Session on phone-width viewports \u2014 hides the Session header (title row + Chat/Trajectory tabs), the per-message icon rows and the composer stats dock below a configurable width (host <style> row), and replaces the composer with a bottom 'tongue' that opens a full-screen text entry (browser half).",
   "type": "module",
   "main": "index.js",
   "exports": {
     ".": "./index.js",
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "files": [
     "index.js",
+    "lib/client.js",
+    "lib/client.js.map",
     "cordis.patch.yml"
   ],
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
     }
   },
   "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
     "check": "node --check index.js",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "prepare": "node build.mjs"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:../../deepseek-harness/vendor/cordis",
+    "@deepseek-ai/dsh-api-session-controller": "link:../../deepseek-harness/packages/api/session-controller",
+    "@deepseek-ai/dsh-client-ui-conversation": "link:../../deepseek-harness/packages/client/ui-conversation",
+    "@deepseek-ai/dsh-client-ui-renderer": "link:../../deepseek-harness/packages/client/ui-renderer",
+    "@deepseek-ai/dsh-client-ui-slots": "link:../../deepseek-harness/packages/client/ui-slots",
+    "@deepseek-ai/dsh-session": "link:../../deepseek-harness/packages/core/session",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "~18.3.7",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.2"
   }
 }

@@ -39,6 +39,10 @@
  *                   command-card bodies 12/16 → 8/10px, context-injection
  *                   bodies, table cells 10/16 → 6/10px, blockquote indent
  *                   14 → 8px, user bubbles 10/16 → 6/10px. Default true.
+ *   deferHmrStream  wrap `EventSource` so the client-HMR `/plugins/events`
+ *                   stream opens 250 ms after `load` instead of mid-load —
+ *                   iOS Safari otherwise shows the page as loading forever.
+ *                   Not a width rule; applies on every viewport. Default true.
  *
  * HOW. One `<style>` row through the webserver's structured
  * `webserver/index-inject` table, no client bundle (the sibling
@@ -104,6 +108,8 @@ export const MAX_SIDE_MARGIN = 64
  * @property {boolean} halfRadius - 6px corners on code blocks (12→6) and user
  *   bubbles (22→6).
  * @property {boolean} compactBlocks - less padding inside boxed blocks.
+ * @property {boolean} deferHmrStream - open the client-HMR SSE stream only
+ *   after `load`, so iOS Safari's loading indicator can finish.
  */
 
 /**
@@ -134,6 +140,7 @@ export function normalizeConfig(raw) {
     codeHeaders: flag('codeHeaders'),
     halfRadius: flag('halfRadius'),
     compactBlocks: flag('compactBlocks'),
+    deferHmrStream: flag('deferHmrStream'),
   }
 }
 
@@ -225,8 +232,57 @@ export function phoneStyle(config) {
   // Twice: once for real phones (the viewport query) and once under the
   // opt-in flag the Dock app's View ▸ Mobile stamps on <html>, so the phone
   // view can be chosen at any window width.
-  return `@media (max-width:${config.maxWidth}px){${render('')}}${render(`${MOBILE_FLAG_SELECTOR} `)}`
+  // The :root variable tells the browser half (lib/client.js) the same width
+  // so its matchMedia agrees with this sheet; the client reads it once.
+  return `:root{--tali-phone-ui-max-width:${config.maxWidth}px}@media (max-width:${config.maxWidth}px){${render('')}}${render(`${MOBILE_FLAG_SELECTOR} `)}`
 }
+
+/**
+ * Head script: defer the client-HMR `EventSource` on `/plugins/events` until
+ * after `window.load`.
+ *
+ * iOS Safari keeps its page-loading indicator running for as long as a
+ * server-sent-events stream that was opened DURING the load stays open, so
+ * a DSH page on an iPhone "never finishes loading" (the desktop Dock app has
+ * no indicator and never showed it). The shipped client-hmr plugin opens
+ * that stream in its `apply`, i.e. mid-load. This shim wraps `EventSource`:
+ * for that one URL, while the document is still loading, it returns a stand-in
+ * that creates the real stream 250 ms after `load` and forwards
+ * add/removeEventListener, close, readyState and the on* handlers to it;
+ * every other EventSource, and any created after load, is untouched. The
+ * HMR client only uses addEventListener('message') + close().
+ */
+export const DEFER_HMR_STREAM_SCRIPT = `(function(){
+var Real = window.EventSource; if (!Real) return;
+function Deferred(url, init) {
+  var self = this, real = null, listeners = [], closed = false;
+  self.url = String(url); self.withCredentials = !!(init && init.withCredentials); self.readyState = 0;
+  self.onopen = null; self.onmessage = null; self.onerror = null;
+  function attach() {
+    if (closed) return;
+    real = new Real(url, init);
+    listeners.forEach(function (l) { real.addEventListener(l[0], l[1], l[2]) });
+    ['onopen', 'onmessage', 'onerror'].forEach(function (k) {
+      real[k] = function (e) { self.readyState = real.readyState; if (typeof self[k] === 'function') self[k].call(self, e) };
+    });
+  }
+  self.addEventListener = function (t, fn, o) { if (real) real.addEventListener(t, fn, o); else listeners.push([t, fn, o]) };
+  self.removeEventListener = function (t, fn, o) { if (real) real.removeEventListener(t, fn, o); else listeners = listeners.filter(function (l) { return !(l[0] === t && l[1] === fn) }) };
+  self.close = function () { closed = true; self.readyState = 2; if (real) real.close() };
+  self.dispatchEvent = function (e) { return real ? real.dispatchEvent(e) : false };
+  window.addEventListener('load', function () { setTimeout(attach, 250) }, { once: true });
+}
+// Plain prototype on purpose: EventSource.prototype's accessors (url, readyState) are
+// brand-checked and would throw on this stand-in; nothing here tests instanceof.
+Deferred.CONNECTING = 0; Deferred.OPEN = 1; Deferred.CLOSED = 2;
+function Shim(url, init) {
+  var s = String(url);
+  if (document.readyState !== 'complete' && /\\/plugins\\/events(\\?|$)/.test(s)) return new Deferred(url, init);
+  return new Real(url, init);
+}
+Shim.prototype = Real.prototype; Shim.CONNECTING = 0; Shim.OPEN = 1; Shim.CLOSED = 2;
+window.EventSource = Shim;
+})();`
 
 /**
  * @param {import('@deepseek-ai/cordis').Context} ctx - plugin context.
@@ -235,13 +291,15 @@ export function phoneStyle(config) {
 export function apply(ctx, rawConfig) {
   const config = normalizeConfig(rawConfig)
   const style = phoneStyle(config)
-  if (style !== '') {
+  if (style !== '' || config.deferHmrStream) {
     ctx.on('webserver/index-inject', table => {
-      table.push({ kind: 'style', text: `/* tali-phone-ui */\n${style}` })
+      if (style !== '') table.push({ kind: 'style', text: `/* tali-phone-ui */\n${style}` })
+      if (config.deferHmrStream) table.push({ kind: 'script', placement: 'head', text: `/* tali-phone-ui */\n${DEFER_HMR_STREAM_SCRIPT}` })
     })
   }
   const groups = /** @type {const} */ (['header', 'messageActions', 'stats', 'codeHeaders', 'halfRadius', 'compactBlocks'])
     .filter(group => config[group])
   if (config.sideMargin !== STOCK_SIDE_MARGIN) groups.push(`sideMargin ${config.sideMargin}px`)
+  if (config.deferHmrStream) groups.push('deferHmrStream')
   ctx.logger.info(`phone-ui: ≤${config.maxWidth}px → ${style === '' ? 'nothing (disabled)' : groups.join(', ')}`)
 }

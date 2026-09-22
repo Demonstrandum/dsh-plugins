@@ -1,8 +1,9 @@
 # tali-phone-ui
 
-A chat-only Session on phone-width viewports. Host-only DSH plugin (no
-client bundle): one injected `<style>` rule inside a `max-width` media
-query.
+A chat-only Session on phone-width viewports. Two halves: a host `<style>`
+row inside a `max-width` media query that strips the desktop chrome (plus a
+head script that lets iOS Safari finish loading), and a browser bundle that
+replaces the composer card with a bottom **tongue** + full-screen text entry.
 
 ## Why
 
@@ -43,14 +44,64 @@ bubbles (22→6px) is cut to the code-block radius.
 | `codeHeaders` | `true` | hide the code-block banner row (language label + Copy) |
 | `halfRadius` | `true` | 6px corners on code blocks (12→6px) and user bubbles (22→6px) |
 | `compactBlocks` | `true` | less padding inside boxed blocks: code blocks 16→8/10px, tool-card IN/OUT sections and command-card bodies 12/16→8/10px, context-injection bodies, table cells 10/16→6/10px, blockquote indent 14→8px, user bubbles 10/16→6/10px |
+| `deferHmrStream` | `true` | open the client-HMR `/plugins/events` SSE stream 250 ms after `load` instead of mid-load (see below). Not a width rule |
 
-All flags `false` and `sideMargin: 32` disables the plugin (no style row).
+All flags `false` and `sideMargin: 32` disables the plugin (no rows).
+
+## The mobile composer (browser half)
+
+In mobile mode the stock composer card is hidden and replaced by:
+
+- **Tongue** — a grey tab (`--dsw-specific-input-major`) flush with the
+  bottom edge, centred, 14px top corners, carrying a chevron-up. While the
+  agent runs a **red stop square** sits beside it (the session's `cancel()`,
+  what the stock stop button calls). ChatView's back-to-bottom control moves
+  to the bottom-right corner, level with the tongue.
+- **Entry sheet** (tap the chevron) — full-screen, same grey, a plain
+  `<textarea>`: no placeholder, no attach / permission / model controls, no
+  slash menu; **Enter inserts a newline**; 16px font (iOS does not zoom).
+  Bottom bar, all 40px tall with 8px corners: **⌄ minimise** (40px, framed,
+  far left) folds back to the tongue keeping the text *and the caret*;
+  **✕ Abandon message** (80px, solid red) asks "Abandon message?" with
+  Cancel / Abandon before clearing; **↑ Send** (80px, blue) is the only way
+  to submit and is disabled while empty or while the input machine is
+  mid-submission. The sheet is sized to `window.visualViewport`, so when the
+  iOS keyboard comes up it shrinks above the keys and the bar stays visible
+  (iOS covers the layout viewport instead of shrinking it). The ↑ ↓ ✓ strip
+  above the keys is Safari's own form-accessory bar; web content cannot
+  remove it.
+
+Send goes through the session's public input actions (`setDraft` +
+`submit`), so admission, queueing while a turn runs and steering behave
+exactly as a stock submission does; minimise writes the text to the session
+draft as well, so it persists like any draft. The component is mounted on
+`conversation.input.dock` (session scope) and renders through portals to
+`<body>`; while active it stamps `<html data-tali-phone-composer>`, and the
+stock bar is hidden under that attribute only — a missing or failed bundle
+leaves the normal composer in place.
+
+## iOS Safari "never finishes loading" (`deferHmrStream`)
+
+iOS Safari keeps its page-loading indicator running for as long as a
+server-sent-events stream that was opened *during* the load stays open. The
+shipped `client-hmr` plugin opens `/plugins/events` in its `apply`, mid-load,
+so a DSH page on an iPhone looked permanently loading (the Dock app's
+WKWebView has no indicator, so it never showed there). The host half injects
+a head `<script>` that wraps `window.EventSource`: for that one URL, while
+`document.readyState !== 'complete'`, it hands back a stand-in that creates
+the real stream 250 ms after `load` and forwards `add/removeEventListener`,
+`close`, `readyState` and the `on*` handlers; every other EventSource, and
+any created after load, is untouched (the HMR client only uses
+`addEventListener('message')` + `close()`). The stand-in has a plain
+prototype on purpose — `EventSource.prototype`'s accessors are brand-checked.
 
 ## Trialing on the Mac: `<html data-dsh-view="mobile">`
 
-Every rule is emitted twice: inside the `max-width` media query, and again
-prefixed with `html[data-dsh-view="mobile"]`. Anything that stamps that
-attribute on `<html>` gets the phone view at any window width. The DSH Dock
+Every host rule is emitted twice: inside the `max-width` media query, and
+again prefixed with `html[data-dsh-view="mobile"]`; the browser half watches
+the same attribute plus a `matchMedia` on the width the host publishes as
+`--tali-phone-ui-max-width`. Anything that stamps that attribute on `<html>`
+gets the phone view at any window width. The DSH Dock
 apps do it from **View ▸ Mobile** (which also resizes the window to
 390×844 so the real media query fires; **View ▸ Desktop** undoes both) —
 see `plugins/dsh-tailscale-remote/README.md`. In any browser:
@@ -153,10 +204,13 @@ starts at y=0, text / composer card / code blocks all start at x=8 and are
 364px wide, code blocks and bubbles report 6px radius, no banner on
 any of the four fenced blocks; at 1100px nothing changes.
 
-## Test
+## Build / test
 
 ```sh
-pnpm test   # node --test tests/*.test.mjs, no DSH boot
+pnpm build      # esbuild → lib/client.js (the shell's factory-registration format)
+pnpm watch      # rebuild on save; the server hot-swaps the bundle
+pnpm typecheck  # tsc against the checkout's d.ts (link: devDependencies)
+pnpm test       # node --test tests/*.test.mjs (host half), no DSH boot
 ```
 
 Recipe with the investigation, the DOM facts and the trial procedure:
