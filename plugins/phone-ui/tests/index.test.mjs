@@ -2,8 +2,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  DEFAULT_MAX_WIDTH, DEFAULT_SIDE_MARGIN, MAX_MAX_WIDTH, MAX_SIDE_MARGIN, MIN_MAX_WIDTH, SELECTORS,
-  STOCK_SIDE_MARGIN, USER_BUBBLE_SELECTOR, apply, normalizeConfig, phoneStyle,
+  DEFAULT_MAX_WIDTH, DEFAULT_SIDE_MARGIN, MAX_MAX_WIDTH, MAX_SIDE_MARGIN, MIN_MAX_WIDTH, MOBILE_FLAG_SELECTOR,
+  SELECTORS, STOCK_SIDE_MARGIN, USER_BUBBLE_SELECTOR, apply, normalizeConfig, phoneStyle,
 } from '../index.js'
 
 function fakeContext() {
@@ -37,7 +37,24 @@ test('defaults: 640px, every group on, 8px side margin', () => {
   assert.match(css, /\.md-code-block pre\{border-top-left-radius/)
   assert.match(css, /\.md-code-block\{--dsl-code-block-border-radius:6px\}/)
   assert.ok(css.includes(`${USER_BUBBLE_SELECTOR}{border-radius:11px}`))
-  assert.match(css, /\}\}$/)
+})
+
+test('every rule is emitted twice: inside the media query and under the html[data-dsh-view="mobile"] flag', () => {
+  const css = phoneStyle(ALL_ON)
+  const close = css.indexOf('}}')
+  assert.ok(close > 0, 'media block closes')
+  const inMedia = css.slice(0, close + 2)
+  const flagged = css.slice(close + 2)
+  assert.ok(!inMedia.includes(MOBILE_FLAG_SELECTOR))
+  assert.ok(flagged.startsWith(`${MOBILE_FLAG_SELECTOR} `))
+  // Same rule count on both sides; every flagged selector is a prefixed media selector.
+  const count = text => (text.match(/\{/g) ?? []).length
+  assert.equal(count(flagged), count(inMedia) - 1)
+  for (const selector of [...Object.values(SELECTORS).flat(), USER_BUBBLE_SELECTOR, '[data-conversation-content][data-content-phase]']) {
+    assert.ok(flagged.includes(`${MOBILE_FLAG_SELECTOR} ${selector}`), selector)
+  }
+  // A comma list is prefixed per selector, not once for the list.
+  assert.ok(flagged.includes(`,${MOBILE_FLAG_SELECTOR} ${SELECTORS.messageActions[0]}`))
 })
 
 test('sideMargin: integer 0-64; the stock value emits no padding rules', () => {

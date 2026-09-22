@@ -264,6 +264,26 @@ this Mac and lets the navigation proceed — see [Loopback port
 forwarding](#loopback-port-forwarding). View ▸ **Forwarded Ports** lists and
 closes them.
 
+**View ▸ Desktop / Mobile (2026-09-23).** A layout switch for trialing phone
+styling on the Mac, radio items in the View menu (Desktop is the default and
+normal state). **Mobile** stamps `<html data-dsh-view="mobile">` — a
+document-start user script re-registered on every toggle so reloads carry
+it, plus a live `evaluateJavaScript` for the current page — publishes it as
+`__DSH_DOCK__.view`, persists it in the app's UserDefaults
+(`dsh-dock-app.viewMode`, so a relaunch keeps the mode), remembers the
+current frame (`dsh-dock-app.desktopFrame`) and resizes the window to
+iPhone content size **390×844** (top-left anchored, clamped to the screen;
+`minSize` width lowered 480 → 360). **Desktop** removes the attribute and
+restores the remembered frame. Plugins key their phone rules on the
+attribute beside their `max-width` media query — `tali-phone-ui` emits every
+rule twice for exactly this — so the flag alone selects the mobile view at
+any window width, while the resize makes the real media queries fire too.
+The page's own state (session, scroll position) is untouched; the toggle is
+logged to `~/Library/Logs/DSH Dock/<app>.log` (`view mode: mobile`).
+Headless test: `dock-app/Tools/ax-drive.swift` (PID-keyed Accessibility
+driver — System Events resolves same-named "DSH" processes to the live one;
+see `recipes/phone-ui.md`).
+
 **Identity (2026-09-21).** The wrapper carries its own name and icon colour
 into the page: a document-start script sets `globalThis.__DSH_DOCK__ =
 { name, glyphColor }` and appends a `<style>` (all rules `!important`) that

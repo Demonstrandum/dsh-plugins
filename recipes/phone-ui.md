@@ -19,6 +19,9 @@ phone), hide the message action row, hide the stats line. Second round
 32px): 8px side margins, no `python … Copy` banner row on fenced blocks
 (incl. language-less ones such as an "Output (example)" block), and half
 the corner rounding on code blocks and on the user's own message bubbles.
+Third round: a **View ▸ Desktop / Mobile** switch in the DSH Dock apps so
+the maintainer can trial the phone view on the Mac without a phone or a browser
+automation session.
 The collapsed sidebar rail in the full GUI is out of scope here.
 
 ## Answer: one media-queried `<style>` row, no fork, no client bundle
@@ -155,6 +158,54 @@ own. What *is* stable:
    served-CSS grep → DOM measurement) and is where the cascade trap above
    surfaced: only the post-restart measurement caught it.
 
+## View ▸ Mobile in the Dock apps (2026-09-23)
+
+Media queries read the viewport; there is no "flag" a page can set to make
+`max-width` match. So the switch does two things, and the plugin meets it
+halfway:
+
+- **The plugin** emits every rule twice — inside the media query and
+  prefixed with `html[data-dsh-view="mobile"]` (`MOBILE_FLAG_SELECTOR` in
+  `plugins/phone-ui/index.js`; the prefix is applied per selector of a
+  comma list, and the added `html[attr]` only raises specificity). The
+  attribute alone selects the phone view at any width.
+- **The wrapper** (`plugins/dsh-tailscale-remote/dock-app/Sources/main.swift`,
+  `ViewMode`): radio items View ▸ Desktop / Mobile. Mobile stamps the
+  attribute via a document-start `WKUserScript` (all user scripts are
+  re-registered through `installUserScripts(into:)` after
+  `removeAllUserScripts()`, since a `WKUserScript`'s source is fixed at
+  creation) *and* live via `evaluateJavaScript`, publishes
+  `__DSH_DOCK__.view`, persists the mode in UserDefaults
+  (`dsh-dock-app.viewMode`), saves the frame (`dsh-dock-app.desktopFrame`)
+  and resizes the content to 390×844 anchored top-left and clamped to the
+  screen (`minSize` width 480 → 360). Desktop removes the attribute and
+  restores the frame. Toggles log `view mode: …` to
+  `~/Library/Logs/DSH Dock/<app>.log`.
+- **Rollout:** `node scripts/cli.mjs dock-app:build` compiles (mtime-cached,
+  ~5 s); the preview app was reinstalled through the preview's control
+  channel (`ctl install-dock-app`, PREVIEWING.md) — `installDockApp` quits
+  and relaunches the app. The live `DSH.app` / `DSH Alpha.app` were **not**
+  rebuilt (that relaunches the user's live window); same call against the
+  live control channel, or `pnpm dock-app:install` with the spec from
+  `~/Applications/<name>.app/Contents/Resources/dsh-dock-app.json`.
+
+### Verifying the wrapper without a GUI login
+
+`osascript` `click menu item "Mobile" of menu "View" … of process …` **failed
+by name** even after `first process whose bundle identifier is …preview`
+returned the right process: the reference is stored as `application process
+"DSH"` and re-resolves to whichever "DSH" System Events picks (the trap
+recorded in `recipes/numbered-session-switching-plugin.md`). What worked:
+`dock-app/Tools/ax-drive.swift`, a PID-keyed Accessibility driver
+(`AXUIElementCreateApplication(pid)`; walk the menu bar, `AXPress` the item,
+read `AXSize` and `AXMenuItemMarkChar`, `CGWindowListCopyWindowInfo` for the
+window id, then `screencapture -l<id>` — both worked from the agent shell
+without a permission prompt). Measured on DSH Preview.app: Mobile → window
+390×844, ✓ on Mobile, header/banners/dock gone in the capture; Desktop →
+1280×860 restored; Mobile + AX-resize to 1000×700 → phone rules still
+applied (the flag path); View ▸ Reload in Mobile → still applied (the
+re-registered user script).
+
 ## Alternatives considered
 
 - **`(pointer: coarse)` / `(hover: none)` instead of width** — would spare
@@ -169,6 +220,11 @@ own. What *is* stable:
   chrome ever needs to come back on demand (e.g. a tap-to-reveal header).
 - **A fork patch** adding responsive rules to `ConversationRoot.module.css`
   — against the house rule and lost on every rebase.
+- **Flag only, no resize** for View ▸ Mobile — would show phone chrome on a
+  wide transcript, which is not what a phone shows; **resize only** — would
+  leave plugins with no way to opt into the mode other than width. Both
+  together, with the plugin honouring the flag, cover trial-at-phone-size
+  and "keep the phone styling while I widen the window to read".
 
 ## Rollout
 

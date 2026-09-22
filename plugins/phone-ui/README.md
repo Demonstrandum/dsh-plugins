@@ -45,6 +45,19 @@ bubbles (22→11px) is halved.
 
 All flags `false` and `sideMargin: 32` disables the plugin (no style row).
 
+## Trialing on the Mac: `<html data-dsh-view="mobile">`
+
+Every rule is emitted twice: inside the `max-width` media query, and again
+prefixed with `html[data-dsh-view="mobile"]`. Anything that stamps that
+attribute on `<html>` gets the phone view at any window width. The DSH Dock
+apps do it from **View ▸ Mobile** (which also resizes the window to
+390×844 so the real media query fires; **View ▸ Desktop** undoes both) —
+see `plugins/dsh-tailscale-remote/README.md`. In any browser:
+
+```js
+document.documentElement.dataset.dshView = 'mobile'   // delete it to go back
+```
+
 Bundle install:
 
 ```sh
@@ -96,6 +109,7 @@ table and pushes one style row:
     > [data-slot="conversation.chat.node"] > div > div:first-child > div:not([data-message-attachments])
   { border-radius: 11px }
 }
+/* … and the same rules once more, each selector prefixed html[data-dsh-view="mobile"] */
 ```
 
 Every hook is an **unhashed attribute** the client renders itself, so the

@@ -17,7 +17,9 @@
  *   maxWidth        the media query's `max-width` in CSS px, integer
  *                   320–1200. Default 640 (phones in either orientation are
  *                   ≤ 430 px wide; an iPad portrait is 768–834 px and keeps
- *                   its chrome).
+ *                   its chrome). Independently of the width, every rule also
+ *                   applies under `<html data-dsh-view="mobile">` — the flag
+ *                   the Dock app's View ▸ Mobile stamps.
  *   header          hide the Session header incl. the view tabs. Default true.
  *   messageActions  hide the icon-action rows of assistant turn tails and
  *                   user/steering bubbles. Default true.
@@ -141,6 +143,13 @@ export const SELECTORS = Object.freeze({
   codeHeaders: ['[data-chat-flow] .md-code-block > div:has(> [data-code-block-banner])'],
 })
 
+/**
+ * Opt-in flag: `<html data-dsh-view="mobile">`. The DSH Dock app's View ▸
+ * Mobile stamps it (document-start script + live) so the phone rules apply
+ * regardless of window width; anything else may set it the same way.
+ */
+export const MOBILE_FLAG_SELECTOR = 'html[data-dsh-view="mobile"]'
+
 /** The user/steering bubble inside `userRow > userStack` (attachments row excluded). */
 export const USER_BUBBLE_SELECTOR =
   ':is([data-chat-flow-kind="user"],[data-chat-flow-kind="steering"]) > [data-slot="conversation.chat.node"] > div > div:first-child > div:not([data-message-attachments])'
@@ -151,32 +160,37 @@ export const USER_BUBBLE_SELECTOR =
  * @returns {string} CSS, '' when every group is off.
  */
 export function phoneStyle(config) {
-  /** @type {string[]} */
+  /** @type {{ selectors: string[], declarations: string }[]} */
   const rules = []
   const hidden = /** @type {(keyof typeof SELECTORS)[]} */ (Object.keys(SELECTORS))
     .filter(group => config[group])
     .flatMap(group => SELECTORS[group])
-  if (hidden.length > 0) rules.push(`${hidden.join(',')}{display:none}`)
+  if (hidden.length > 0) rules.push({ selectors: hidden, declarations: 'display:none' })
   if (config.sideMargin !== STOCK_SIDE_MARGIN) {
     // ChatView `.scroll` pads `calc(var(--dsh-composer-side-clearance) + 16px)`
     // (32px stock); the composer card sits at the clearance (16px). Both go to
     // the same value so the card stays flush with the text column. Two
     // attributes: `.body` defines the variable at class specificity and the
     // client's stylesheet is injected after this <style>, so a tie loses.
-    rules.push(`[data-conversation-content][data-content-phase]{--dsh-composer-side-clearance:${config.sideMargin}px}`)
-    rules.push(`[data-conversation-scroll] div:has(> [data-chat-flow]){padding-left:${config.sideMargin}px;padding-right:${config.sideMargin}px}`)
+    rules.push({ selectors: ['[data-conversation-content][data-content-phase]'], declarations: `--dsh-composer-side-clearance:${config.sideMargin}px` })
+    rules.push({ selectors: ['[data-conversation-scroll] div:has(> [data-chat-flow])'], declarations: `padding-left:${config.sideMargin}px;padding-right:${config.sideMargin}px` })
   }
   if (config.codeHeaders) {
     // With the banner gone the <pre>'s opaque fill would square off the
     // block's top corners (it only carries the bottom radii by default).
-    rules.push('[data-chat-flow] .md-code-block pre{border-top-left-radius:var(--dsl-code-block-border-radius);border-top-right-radius:var(--dsl-code-block-border-radius)}')
+    rules.push({ selectors: ['[data-chat-flow] .md-code-block pre'], declarations: 'border-top-left-radius:var(--dsl-code-block-border-radius);border-top-right-radius:var(--dsl-code-block-border-radius)' })
   }
   if (config.halfRadius) {
-    rules.push('[data-chat-flow] .md-code-block{--dsl-code-block-border-radius:6px}')
-    rules.push(`${USER_BUBBLE_SELECTOR}{border-radius:11px}`)
+    rules.push({ selectors: ['[data-chat-flow] .md-code-block'], declarations: '--dsl-code-block-border-radius:6px' })
+    rules.push({ selectors: [USER_BUBBLE_SELECTOR], declarations: 'border-radius:11px' })
   }
   if (rules.length === 0) return ''
-  return `@media (max-width:${config.maxWidth}px){${rules.join('')}}`
+  const render = (/** @type {string} */ prefix) =>
+    rules.map(rule => `${rule.selectors.map(selector => prefix + selector).join(',')}{${rule.declarations}}`).join('')
+  // Twice: once for real phones (the viewport query) and once under the
+  // opt-in flag the Dock app's View ▸ Mobile stamps on <html>, so the phone
+  // view can be chosen at any window width.
+  return `@media (max-width:${config.maxWidth}px){${render('')}}${render(`${MOBILE_FLAG_SELECTOR} `)}`
 }
 
 /**

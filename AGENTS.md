@@ -475,8 +475,13 @@ can reproduce or maintain it:
   padding formula), the **cascade trap** (client CSS is injected after the
   `index-inject` rows, so a specificity tie loses — and a console-appended
   trial hides it), the STP `safari_set_viewport_size 390×844` trial (no
-  device emulation needed), and the rest of the phone pass still open
-  (sidebar rail, safe-area padding, right dock).
+  device emulation needed), the Dock apps' **View ▸ Desktop / Mobile**
+  switch (`<html data-dsh-view="mobile">` from a re-registered document-start
+  script + a 390×844 resize; the plugin emits every rule twice so the flag
+  alone selects the phone view), the PID-keyed `ax-drive.swift` that tests
+  the wrapper's menus where System Events picks the wrong "DSH", and the
+  rest of the phone pass still open (sidebar rail, safe-area padding, right
+  dock).
 - `preview-identity.md` — superseded stub (2026-09-05 red favicon + "DSH-dev"
   manifest for the Safari Dock preview; the dev-overlay/profile collision rule).
 - `promotion-loop-and-duplicate-dsh-tools.md` — the two faults that made the

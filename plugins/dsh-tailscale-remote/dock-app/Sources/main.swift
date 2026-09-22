@@ -28,6 +28,13 @@
 //     connection (PortForward.swift; forward.mjs on the host) and lets the
 //     navigation proceed — the URL works verbatim. View ▸ Forwarded Ports
 //     lists and closes them;
+//   - View ▸ Desktop / Mobile: a layout switch for trialing phone styling on
+//     the Mac. Mobile stamps `<html data-dsh-view="mobile">` (document-start
+//     script + live, persisted in UserDefaults so it survives reloads and
+//     relaunches) — the hook plugins such as tali-phone-ui key their phone
+//     rules on beside their `max-width` media query — and resizes the window
+//     to iPhone content size (390×844) so the media queries fire for real.
+//     Desktop clears the attribute and restores the remembered frame;
 //   - persistent data store, standard menu bar (⌘R reload, zoom, full screen,
 //     "Open in Browser"), remembered window frame, Web Inspector enabled
 //     (Safari ▸ Develop ▸ <this Mac> ▸ DSH), downloads into ~/Downloads.
@@ -126,10 +133,38 @@ struct Scope {
     }
 }
 
+/// View ▸ Desktop / Mobile. The raw value is what the page sees in
+/// `document.documentElement.dataset.dshView` (absent for desktop).
+enum ViewMode: String {
+    case desktop, mobile
+
+    static let defaultsKey = "dsh-dock-app.viewMode"
+    static let desktopFrameKey = "dsh-dock-app.desktopFrame"
+    /// iPhone 14/15 CSS viewport; matches the phone-ui plugin's ≤640px query with room to spare.
+    static let mobileContentSize = NSSize(width: 390, height: 844)
+
+    static var stored: ViewMode {
+        get { UserDefaults.standard.string(forKey: defaultsKey).flatMap(ViewMode.init(rawValue:)) ?? .desktop }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
+    }
+
+    /// Document-start script: stamp the flag before the client's first paint
+    /// and publish it beside the app identity (`__DSH_DOCK__.view`).
+    var script: String {
+        let set = self == .mobile
+            ? "document.documentElement.setAttribute('data-dsh-view','mobile');"
+            : "document.documentElement.removeAttribute('data-dsh-view');"
+        return "(function(){\(set)globalThis.__DSH_DOCK__=Object.assign(globalThis.__DSH_DOCK__||{},{view:'\(rawValue)'});})();"
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKDownloadDelegate, NSWindowDelegate, NSMenuDelegate {
     let config = DockConfig.load()
     var window: NSWindow!
     var webView: WKWebView!
+    var viewMode: ViewMode = ViewMode.stored
+    var desktopMenuItem: NSMenuItem!
+    var mobileMenuItem: NSMenuItem!
     var scope: Scope!
     var forwarder: PortForwarder!
     let forwardedPortsMenu = NSMenu(title: "Forwarded Ports")
@@ -155,41 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         configuration.websiteDataStore = .default()
         configuration.applicationNameForUserAgent = "DSHDock/1.0"
         configuration.preferences.isElementFullscreenEnabled = true
-        let ownsHost = WKUserScript(
-            source: "globalThis.__DSH_TRANSPORT__=Object.assign(globalThis.__DSH_TRANSPORT__||{},{ownsHost:true});",
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: true)
-        configuration.userContentController.addUserScript(ownsHost)
-        configuration.userContentController.addUserScript(WKUserScript(
-            source: config.identityScript(),
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: true))
-        // Page diagnostics → ~/Library/Logs/DSH Dock/<app>.log: uncaught errors,
-        // unhandled rejections and console.error/warn. The wrapper has no
-        // dev-tools shortcut, so this is how a "it only happens in the app"
-        // report becomes readable (Safari ▸ Develop remains available too).
-        configuration.userContentController.addUserScript(WKUserScript(
-            source: """
-            (() => {
-              const post = (level, text) => { try { webkit.messageHandlers.dshDock.postMessage({ type: 'console', level, text: String(text).slice(0, 2000) }) } catch {} };
-              window.addEventListener('error', e => post('error', (e.message || 'error') + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : '')));
-              window.addEventListener('unhandledrejection', e => post('unhandled', e.reason && (e.reason.stack || e.reason.message || e.reason)));
-              for (const level of ['error', 'warn']) { const orig = console[level]; console[level] = (...a) => { post(level, a.map(x => { try { return typeof x === 'string' ? x : (x && x.stack) || JSON.stringify(x) } catch { return String(x) } }).join(' ')); orig.apply(console, a) } }
-              // Menus: in WKWebView the mousedown default on a Radix menu row moves focus to <body> (the row
-              // is not focused on hover as in Chrome/Safari), the menu's focus-outside guard unmounts it
-              // before pointerup, and nothing is selected (traced 2026-09-21). Suppress that default for
-              // radio/checkbox rows — plain menuitems ("Model ›", which swaps the menu content) work unaided.
-              const rowOf = e => e.target && e.target.closest ? e.target.closest('[role="menuitemradio"],[role="menuitemcheckbox"]') : null;
-              document.addEventListener('mousedown', e => { if (rowOf(e)) e.preventDefault() }, true);
-              // Transport: failed or non-2xx fetches and WebSocket closes — a request the page drops quietly shows up here.
-              const origFetch = window.fetch.bind(window);
-              const urlOf = input => typeof input === 'string' ? input : (input && (input.url || input.href)) || String(input);
-              window.fetch = async (input, init) => { const url = urlOf(input); const method = (init && init.method) || (input && input.method) || 'GET'; try { const res = await origFetch(input, init); if (res.status >= 400) post('net', method + ' ' + url + ' → ' + res.status); else if (method !== 'GET') post('net', method + ' ' + url + ' → ' + res.status); if (res.status < 400 && method !== 'GET' && /application\\/json/.test(res.headers.get('content-type') || '')) { res.clone().text().then(t => { if (/"ok":\\s*false|"error"/.test(t)) post('rpc', method + ' ' + url + ' → ' + t.slice(0, 600)) }).catch(() => {}) } return res } catch (e) { post('net', method + ' ' + url + ' → failed: ' + (e && e.message || e)); throw e } };
-              const OrigWS = window.WebSocket; window.WebSocket = function (url, protocols) { const ws = protocols === undefined ? new OrigWS(url) : new OrigWS(url, protocols); ws.addEventListener('close', ev => post('net', 'ws close ' + url + ' code ' + ev.code + (ev.reason ? ' ' + ev.reason : ''))); ws.addEventListener('error', () => post('net', 'ws error ' + url)); ws.addEventListener('message', ev => { if (typeof ev.data === 'string' && /"ok":\\s*false|"error"/.test(ev.data)) post('rpc', 'ws ← ' + ev.data.slice(0, 600)) }); const origSend = ws.send.bind(ws); ws.send = data => { if (typeof data === 'string' && /selection|model/i.test(data)) post('rpc', 'ws → ' + data.slice(0, 300)); return origSend(data) }; return ws }; window.WebSocket.prototype = OrigWS.prototype; Object.assign(window.WebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
-            })();
-            """,
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: true))
+        installUserScripts(into: configuration.userContentController)
         configuration.userContentController.add(self, name: "dshDock")
 
         webView = WKWebView(frame: .zero, configuration: configuration)
@@ -215,15 +216,110 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window.title = config.name
         window.titlebarAppearsTransparent = false
         window.tabbingMode = .disallowed
-        window.minSize = NSSize(width: 480, height: 320)
+        // Narrow enough for View ▸ Mobile's 390px phone width.
+        window.minSize = NSSize(width: 360, height: 320)
         window.contentView = webView
         window.delegate = self
         window.setFrameAutosaveName("dsh-dock-app.main")
         if !window.setFrameUsingName("dsh-dock-app.main") { window.center() }
+        syncViewModeMenu()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
         connect()
+    }
+
+    /// All document-start scripts, in order. Re-run (after `removeAllUserScripts`)
+    /// when the view mode changes so the next load already carries the flag.
+    func installUserScripts(into controller: WKUserContentController) {
+        controller.removeAllUserScripts()
+        let ownsHost = WKUserScript(
+            source: "globalThis.__DSH_TRANSPORT__=Object.assign(globalThis.__DSH_TRANSPORT__||{},{ownsHost:true});",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true)
+        controller.addUserScript(ownsHost)
+        controller.addUserScript(WKUserScript(
+            source: config.identityScript(),
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true))
+        controller.addUserScript(WKUserScript(
+            source: viewMode.script,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true))
+        // Page diagnostics → ~/Library/Logs/DSH Dock/<app>.log: uncaught errors,
+        // unhandled rejections and console.error/warn. The wrapper has no
+        // dev-tools shortcut, so this is how a "it only happens in the app"
+        // report becomes readable (Safari ▸ Develop remains available too).
+        controller.addUserScript(WKUserScript(
+            source: """
+            (() => {
+              const post = (level, text) => { try { webkit.messageHandlers.dshDock.postMessage({ type: 'console', level, text: String(text).slice(0, 2000) }) } catch {} };
+              window.addEventListener('error', e => post('error', (e.message || 'error') + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : '')));
+              window.addEventListener('unhandledrejection', e => post('unhandled', e.reason && (e.reason.stack || e.reason.message || e.reason)));
+              for (const level of ['error', 'warn']) { const orig = console[level]; console[level] = (...a) => { post(level, a.map(x => { try { return typeof x === 'string' ? x : (x && x.stack) || JSON.stringify(x) } catch { return String(x) } }).join(' ')); orig.apply(console, a) } }
+              // Menus: in WKWebView the mousedown default on a Radix menu row moves focus to <body> (the row
+              // is not focused on hover as in Chrome/Safari), the menu's focus-outside guard unmounts it
+              // before pointerup, and nothing is selected (traced 2026-09-21). Suppress that default for
+              // radio/checkbox rows — plain menuitems ("Model ›", which swaps the menu content) work unaided.
+              const rowOf = e => e.target && e.target.closest ? e.target.closest('[role="menuitemradio"],[role="menuitemcheckbox"]') : null;
+              document.addEventListener('mousedown', e => { if (rowOf(e)) e.preventDefault() }, true);
+              // Transport: failed or non-2xx fetches and WebSocket closes — a request the page drops quietly shows up here.
+              const origFetch = window.fetch.bind(window);
+              const urlOf = input => typeof input === 'string' ? input : (input && (input.url || input.href)) || String(input);
+              window.fetch = async (input, init) => { const url = urlOf(input); const method = (init && init.method) || (input && input.method) || 'GET'; try { const res = await origFetch(input, init); if (res.status >= 400) post('net', method + ' ' + url + ' → ' + res.status); else if (method !== 'GET') post('net', method + ' ' + url + ' → ' + res.status); if (res.status < 400 && method !== 'GET' && /application\\/json/.test(res.headers.get('content-type') || '')) { res.clone().text().then(t => { if (/"ok":\\s*false|"error"/.test(t)) post('rpc', method + ' ' + url + ' → ' + t.slice(0, 600)) }).catch(() => {}) } return res } catch (e) { post('net', method + ' ' + url + ' → failed: ' + (e && e.message || e)); throw e } };
+              const OrigWS = window.WebSocket; window.WebSocket = function (url, protocols) { const ws = protocols === undefined ? new OrigWS(url) : new OrigWS(url, protocols); ws.addEventListener('close', ev => post('net', 'ws close ' + url + ' code ' + ev.code + (ev.reason ? ' ' + ev.reason : ''))); ws.addEventListener('error', () => post('net', 'ws error ' + url)); ws.addEventListener('message', ev => { if (typeof ev.data === 'string' && /"ok":\\s*false|"error"/.test(ev.data)) post('rpc', 'ws ← ' + ev.data.slice(0, 600)) }); const origSend = ws.send.bind(ws); ws.send = data => { if (typeof data === 'string' && /selection|model/i.test(data)) post('rpc', 'ws → ' + data.slice(0, 300)); return origSend(data) }; return ws }; window.WebSocket.prototype = OrigWS.prototype; Object.assign(window.WebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
+            })();
+            """,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true))
+    }
+
+    // MARK: view mode (View ▸ Desktop / Mobile)
+
+    @objc func selectDesktopView() { setViewMode(.desktop) }
+    @objc func selectMobileView() { setViewMode(.mobile) }
+
+    func setViewMode(_ mode: ViewMode) {
+        guard mode != viewMode else { return }
+        let previous = viewMode
+        viewMode = mode
+        ViewMode.stored = mode
+        // Next load: the document-start script carries the new flag. This load: flip it live.
+        installUserScripts(into: webView.configuration.userContentController)
+        webView.evaluateJavaScript(mode.script, completionHandler: nil)
+        switch (previous, mode) {
+        case (.desktop, .mobile):
+            UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: ViewMode.desktopFrameKey)
+            resizeContentKeepingTopLeft(to: ViewMode.mobileContentSize)
+        case (.mobile, .desktop):
+            if let saved = UserDefaults.standard.string(forKey: ViewMode.desktopFrameKey) {
+                window.setFrame(NSRectFromString(saved), display: true, animate: true)
+            } else {
+                resizeContentKeepingTopLeft(to: NSSize(width: 1280, height: 860))
+            }
+        default:
+            break
+        }
+        syncViewModeMenu()
+        appendLog("view mode: \(mode.rawValue)")
+    }
+
+    /// Resize the content area, keeping the window's top-left corner where it is (clamped to the screen).
+    func resizeContentKeepingTopLeft(to size: NSSize) {
+        let contentRect = NSRect(origin: .zero, size: size)
+        var frame = window.frameRect(forContentRect: contentRect)
+        frame.origin = NSPoint(x: window.frame.minX, y: window.frame.maxY - frame.height)
+        if let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame {
+            if frame.height > visible.height { frame.size.height = visible.height }
+            frame.origin.y = max(visible.minY, min(frame.origin.y, visible.maxY - frame.height))
+            frame.origin.x = max(visible.minX, min(frame.origin.x, visible.maxX - frame.width))
+        }
+        window.setFrame(frame, display: true, animate: true)
+    }
+
+    func syncViewModeMenu() {
+        desktopMenuItem?.state = viewMode == .desktop ? .on : .off
+        mobileMenuItem?.state = viewMode == .mobile ? .on : .off
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -680,6 +776,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         view.addItem(withTitle: "Actual Size", action: #selector(zoomReset), keyEquivalent: "0")
         view.addItem(withTitle: "Zoom In", action: #selector(zoomIn), keyEquivalent: "+")
         view.addItem(withTitle: "Zoom Out", action: #selector(zoomOut), keyEquivalent: "-")
+        view.addItem(.separator())
+        desktopMenuItem = view.addItem(withTitle: "Desktop", action: #selector(selectDesktopView), keyEquivalent: "")
+        mobileMenuItem = view.addItem(withTitle: "Mobile", action: #selector(selectMobileView), keyEquivalent: "")
+        syncViewModeMenu()
         view.addItem(.separator())
         let openInBrowser = view.addItem(withTitle: "Open in Browser", action: #selector(openInBrowser), keyEquivalent: "o")
         openInBrowser.keyEquivalentModifierMask = [.command, .shift]

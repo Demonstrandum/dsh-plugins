@@ -26,6 +26,7 @@
     "dock-app/Sources/main.swift",
     "dock-app/Sources/PortForward.swift",
     "dock-app/Tools/make-icon.swift",
+    "dock-app/Tools/ax-drive.swift",
     "dock-app/icon.svg",
     "lib/client.js",
     "lib/client.js.map",
