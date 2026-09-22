@@ -220,6 +220,25 @@ export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 HOMEBR
        HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_ANALYTICS=1
 brew_env() { have_brew && eval "$(/opt/homebrew/bin/brew shellenv)"; }
 pkg_field() { node -p "const p=require('$1/package.json'); $2" 2>/dev/null; }
+# patch_set_row FILE ID JSON — replace (or add) the top-level `- id: ID` row of a profile patch with the JSON
+# object. Parses with the checkout's own `yaml` package because the fresh template is a literal `[]` (a text
+# append would be invalid YAML); only the file's leading `#` header survives a rewrite. Returns 1 when the
+# yaml package is missing so the caller can decide between die and warn.
+patch_set_row() {
+  local file="$1" id="$2" json="$3" yamlpkg
+  yamlpkg="$(ls -d "$CK"/node_modules/.pnpm/yaml@*/node_modules/yaml 2>/dev/null | sort -V | tail -1 || true)"
+  [ -n "$yamlpkg" ] || return 1
+  node - "$file" "$yamlpkg" "$id" "$json" <<'JS'
+const fs = require('fs'); const [file, yamlPath, id, json] = process.argv.slice(2);
+const YAML = require(yamlPath);
+const text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+const header = text.split('\n').filter(l => /^\s*#/.test(l)).join('\n');
+let rows = YAML.parse(text) ?? []; if (!Array.isArray(rows)) rows = [];
+rows = rows.filter(r => !(r && r.id === id));
+rows.push({ id, ...JSON.parse(json) });
+fs.writeFileSync(file, (header ? header + '\n' : '') + YAML.stringify(rows));
+JS
+}
 
 # ---------------------------------------------------------------------------
 echo "${BOLD}DSH bootstrap${NC} — log: $LOG"; [ "$DRY" = 1 ] && warn "dry run: nothing will be changed"
@@ -683,6 +702,17 @@ if wants home; then
     [ -f "$DSH_HOME_DIR/profiles/web/cordis.patch.yml" ] || die "profile not created"
     ok "home initialised"
   fi
+  # Model-generated session titles as slugs (foo-bar-baz), the shape the hand-typed `slug:` convention of
+  # session-title-slug produces: the fork's `style: slug` on the in-tree session-title-llm row. The base bundle
+  # leaves `style` unset (natural-language titles), so every new home needs this override — DSH Remote shipped
+  # without it (recipes/model-titles-not-slugs-on-new-instance.md). A patch row replaces the whole config, so
+  # the bundle's other keys are restated.
+  PATCH="$DSH_HOME_DIR/profiles/web/cordis.patch.yml"
+  TITLE_ROW='{"config":{"targetWords":5,"targetCjkCharacters":10,"maxInputBytes":4096,"maxOutputTokens":64,"timeoutMs":60000,"style":"slug"}}'
+  if grep -q 'style: slug' "$PATCH" 2>/dev/null; then ok "session-title-llm override present (slug titles)"
+  elif [ "$DRY" = 1 ]; then log "would set the session-title-llm row (style: slug) in $PATCH"
+  elif patch_set_row "$PATCH" session-title-llm "$TITLE_ROW"; then ok "$PATCH: session-title-llm → style: slug (model titles come out as foo-bar-baz)"
+  else warn "no yaml package in the checkout; add the session-title-llm row (style: slug) to $PATCH by hand (INSTALLING.md C4)"; fi
   # A fresh home's .credentials.yaml holds only the browser-session grant the first launch writes; provider keys
   # are further `records:` entries. A --replace host keeps its keys.
   if [ "$(grep -E '^  [^ ]' "$DSH_HOME_DIR/.credentials.yaml" 2>/dev/null | grep -vc 'client-connection/' || true)" = 0 ]; then
@@ -818,22 +848,10 @@ if wants tailnet && [ "$TAILNET" = 1 ]; then
       #    (a patch row replaces the whole config; unset keys fall back to the plugin's schema defaults).
       if [ "$WEB_PORT" != 3080 ] || [ -n "$INSTANCE" ] || [ "$MOUNT" != /dsh ]; then
         PATCH="$DSH_HOME_DIR/profiles/web/cordis.patch.yml"
-        YAMLPKG="$(ls -d "$CK"/node_modules/.pnpm/yaml@*/node_modules/yaml 2>/dev/null | sort -V | tail -1 || true)"
+        TSR_ROW="$(node -e 'const [l,p,m,d,s]=process.argv.slice(1); process.stdout.write(JSON.stringify({config:{listenPort:Number(l),publishPort:Number(p),mountPath:m,dockAppName:d,relayStart:s}}))' "$PROXY_PORT" "$RELAY_PORT" "$MOUNT" "$DOCK_NAME" "$START")"
         if [ "$DRY" = 1 ]; then log "would set tali-tailscale-remote {listenPort $PROXY_PORT, publishPort $RELAY_PORT, mountPath $MOUNT, dockAppName $DOCK_NAME} in $PATCH"
-        elif [ -z "$YAMLPKG" ]; then die "no yaml package in the checkout to edit $PATCH"
-        else
-          node - "$PATCH" "$YAMLPKG" "$PROXY_PORT" "$RELAY_PORT" "$MOUNT" "$DOCK_NAME" "$START" <<'JS'
-const fs = require('fs'); const [file, yamlPath, listenPort, publishPort, mountPath, dockAppName, relayStart] = process.argv.slice(2);
-const YAML = require(yamlPath);
-const text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-const header = text.split('\n').filter(l => /^\s*#/.test(l)).join('\n');
-let rows = YAML.parse(text) ?? []; if (!Array.isArray(rows)) rows = [];
-rows = rows.filter(r => !(r && r.id === 'tali-tailscale-remote'));
-rows.push({ id: 'tali-tailscale-remote', config: { listenPort: Number(listenPort), publishPort: Number(publishPort), mountPath, dockAppName, relayStart } });
-fs.writeFileSync(file, (header ? header + '\n' : '') + YAML.stringify(rows));
-console.log('    ' + file + ': tali-tailscale-remote → proxy :' + listenPort + ', relay :' + publishPort + ', route ' + mountPath + ', Dock app ' + dockAppName);
-JS
-        fi
+        elif patch_set_row "$PATCH" tali-tailscale-remote "$TSR_ROW"; then ok "$PATCH: tali-tailscale-remote → proxy :$PROXY_PORT, relay :$RELAY_PORT, route $MOUNT, Dock app $DOCK_NAME"
+        else die "no yaml package in the checkout to edit $PATCH"; fi
       fi
       # 2. Relay LaunchAgent (relay → proxy; starts `dsh web` on demand).
       if launchctl print "gui/$(id -u)/$RELAY_LABEL" >/dev/null 2>&1; then ok "relay LaunchAgent present"

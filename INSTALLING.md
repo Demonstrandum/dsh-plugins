@@ -501,10 +501,17 @@ trace files, e.g.:
     traceFile: /tmp/browser-automation-trace.log
 ```
 
-Optional, not a `tali-dash-plugins` plugin: The maintainer's patch also overrides the
-in-tree `session-title-llm` row (`style: slug`, `targetWords: 5`,
-`maxOutputTokens: 64`, …) so model-generated titles come out as
-`foo-bar-baz`, matching the hand-typed `slug:` convention.
+One override the installer **does** write (step `home`, idempotent): the
+in-tree `session-title-llm` row with `style: slug` (plus the bundle's other
+keys restated: `targetWords: 5`, `targetCjkCharacters: 10`,
+`maxInputBytes: 4096`, `maxOutputTokens: 64`, `timeoutMs: 60000`), so
+model-generated titles come out as `foo-bar-baz`, matching the hand-typed
+`slug:` convention. `style` is a fork feature the base bundle leaves unset;
+a home without this row titles sessions in natural language (that is how DSH
+the remote instances shipped before 2026-09-22 —
+`recipes/model-titles-not-slugs-on-new-instance.md`). On an existing install,
+`tools/bootstrap-mac.sh --only home --yes` adds it and a `dsh web` restart
+(or the `web` profile's live patch reload) picks it up.
 
 Verify the composition without booting (expect 12 `tali-` rows — the
 installer prints them too): `pnpm dsh --profile web --dump-config | grep -n 'id: tali-'`.

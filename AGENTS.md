@@ -389,6 +389,13 @@ can reproduce or maintain it:
   transcripts, the session-log frame contract, the converter tool in
   `tools/`, and the installed `dsh-import-agents` plugin alternative.
 - `install-rewind-plugin.md` — session rewind plugin install.
+- `model-titles-not-slugs-on-new-instance.md` — model-generated session
+  titles come out as natural phrases instead of `foo-bar-baz` on a freshly
+  bootstrapped instance (DSH Remote, 2026-09-22): the slug shape is the fork's
+  `style: slug` on the in-tree `session-title-llm` row, set only in this Mac's
+  `~/.dsh/profiles/web/cordis.patch.yml` and never by `bootstrap-mac.sh`; how
+  to read `source.kind` from `session/title` events, the preview
+  reproduction + fix, and the remote fix (live home — confirm first).
 - `notion-mcp.md` — Notion's hosted MCP server in the web profile: why DSH's
   mcp-client can't do OAuth, the `mcp-remote` stdio bridge, the one-time
   terminal login into `~/.mcp-auth`, and the sandbox/`npx` EPERM trap.
