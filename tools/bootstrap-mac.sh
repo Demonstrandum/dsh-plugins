@@ -221,6 +221,11 @@ have_brew() { [ -x /opt/homebrew/bin/brew ]; }
 # flags — Homebrew has no per-command switch for the auto-update.
 export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 HOMEBREW_NO_INSTALL_CLEANUP=1 \
        HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_ANALYTICS=1
+# The fork's pnpm postinstall (scripts/install-lefthook.mjs) refuses to run when the user's ~/.gitconfig sets a
+# global core.hooksPath (a common setup: a personal hooks dir). With this variable it installs a WORKTREE-scoped
+# hooksPath inside the fork checkout instead — the user's global config is never touched. pnpm re-runs that
+# postinstall before every `pnpm dsh …`, so it has to be set for the whole run, not just the first install.
+export DSH_LEFTHOOK_ALLOW_HOOKS_PATH_OVERRIDE=1
 brew_env() { have_brew && eval "$(/opt/homebrew/bin/brew shellenv)"; }
 pkg_field() { node -p "const p=require('$1/package.json'); $2" 2>/dev/null; }
 # patch_set_row FILE ID JSON — replace (or add) the top-level `- id: ID` row of a profile patch with the JSON
@@ -607,7 +612,14 @@ if wants clone; then
     # (Local modifications such as the re-pointed cordis.dev.yml do not block a fast-forward; a real
     # divergence or a conflicting local edit does, and then we keep what is checked out.)
     if [ "$DRY" = 0 ]; then
-      if ! git -C "$DIR" pull --ff-only -q 2>>"$LOG"; then warn "could not fast-forward $DIR (diverged from origin, or local edits conflict) — continuing with what is checked out"; fi
+      if ! git -C "$DIR" pull --ff-only -q 2>>"$LOG"; then
+        # Diverged (e.g. a clone from before the 2026-09-21 history rewrite) or dirty. With no local commits worth
+        # keeping — this is an installer, not a dev checkout — reset onto origin/main; local edits are backed up.
+        dirty="$(git -C "$DIR" status --short 2>/dev/null | head -5)"
+        if [ -n "$dirty" ]; then log "local edits in $DIR (saved as a stash):"; echo "$dirty" | sed 's/^/    /'; [ "$DRY" = 1 ] || git -C "$DIR" stash push -q -u -m "bootstrap-mac $(date +%F)" >/dev/null 2>&1 || true; fi
+        log "resetting $DIR onto origin/main (history diverged — likely a clone from before a rewrite)"
+        [ "$DRY" = 1 ] || { git -C "$DIR" fetch -q origin && git -C "$DIR" reset -q --hard origin/main; } || die "could not reset $DIR onto origin/main"
+      fi
       ok "$DIR at $(git -C "$DIR" log -1 --format='%h %s' 2>/dev/null)"
     fi
   else
@@ -953,10 +965,12 @@ if wants verify; then
     done
     n="$(cd "$CK" && pnpm dsh --profile web --dump-config 2>/dev/null | grep -cE '^- id: tali-' || true)"
     # Every live bundle inserts one `tali-` row: count the plugins that have a bundle patch, minus the app-gated ones.
+    # The truth is install-plugins.sh's list minus what this run left out (--without, paid-app gating).
     expected=0
-    for pdir in "$DIR"/plugins/*/; do
-      p="$(basename "$pdir")"; excluded "$p" && continue
-      [ -n "$(pkg_field "$pdir" 'p.dsh?.bundle?.patch ?? ""' || true)" ] && expected=$((expected+1))
+    for p in $(sed -n '/^PLUGINS=(/,/^)/p' "$DIR/tools/install-plugins.sh" | grep -E '^\s+[a-z0-9-]+$' | tr -d ' '); do
+      excluded "$p" && continue
+      case ",${USER_WITHOUT:-}," in *",$p,"*) continue ;; esac
+      expected=$((expected+1))
     done
     [ "${n:-0}" -ge "$expected" ] && ok "$n tali- rows composed in the web profile" || warn "only ${n:-0} tali- rows composed (expected ≥ $expected)"
     if [ -x "$TS" ]; then
