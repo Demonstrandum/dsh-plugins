@@ -73,6 +73,7 @@ PLUGINS=(
   numbered-switching
   import-api-keys
   reload-on-restart
+  transcript-grace-margin
 )
 
 log() { printf '\033[1;34m▸\033[0m %s\n' "$*"; }
