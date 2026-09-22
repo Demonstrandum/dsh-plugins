@@ -1,0 +1,13 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# Default: below 640px viewport width hide the Session header (+ view tabs),
+# the per-message icon rows and the composer stats dock. Override `config`
+# in the profile's cordis.patch.yml (a later layer replaces the whole value):
+#   - id: tali-phone-ui
+#     config:
+#       maxWidth: 480          # px, integer 320-1200
+#       header: true
+#       messageActions: false  # keep copy/branch/feedback rows
+#       stats: true
+- insert:
+    - id: tali-phone-ui
+      name: tali-phone-ui

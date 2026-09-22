@@ -1,0 +1,25 @@
+{
+  "name": "tali-phone-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin: a chat-only Session on phone-width viewports — hides the Session header (title row + Chat/Trajectory tabs), the per-message icon rows and the composer stats dock below a configurable width. Host-only, no client bundle.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "check": "node --check index.js",
+    "test": "node --test tests/*.test.mjs"
+  }
+}

@@ -463,6 +463,15 @@ can reproduce or maintain it:
   keeping the query, the `session-` prefix trap, phone-width facts, the
   `/tmp`-copy trial so the live bundle is not hot-swapped, and the `CI=true
   pnpm install` purge trap.
+- `phone-ui.md` — chat-only Session chrome on phone-width viewports
+  (`phone-ui` plugin, host-only `<style>` row in a `max-width` media query):
+  hides the Session header + Chat/Trajectory tabs, the per-message icon
+  rows and the composer stats dock (incl. the context meter) below 640px,
+  in the full GUI and the `?embed` page alike; the `data-slot="…"` outlets
+  as the unhashed hooks for chrome without attributes of its own, the DOM
+  facts per target, the STP `safari_set_viewport_size 390×844` trial (no
+  device emulation needed), and the rest of the phone pass still open
+  (sidebar rail, safe-area padding, right dock).
 - `preview-identity.md` — superseded stub (2026-09-05 red favicon + "DSH-dev"
   manifest for the Safari Dock preview; the dev-overlay/profile collision rule).
 - `promotion-loop-and-duplicate-dsh-tools.md` — the two faults that made the
