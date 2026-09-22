@@ -41,6 +41,23 @@
 //     can reach the page: the action hands the plugin its ⌘. chord as a
 //     synthetic keydown and, when no plugin claims it, clicks the sidebar's
 //     Settings trigger / the panel's close button itself (same selectors);
+//   - integrated title bar: the title bar is transparent and title-less, the
+//     page fills the window, the traffic lights sit at (16, 18) like the
+//     upstream Electron desktop shell's, and the window material shows
+//     through the page's sidebar column (View ▸ Window Material: Frosted =
+//     the standard sidebar vibrancy blurring the desktop behind the window;
+//     Liquid Glass = the same with an NSGlassEffectView under the page,
+//     macOS 26+; the wrapper also thins the client's sidebar tint to 18% so
+//     the material is what one sees). The page is told it runs in the macOS desktop
+//     shell (`<html data-platform="darwin">`, the mark the shipped client's
+//     hiddenInset layout keys on: 52px sidebar top strip with the collapse
+//     toggle beside the lights, header controls when the sidebar is closed,
+//     transparent sidebar column). WKWebView ignores `-webkit-app-region`,
+//     so a document-start script reports mousedowns on the client's drag
+//     regions (sidebar top strip, conversation title row) and the wrapper
+//     drags the window (double-click follows the System Settings title-bar
+//     action). The page's theme choice (`html[data-ds-theme-source]`) sets
+//     the window appearance so the vibrancy material follows it;
 //   - persistent data store, standard menu bar (⌘R reload, zoom, full screen,
 //     "Open in Browser"), remembered window frame, Web Inspector enabled
 //     (Safari ▸ Develop ▸ <this Mac> ▸ DSH), downloads into ~/Downloads.
@@ -80,6 +97,12 @@ struct DockConfig: Decodable {
         css += "span[class*=\"_fallbackBrandName\"]::before{content:\"\(label)\"!important;font-size:17px!important;line-height:24px!important}"
         // The build-version chip: no inverted box, dim text (tali-instance-identity's `versionBadge: subtle`).
         css += "span[class*=\"_buildVersion\"]{color:inherit!important;background:none!important;opacity:.4!important;padding:0!important;border-radius:0!important}"
+        // The client's darwin layout tints its sidebar column 60% over the window
+        // material (tuned for Electron's flatter vibrancy); here the material is
+        // the point, so the column keeps only a light wash and the frosted glass
+        // behind the window shows through. Specificity (0,2,1) beats the
+        // module's (0,2,0) without `!important`.
+        css += "html[data-platform=\"darwin\"] [class*=\"_sidebarCol\"]{background:color-mix(in srgb,var(--dsw-specific-sidebar-fill) 18%,transparent)}"
         if !hex.isEmpty {
             css += "span[class*=\"_brandMark\"],span[class*=\"_railMark\"]{color:\(hex)!important}"
         }
@@ -164,13 +187,44 @@ enum ViewMode: String {
     }
 }
 
+/// The main window. With the traffic lights moved out of their stock spot
+/// (AppDelegate.layoutTrafficLights), AppKit's own rollover tracking no longer
+/// covers them and the buttons would never draw their × – + glyphs: the frame
+/// asks the window `_mouseInGroup:` (private) before drawing each button, and
+/// the delegate keeps `pointerOverTrafficLights` current from a tracking area
+/// over the moved group — the same arrangement Electron's `trafficLightPosition`
+/// uses.
+final class DockWindow: NSWindow {
+    var pointerOverTrafficLights = false
+
+    @objc(_mouseInGroup:) func mouseInGroup(_ button: NSButton) -> Bool { pointerOverTrafficLights }
+}
+
+/// View ▸ Window Material: what the transparent page sits on.
+enum WindowMaterial: String {
+    /// `NSVisualEffectView` sidebar material, behind-window blur (default).
+    case frosted
+    /// The same blur with an `NSGlassEffectView` (macOS 26+) between it and the page.
+    case liquidGlass
+
+    static let defaultsKey = "dsh-dock-app.windowMaterial"
+
+    static var stored: WindowMaterial {
+        get { UserDefaults.standard.string(forKey: defaultsKey).flatMap(WindowMaterial.init(rawValue:)) ?? .frosted }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKDownloadDelegate, NSWindowDelegate, NSMenuDelegate {
     let config = DockConfig.load()
-    var window: NSWindow!
+    var window: DockWindow!
     var webView: WKWebView!
     var viewMode: ViewMode = ViewMode.stored
     var desktopMenuItem: NSMenuItem!
     var mobileMenuItem: NSMenuItem!
+    var windowMaterial: WindowMaterial = WindowMaterial.stored
+    var frostedMenuItem: NSMenuItem!
+    var liquidGlassMenuItem: NSMenuItem!
     var scope: Scope!
     var forwarder: PortForwarder!
     let forwardedPortsMenu = NSMenu(title: "Forwarded Ports")
@@ -188,6 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        installSnapshotSignal()
         scope = Scope(urls: [remoteURL] + (fallbackBase.map { [$0] } ?? []))
         forwarder = PortForwarder(endpointBase: { [weak self] in self?.currentMountBase() }, log: { [weak self] line in self?.appendLog(line) })
         buildMenu()
@@ -204,6 +259,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = false
         webView.allowsMagnification = true
+        // The client paints `html, body` transparent under data-platform=darwin so
+        // the window's vibrancy reaches its sidebar column; the view must not
+        // paint an opaque base behind the page. (Private `_drawsBackground`,
+        // reached through KVC — the same switch Electron's transparent windows use.)
+        webView.setValue(false, forKey: "drawsBackground")
         if #available(macOS 13.3, *) { webView.isInspectable = true }
         titleObservation = webView.observe(\.title, options: [.new]) { [weak self] view, _ in
             guard let self else { return }
@@ -215,19 +275,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             self.window.title = title.isEmpty ? self.config.name : title
         }
 
-        window = NSWindow(
+        window = DockWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1280, height: 860),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false)
         window.title = config.name
-        window.titlebarAppearsTransparent = false
+        // Integrated title bar (Electron `titleBarStyle: 'hiddenInset'`): no title
+        // text, no bar fill, no separator; the page owns the top edge and the
+        // traffic lights float over it (layoutTrafficLights).
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.titlebarSeparatorStyle = .none
+        window.isMovableByWindowBackground = false
         window.tabbingMode = .disallowed
         // Narrow enough for View ▸ Mobile's 390px phone width.
         window.minSize = NSSize(width: 360, height: 320)
-        window.contentView = webView
+        // Window material behind the transparent page (View ▸ Window Material):
+        // the client's centre column paints its own opaque base, only the
+        // sidebar column lets the material through.
+        webView.autoresizingMask = [.width, .height]
+        installBackdrop()
         window.delegate = self
         window.setFrameAutosaveName("dsh-dock-app.main")
         if !window.setFrameUsingName("dsh-dock-app.main") { window.center() }
+        layoutTrafficLights()
         syncViewModeMenu()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -244,6 +315,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true)
         controller.addUserScript(ownsHost)
+        // The client's macOS-desktop layout mark (apps/desktop's preload sets the
+        // same attribute): hiddenInset sidebar strip, header controls for the
+        // closed sidebar, transparent page background for the vibrancy.
+        controller.addUserScript(WKUserScript(
+            source: Self.darwinPlatformScript,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true))
+        controller.addUserScript(WKUserScript(
+            source: Self.titlebarBridgeScript,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true))
         controller.addUserScript(WKUserScript(
             source: config.identityScript(),
             injectionTime: .atDocumentStart,
@@ -278,6 +360,212 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             """,
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true))
+    }
+
+    /// `<html data-platform="darwin">`, set before the client's first paint. At
+    /// document start the root element exists; the DOMContentLoaded fallback
+    /// mirrors apps/desktop/src/preload-platform.ts.
+    static let darwinPlatformScript = """
+    (function(){var m=function(){document.documentElement.dataset.platform='darwin'};if(document.documentElement)m();else addEventListener('DOMContentLoaded',m);})();
+    """
+
+    /// Title-bar behaviour the page cannot get from WebKit alone:
+    ///   - drag: a primary mousedown on one of the client's drag regions (the
+    ///     sidebar top strip, the conversation title row — the elements the
+    ///     shipped CSS marks `-webkit-app-region: drag`, which WKWebView ignores)
+    ///     that is not on a control is reported with its click count; the
+    ///     wrapper moves the window or applies the title-bar double-click action;
+    ///   - theme: `html[data-ds-theme-source]` (light | dark | system, written by
+    ///     the client's theme presenter) is reported on load and on change so the
+    ///     window appearance, hence the vibrancy material, follows the page.
+    /// The class selectors match the `<hash>_<local>` names CSS modules compile
+    /// to; the 60px band keeps a same-named class elsewhere from dragging.
+    static let titlebarBridgeScript = """
+    (() => {
+      const post = body => { try { webkit.messageHandlers.dshDock.postMessage(body) } catch {} };
+      const control = 'button,a,input,textarea,select,summary,label,[role="button"],[role="menuitem"],[role="tab"],[role="slider"],[role="switch"],[role="checkbox"],[role="combobox"],[contenteditable]';
+      const region = '[class*="_topStrip"],[class*="_titleRow"]';
+      addEventListener('mousedown', e => {
+        if (e.button !== 0 || e.buttons !== 1 || e.clientY > 60) return;
+        const target = e.target instanceof Element ? e.target : null;
+        if (!target || target.closest(control) || !target.closest(region)) return;
+        post({ type: 'titlebar', clicks: e.detail });
+      }, true);
+      let sent;
+      const theme = () => {
+        const value = document.documentElement.getAttribute('data-ds-theme-source');
+        if (value !== null && value !== sent) { sent = value; post({ type: 'theme', value }) }
+      };
+      const observe = () => { new MutationObserver(theme).observe(document.documentElement, { attributeFilter: ['data-ds-theme-source'] }); theme() };
+      if (document.readyState === 'loading') addEventListener('DOMContentLoaded', observe); else observe();
+    })();
+    """
+
+    // MARK: integrated title bar
+
+    /// Where the close button's frame sits, from the window's top-left — the
+    /// upstream Electron shell's `trafficLightPosition: { x: 16, y: 18 }`, which
+    /// the client's 52px sidebar top strip is drawn for (16 + 16 + 2·18 = 52).
+    static let trafficLightOrigin = NSPoint(x: 16, y: 18)
+    /// Stock distance between neighbouring buttons' origins, read once before the first move.
+    private var trafficLightSpacing: CGFloat?
+    /// Rollover tracking over the moved group (see DockWindow); replaced on every layout.
+    private var trafficLightTracking: NSTrackingArea?
+
+    /// Move the traffic lights to `trafficLightOrigin` and grow the title-bar
+    /// container to hold them (AppKit lays them out for a 28px bar; a button
+    /// outside its container's bounds is not hit-testable). Re-run on every
+    /// resize and on leaving full screen, when AppKit rebuilds the bar.
+    func layoutTrafficLights() {
+        let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { window.standardWindowButton($0) }
+        guard buttons.count == 3, let titlebar = buttons[0].superview, let container = titlebar.superview, let frame = container.superview else { return }
+        if trafficLightSpacing == nil { trafficLightSpacing = buttons[1].frame.minX - buttons[0].frame.minX }
+        let spacing = trafficLightSpacing ?? 20
+        let margin = Self.trafficLightOrigin
+        let height = margin.y * 2 + buttons[0].frame.height
+        var containerFrame = container.frame
+        containerFrame.size.height = height
+        containerFrame.origin.y = frame.bounds.height - height
+        if container.frame != containerFrame { container.frame = containerFrame }
+        if titlebar.frame != container.bounds { titlebar.frame = container.bounds }
+        var group = NSRect.null
+        for (index, button) in buttons.enumerated() {
+            var buttonFrame = button.frame
+            buttonFrame.origin = NSPoint(x: margin.x + CGFloat(index) * spacing, y: margin.y)
+            if button.frame != buttonFrame { button.frame = buttonFrame }
+            group = group.union(buttonFrame)
+        }
+        if let old = trafficLightTracking, old.rect == group, titlebar.trackingAreas.contains(old) { return }
+        if let old = trafficLightTracking { titlebar.removeTrackingArea(old) }
+        let tracking = NSTrackingArea(rect: group, options: [.mouseEnteredAndExited, .activeAlways], owner: self, userInfo: nil)
+        titlebar.addTrackingArea(tracking)
+        trafficLightTracking = tracking
+    }
+
+    private func setPointerOverTrafficLights(_ inside: Bool) {
+        guard window.pointerOverTrafficLights != inside else { return }
+        window.pointerOverTrafficLights = inside
+        for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { window.standardWindowButton(type)?.needsDisplay = true }
+    }
+
+    // Tracking-area owner callbacks (the delegate is not a responder; these are plain selectors).
+    @objc func mouseEntered(with event: NSEvent) {
+        if event.trackingArea === trafficLightTracking { setPointerOverTrafficLights(true) }
+    }
+
+    @objc func mouseExited(with event: NSEvent) {
+        if event.trackingArea === trafficLightTracking { setPointerOverTrafficLights(false) }
+    }
+
+    func windowDidResize(_ notification: Notification) { layoutTrafficLights() }
+    func windowDidExitFullScreen(_ notification: Notification) { layoutTrafficLights() }
+    func windowDidBecomeKey(_ notification: Notification) { layoutTrafficLights() }
+
+    /// A mousedown on a page drag region. One click drags the window; a double
+    /// click applies the System Settings ▸ Desktop & Dock ▸ "Double-click a
+    /// window's title bar to" action (Zoom by default).
+    func titlebarMouseDown(clicks: Int) {
+        if clicks >= 2 {
+            let action = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?["AppleActionOnDoubleClick"] as? String
+            switch action {
+            case "Minimize": window.performMiniaturize(nil)
+            case "None": break
+            default: window.performZoom(nil)
+            }
+            return
+        }
+        // The message arrives after the event; the drag is still in progress (or the
+        // button is already up, in which case AppKit ends the drag at once).
+        guard let event = NSApp.currentEvent, event.type == .leftMouseDown || event.type == .leftMouseDragged else { return }
+        window.performDrag(with: event)
+    }
+
+    /// `html[data-ds-theme-source]` → window appearance, so the sidebar vibrancy
+    /// material and the traffic lights follow the page's theme; `system` (or
+    /// anything else) follows the OS.
+    func applyPageTheme(_ value: String) {
+        switch value {
+        case "dark": window.appearance = NSAppearance(named: .darkAqua)
+        case "light": window.appearance = NSAppearance(named: .aqua)
+        default: window.appearance = nil
+        }
+    }
+
+    // MARK: window snapshot (View ▸ Save Window Snapshot, or `kill -USR1 <pid>`)
+
+    private var snapshotSignal: DispatchSourceSignal?
+
+    /// `kill -USR1 <pid>` saves a PNG of the window — the way an agent without
+    /// Screen Recording or Accessibility permission sees what the wrapper
+    /// draws (a process may capture its own windows without either).
+    func installSnapshotSignal() {
+        signal(SIGUSR1, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+        source.setEventHandler { [weak self] in self?.saveWindowSnapshot() }
+        source.resume()
+        snapshotSignal = source
+    }
+
+    /// Write the main window (title bar included) to ~/Library/Logs/DSH Dock/<app>-<unix time>.png and log the path.
+    @objc func saveWindowSnapshot() {
+        guard let image = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(window.windowNumber), [.boundsIgnoreFraming, .bestResolution]),
+              let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
+            appendLog("snapshot: capture failed")
+            return
+        }
+        let url = logURL.deletingLastPathComponent().appendingPathComponent("\(config.name)-\(Int(Date().timeIntervalSince1970)).png")
+        do {
+            try png.write(to: url)
+            appendLog("snapshot: \(url.path)")
+        } catch {
+            appendLog("snapshot: \(error)")
+        }
+    }
+
+    // MARK: window material (View ▸ Window Material)
+
+    /// Build the window's content: the material and the page over it. The
+    /// frosted material is the standard translucent sidebar vibrancy (Finder's;
+    /// Electron's `vibrancy: 'sidebar'`) blurring the desktop behind the
+    /// window; the Liquid Glass variant (macOS 26+) adds an `NSGlassEffectView`
+    /// between that blur and the page. Re-run when the choice changes.
+    func installBackdrop() {
+        let bounds = window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 1280, height: 860)
+        let backdrop = NSVisualEffectView(frame: bounds)
+        backdrop.material = .sidebar
+        backdrop.blendingMode = .behindWindow
+        // 'active' keeps the material stable when the window blurs (Electron's `visualEffectState: 'active'`).
+        backdrop.state = .active
+        webView.removeFromSuperview()
+        webView.frame = backdrop.bounds
+        if #available(macOS 26.0, *), windowMaterial == .liquidGlass {
+            let glass = NSGlassEffectView(frame: backdrop.bounds)
+            glass.autoresizingMask = [.width, .height]
+            glass.style = .clear
+            glass.contentView = webView
+            backdrop.addSubview(glass)
+        } else {
+            backdrop.addSubview(webView)
+        }
+        window.contentView = backdrop
+        syncWindowMaterialMenu()
+    }
+
+    @objc func selectFrostedMaterial() { setWindowMaterial(.frosted) }
+    @objc func selectLiquidGlassMaterial() { setWindowMaterial(.liquidGlass) }
+
+    func setWindowMaterial(_ material: WindowMaterial) {
+        guard material != windowMaterial else { return }
+        windowMaterial = material
+        WindowMaterial.stored = material
+        installBackdrop()
+        appendLog("window material: \(material.rawValue)")
+    }
+
+    func syncWindowMaterialMenu() {
+        frostedMenuItem?.state = windowMaterial == .frosted ? .on : .off
+        liquidGlassMenuItem?.state = windowMaterial == .liquidGlass ? .on : .off
+        if #available(macOS 26.0, *) {} else { liquidGlassMenuItem?.isEnabled = false }
     }
 
     // MARK: view mode (View ▸ Desktop / Mobile)
@@ -444,6 +732,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         guard let body = message.body as? [String: Any] else { return }
         if body["type"] as? String == "console" {
             appendLog("[\(body["level"] as? String ?? "log")] \(body["text"] as? String ?? "")")
+            return
+        }
+        // Popup windows share the user scripts; only the main page steers the main window.
+        if body["type"] as? String == "titlebar" {
+            if message.webView === webView { titlebarMouseDown(clicks: body["clicks"] as? Int ?? 1) }
+            return
+        }
+        if body["type"] as? String == "theme" {
+            if message.webView === webView { applyPageTheme(body["value"] as? String ?? "system") }
             return
         }
         guard body["type"] as? String == "open-panel" else { return }
@@ -825,6 +1122,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         mobileMenuItem = view.addItem(withTitle: "Mobile", action: #selector(selectMobileView), keyEquivalent: "")
         syncViewModeMenu()
         view.addItem(.separator())
+        let materialItem = view.addItem(withTitle: "Window Material", action: nil, keyEquivalent: "")
+        let material = NSMenu(title: "Window Material")
+        material.autoenablesItems = false
+        frostedMenuItem = material.addItem(withTitle: "Frosted", action: #selector(selectFrostedMaterial), keyEquivalent: "")
+        frostedMenuItem.target = self
+        liquidGlassMenuItem = material.addItem(withTitle: "Liquid Glass", action: #selector(selectLiquidGlassMaterial), keyEquivalent: "")
+        liquidGlassMenuItem.target = self
+        materialItem.submenu = material
+        syncWindowMaterialMenu()
+        view.addItem(.separator())
         let openInBrowser = view.addItem(withTitle: "Open in Browser", action: #selector(openInBrowser), keyEquivalent: "o")
         openInBrowser.keyEquivalentModifierMask = [.command, .shift]
         let copy = view.addItem(withTitle: "Copy Address", action: #selector(copyURL), keyEquivalent: "c")
@@ -834,6 +1141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         forwardedPortsMenu.delegate = self
         forwardedPortsMenu.autoenablesItems = false
         forwards.submenu = forwardedPortsMenu
+        view.addItem(withTitle: "Save Window Snapshot", action: #selector(saveWindowSnapshot), keyEquivalent: "")
         view.addItem(.separator())
         let fullScreen = view.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         fullScreen.keyEquivalentModifierMask = [.command, .control]

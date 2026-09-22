@@ -299,6 +299,49 @@ markup changed) beeps and logs. Verified with real ⌘, keystrokes posted by
 PID (`CGEvent.postToPid`, virtual key 43) to DSH Preview (fallback path) and
 the script against the live GUI (plugin path), 2026-09-22.
 
+**Integrated title bar (2026-09-22).** The window has no title text and no
+bar fill (`titlebarAppearsTransparent`, `titleVisibility = .hidden`,
+`titlebarSeparatorStyle = .none`, `.fullSizeContentView`); the page fills
+the window and the traffic lights float over it at Electron's
+`trafficLightPosition: { x: 16, y: 18 }`, which is the geometry the shipped
+client's macOS-desktop layout is drawn for. That layout is switched on by a
+document-start script setting `<html data-platform="darwin">` — the same
+mark the upstream Electron shell's preload sets — and gives: a 52px sidebar
+top strip with the collapse toggle beside the lights, the open-sidebar and
+New Session buttons in the conversation header while the sidebar is closed
+(no rail), a transparent page background, and drag regions
+(`-webkit-app-region: drag` on the sidebar strip and the conversation title
+row — which **WKWebView ignores**, so a second document-start script posts
+a `titlebar` message for a primary mousedown on those elements that is not
+on a control, and the wrapper calls `performDrag(with: NSApp.currentEvent)`;
+a double click applies the System Settings title-bar action — Zoom,
+Minimize or None from `AppleActionOnDoubleClick`). Moving the lights:
+AppKit lays them out for a 28px bar, so `layoutTrafficLights()` (on launch,
+every resize, leaving full screen, becoming key) grows the title-bar
+container to `2·18 + button height` and sets each button's origin; a button
+outside its container is not hit-testable, hence the container. Moved
+buttons also lose AppKit's rollover (the × – + glyphs), which the frame
+decides by asking the window the private `_mouseInGroup:` — `DockWindow`
+overrides it with a flag kept by a tracking area over the moved group (what
+Electron does for `trafficLightPosition`). Hit-testing verified: the page
+receives clicks under the whole bar except on the buttons themselves.
+**Window material:** the web view paints no background (`drawsBackground =
+false` via KVC, the private switch Electron uses) and sits on an
+`NSVisualEffectView` (`.sidebar`, `.behindWindow`, `.active`), so the
+desktop blurs through the page's sidebar column; the client tints that
+column 60% (tuned for Electron), and the wrapper's identity CSS thins it to
+18% so the material is what one sees. View ▸ **Window Material** switches
+between *Frosted* (that, the default) and *Liquid Glass* (macOS 26+: an
+`NSGlassEffectView(.clear)` hosting the page over the same blur), persisted
+as `dsh-dock-app.windowMaterial`. The page's theme choice
+(`html[data-ds-theme-source]`, watched by the bridge script) sets
+`window.appearance` so the material follows light/dark/system. A
+single-window capture (`kill -USR1 <pid>` → `~/Library/Logs/DSH Dock/
+<app>-<time>.png`, or View ▸ Save Window Snapshot; an app may capture its
+own window without Screen Recording permission) shows the material as a
+flat fill — the blur is composited by the window server — so judging the
+glass needs eyes on the screen. Popup windows keep a standard title bar.
+
 **Identity (2026-09-21).** The wrapper carries its own name and icon colour
 into the page: a document-start script sets `globalThis.__DSH_DOCK__ =
 { name, glyphColor }` and appends a `<style>` (all rules `!important`) that
