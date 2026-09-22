@@ -27,9 +27,12 @@ so it is doable, but a project of its own. Not warranted for a UI feature.
 
 ## How it works
 
-1. **Link.** `https://<node>.example.ts.net/dsh/?token=<token>&embed=<sessionId>`
-   ("Include access token", the default when the token is readable) or
-   `…/dsh/?embed=<sessionId>` (identity-only). Base URL and token come from
+1. **Link.** `https://<node>.example.ts.net/dsh/?embed=<sessionId>` with the
+   **Only you** checkbox ticked (default; identity-only), or
+   `…/dsh/?token=<token>&embed=<sessionId>` when it is unticked (the standing
+   token rides along). The link is never displayed — clicking the QR code
+   copies it (the maintainer's call, 2026-09-22: no URL box, no Copy button, no
+   warning text). Base URL and token come from
    the plugin's control channel `status` snapshot (`url`, `tokenUrl`;
    operators only). Off the host the panel falls back to the document's own
    directory URL (`new URL('./', document.baseURI)`) token-less — in a tailnet
@@ -99,7 +102,7 @@ remote Mac: `extras/bin/sync-host <host> --restart` after pushing.
 |---|---|
 | `pnpm install` in the plugin dir wipes `node_modules` and aborts | `CI=true` makes pnpm purge without a TTY and then refuse a changed lockfile. Use `CI=true pnpm install --no-frozen-lockfile` after adding a `link:` dep. The running live server keeps its modules in memory, but a restart in between would fail to find `uqr`. |
 | Tokened QR opens the whole GUI | Live host not restarted since the proxy fix (see above). |
-| Panel says "Tailscale login required", no token checkbox | The control channel answered 403: the page is not an operator (token/cookie-admitted device, or `identityOperators: false`). Expected off-host. |
+| **Only you** is ticked and disabled | The control channel answered 403 (no token to embed): the page is not an operator (token/cookie-admitted device, or `identityOperators: false`). Expected off-host. |
 | QR shows the blank hero on the phone | Bare UUID in `embed=`; the id needs its `session-` prefix. |
 | `edit` says the file changed since it was read | Another agent session is committing to the same checkout; re-read and re-apply. |
 

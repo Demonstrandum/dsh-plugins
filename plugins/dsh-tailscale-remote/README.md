@@ -171,11 +171,13 @@ removal on 2026-09-16, which is when the native dialog first appeared.)
 
 The QR-glyph button in the Session header's utilities row (slot
 `conversation.session.header.utilities`, after the `…` menu) opens a panel
-with a QR code and link for the Session on screen:
+with a QR code for the Session on screen and one checkbox, **Only you**
+(ticked by default). The link itself is never displayed; clicking the QR
+code copies it ("Link copied").
 
 ```
-https://<node>.ts.net/dsh/?token=<standing token>&embed=<sessionId>   # "Include access token" (default when readable)
-https://<node>.ts.net/dsh/?embed=<sessionId>                          # identity only
+https://<node>.ts.net/dsh/?embed=<sessionId>                          # Only you ✓ — identity only
+https://<node>.ts.net/dsh/?token=<standing token>&embed=<sessionId>   # Only you unticked — the token rides along
 ```
 
 `?embed=<sessionId>` is the DSH fork's chrome-less presentation (branch
@@ -190,8 +192,8 @@ Session. At phone width it lays out well as it is. Facts and limits:
   on the allow list. Rotating the token voids every tokened link.
 - The public URL and the token come from the control channel's `status`
   (operators only). Off the host — a tailnet tab, a direct-remote Dock app —
-  the panel falls back to the document's own directory URL, token-less, and
-  says "Tailscale login required". On a loopback tab with the route off it
+  the panel falls back to the document's own directory URL, token-less, with
+  **Only you** ticked and disabled. On a loopback tab with the route off it
   explains instead of showing a QR.
 - The button is not registered inside an embedded page itself
   (`embedPresentation()` set), so a phone never sees it.

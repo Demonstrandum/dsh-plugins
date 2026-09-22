@@ -7,15 +7,17 @@
  * publishes. Scanning it on a phone shows that one Session: no sidebar, no
  * other sessions, composer and approvals intact.
  *
- * Two flavours of link, one checkbox apart:
- *   • with the standing access token (`?token=…&embed=…`; the proxy exchanges
- *     the token for its cookie and keeps `embed` across the redirect) — works
- *     on any device, and is exactly as powerful as the Settings QR code: the
- *     device is admitted to the whole DSH GUI, the `embed` selector is a
- *     presentation choice, not a permission;
- *   • without it (`?embed=…` only) — the device must be admitted by its
- *     Tailscale login (allow list). Nothing to leak; the default when the
- *     token is unavailable (the control channel answers 403 off-host).
+ * Two flavours of link, one checkbox ("Only you", ticked by default) apart:
+ *   • ticked: `?embed=…` only — the device must be admitted by its Tailscale
+ *     login (allow list), i.e. it is you on your phone. Nothing to leak; the
+ *     only option when the token is unavailable (the control channel answers
+ *     403 off-host);
+ *   • unticked: the standing access token rides along (`?token=…&embed=…`;
+ *     the proxy exchanges it for its cookie and keeps `embed` across the
+ *     redirect) — works on any device, and is exactly as powerful as the
+ *     Settings QR code: the device is admitted to the whole DSH GUI, the
+ *     `embed` selector is a presentation choice, not a permission.
+ * The link itself is never shown; clicking the QR code copies it.
  *
  * Facts the link relies on: the public URL and token come from the host
  * half's `status` snapshot (operators only). Off the host — a tailnet tab, a
@@ -26,7 +28,7 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { renderSVG } from 'uqr'
-import { Button, Checkbox, Tooltip, useDismissOnOutsidePointer, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Checkbox, Tooltip, useDismissOnOutsidePointer, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only (erased at build): the `conversation.session.header.utilities` slot declaration.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -129,13 +131,8 @@ const styles = {
   } as CSSProperties,
   title: { fontSize: 13, lineHeight: '20px', fontWeight: 500 } as CSSProperties,
   caption: { fontSize: 11.5, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)' } as CSSProperties,
-  qrWrap: { alignSelf: 'center', width: 208, height: 208, padding: 8, boxSizing: 'border-box', borderRadius: 12, background: '#fff', border: '0.5px solid var(--dsw-alias-border-l4)' } as CSSProperties,
-  url: {
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 11, lineHeight: '15px', padding: '6px 8px', borderRadius: 8,
-    border: '0.5px solid var(--dsw-alias-border-l4)', background: 'var(--dsw-alias-bg-module-platform)', overflowWrap: 'anywhere', userSelect: 'all',
-    maxHeight: 62, overflow: 'auto',
-  } as CSSProperties,
-  row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } as CSSProperties,
+  qrWrap: { alignSelf: 'center', width: 208, height: 208, padding: 8, boxSizing: 'border-box', borderRadius: 12, background: '#fff', border: '0.5px solid var(--dsw-alias-border-l4)', cursor: 'copy' } as CSSProperties,
+  row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 22 } as CSSProperties,
   error: { color: 'var(--dsw-alias-state-error-primary)' } as CSSProperties,
 }
 
@@ -161,7 +158,8 @@ export function SessionQrAction({ sessionId, api, documentBase }: SessionQrActio
   const root = useRef<HTMLDivElement | null>(null)
   const [open, setOpen] = useState(false)
   const [facts, setFacts] = useState<SessionLinkFacts | undefined>(undefined)
-  const [withToken, setWithToken] = useState(true)
+  /** "Only you": identity-only link. Unticked embeds the standing token. */
+  const [onlyMe, setOnlyMe] = useState(true)
   const [copied, setCopied] = useState(false)
   useDismissOnOutsidePointer(root, open, setOpen)
 
@@ -186,9 +184,16 @@ export function SessionQrAction({ sessionId, api, documentBase }: SessionQrActio
   const toggle = useCallback(() => { setOpen(value => !value) }, [])
 
   const token = facts?.token
-  const includeToken = withToken && token !== undefined
+  const includeToken = !onlyMe && token !== undefined
   const link = facts?.base === undefined ? undefined : sessionLink(facts.base, sessionId, includeToken ? token : undefined)
   const svg = link === undefined ? undefined : qrSvg(link)
+  const copy = useCallback(() => {
+    if (link === undefined) return
+    void writeClipboard(link).then((ok) => {
+      setCopied(ok)
+      if (ok) setTimeout(() => setCopied(false), 1500)
+    })
+  }, [link])
 
   return (
     <div ref={root} style={styles.root} data-tailscale-remote-session-qr>
@@ -213,44 +218,32 @@ export function SessionQrAction({ sessionId, api, documentBase }: SessionQrActio
           )}
           {link !== undefined && (
             <>
-              <div style={styles.caption}>
-                Scan to open just this session — no sidebar, no other sessions. Works in the phone’s browser; a running turn streams live.
-              </div>
               {svg === undefined
-                ? <div style={{ ...styles.qrWrap, display: 'grid', placeItems: 'center', color: '#888' }}>QR unavailable</div>
-                : <div style={styles.qrWrap} dangerouslySetInnerHTML={{ __html: svg }} />}
-              <div style={styles.url} title={link}>{link}</div>
+                ? <div style={{ ...styles.qrWrap, display: 'grid', placeItems: 'center', color: '#888', cursor: 'default' }}>QR unavailable</div>
+                : (
+                    <div
+                      style={styles.qrWrap}
+                      role="button"
+                      tabIndex={0}
+                      title="Click to copy the link"
+                      aria-label="QR code for this session; click to copy the link"
+                      onClick={copy}
+                      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); copy() } }}
+                      dangerouslySetInnerHTML={{ __html: svg }}
+                    />
+                  )}
               <div style={styles.row}>
-                {token !== undefined
-                  ? (
-                      <Checkbox
-                        checked={withToken}
-                        onChange={setWithToken}
-                        label="Include access token"
-                        title="With the token any device that scans is let in (the same standing token as the Settings QR code, and the same full access — the session view is a presentation choice, not a permission). Without it, only devices whose Tailscale login is on the allow list can open the link."
-                      />
-                    )
-                  : (
-                      <span style={styles.caption} title={facts?.source === 'document' ? 'The access token is readable from the DSH host only; this link relies on the device’s Tailscale login.' : undefined}>
-                        Tailscale login required
-                      </span>
-                    )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    void writeClipboard(link).then((ok) => {
-                      setCopied(ok)
-                      if (ok) setTimeout(() => setCopied(false), 1500)
-                    })
-                  }}
-                >
-                  {copied ? 'Copied' : 'Copy link'}
-                </Button>
+                <Checkbox
+                  checked={token === undefined ? true : onlyMe}
+                  onChange={setOnlyMe}
+                  disabled={token === undefined}
+                  label="Only you"
+                  title={token === undefined
+                    ? 'The link relies on the device’s Tailscale login (the access token is readable from the DSH host only).'
+                    : 'Ticked: only a device whose Tailscale login is on the allow list can open the link. Unticked: the access token rides along, and any device that scans is let in — with the same full access as the Settings QR code.'}
+                />
+                <span style={{ ...styles.caption, visibility: copied ? 'visible' : 'hidden' }} aria-live="polite">Link copied</span>
               </div>
-              {includeToken && (
-                <div style={styles.caption}>Anyone who scans this can use this DSH host (rotate the token in Settings to revoke).</div>
-              )}
             </>
           )}
         </div>
