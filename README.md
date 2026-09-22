@@ -10,7 +10,7 @@ Out-of-tree work on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-h
 | | Where | What |
 |---|---|---|
 | **Plugins** | `plugins/<name>/` | Nineteen DSH plugins — agent tools, remote access, native OS apps, GUI tweaks, model plumbing. One installable npm package each. [Below](#plugins). |
-| **The fork** | `deepseek-harness/` (git submodule) | the custom fork of DSH, branch `feat/embed-session`, pinned to the commit the plugins were last tested against. A handful of features needed changes no plugin can make. [Below](#the-fork). |
+| **The fork** | `deepseek-harness/` (git submodule) | [the custom fork of DSH](https://github.com/taliesinb/deepseek-harness), branch `feat/embed-session`, pinned to the commit the plugins were last tested against. A handful of features needed changes no plugin can make. [Below](#the-fork). |
 | **macOS apps** | built by `plugins/dsh-tailscale-remote` | Native WKWebView Dock apps for the local server, the preview server and remote Macs, with loopback port forwarding. [Below](#native-os-apps). |
 | **Tooling** | `tools/`, `package.json` scripts | Fresh-machine bootstrap, plugin bundle install, deploy-to-remote, remote control. |
 | **Recipes** | `recipes/` | One Markdown file per completed setup / change / diagnosis, written so a future agent (or human) with zero context can reproduce it. Index in `AGENTS.md`. |
@@ -45,7 +45,8 @@ straight to a remote), `pnpm remote-status|logs|restart|stop`.
 
 DSH is built to be extended by mounting plugins, and almost everything here
 is a plugin. The submodule `deepseek-harness/` is nevertheless a **fork**
-(`taliesinb/deepseek-harness`, branch `feat/embed-session`, ~30 commits over
+([`taliesinb/deepseek-harness`](https://github.com/taliesinb/deepseek-harness), branch
+[`feat/embed-session`](https://github.com/taliesinb/deepseek-harness/tree/feat/embed-session), ~30 commits over
 upstream `master`, periodically rebased — `recipes/rebase-fork-on-upstream.md`)
 because a few things live below any plugin seam:
 
