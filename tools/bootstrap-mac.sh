@@ -22,7 +22,9 @@
 #   --tailscale-timeout S give up waiting for the Tailscale login after S seconds (default 10: the login is a
 #                         precondition, not something this script waits around for)
 #   --force               proceed even though DSH already seems installed or running on this Mac (see below)
-#   --replace             REDEPLOY: stop the existing DSH (both LaunchAgents, the listeners), delete the
+#   --replace             take over ANY existing DSH on this Mac (stock Desktop app / global CLI / our Dock apps /
+#                         relay / Serve route / foreign profile), keeping sessions, settings and credentials; then install.
+#                         Also: REDEPLOY: stop the existing DSH (both LaunchAgents, the listeners), delete the
 #                         deploy-remote.sh tree (~/dsh, ~/.dsh/deploy) and reinstall from scratch, keeping
 #                         ~/.dsh (settings, credentials, sessions, tailscale-remote.json) and any clone at --dir
 #   --instance NAME       one DSH per macOS user on a shared machine: this user's install gets its own ports
@@ -72,6 +74,7 @@ APPS=1
 TAILNET=1
 APPLE=1
 USER_WITHOUT=""
+TS=/Applications/Tailscale.app/Contents/MacOS/Tailscale
 REBUILD=0
 FORCE=0
 REPLACE=0
@@ -266,7 +269,7 @@ if wants preflight; then
     banner "Replace the existing DSH install (--replace)"
     [ -f "$MARKER" ] && rm -f "$MARKER"
     if [ "$DRY" = 0 ]; then
-      confirm "Stop DSH here, remove ~/dsh and ~/.dsh/deploy (deploy-remote.sh tree) and reinstall? ~/.dsh settings/sessions/token are kept" y \
+      confirm "Take over this Mac's DSH: stop every dsh web, remove DSH Dock/Desktop apps and a global dsh CLI, reset the Tailscale Serve route, drop a foreign ~/.dsh/profiles, then reinstall? Sessions, settings and credentials are kept" y \
         || die "aborted"
     fi
     for la in ai.symbolica.dsh-remote io.github.taliesinb.dsh-web-relay; do
@@ -287,8 +290,55 @@ if wants preflight; then
       log "removing the deploy-remote.sh tree: ~/dsh (checkout, plugins, deps, logs) and ~/.dsh/deploy"
       [ "$DRY" = 1 ] || rm -rf "$HOME/dsh" "$DSH_HOME_DIR/deploy"
     fi
+    # ---- take over ANY other DSH on this Mac (a colleague's manual install), not just our own shapes ----
+    # Every `dsh web` of this user, whatever started it (stock CLI, Desktop app, a terminal).
+    for pid in $(pgrep -u "$(id -u)" -f 'dsh (web|serve)|@deepseek-ai/dsh|dsh/(lib|src)/bin\.(js|ts)|DSH\.app/Contents/MacOS/' 2>/dev/null); do
+      log "stopping dsh process $pid ($(ps -o command= -p "$pid" 2>/dev/null | cut -c1-80))"
+      [ "$DRY" = 1 ] || kill "$pid" 2>/dev/null || true
+    done
+    # Listeners across the whole DSH port range (a stock install may sit on 3080..3089 or the next free one).
+    for port in $(seq 3080 3099); do
+      pids="$(lsof -ti tcp:$port -sTCP:LISTEN 2>/dev/null || true)"
+      [ -z "$pids" ] || { log "stopping listener on :$port (pid $pids: $(ps -o comm= -p "$(echo "$pids" | head -1)" 2>/dev/null))"; [ "$DRY" = 1 ] || { echo "$pids" | xargs kill 2>/dev/null || true; }; }
+    done
+    # Our Dock apps (any instance: DSH, DSH Preview, DSH <Host>…) by bundle-id prefix, and the stock Desktop app.
+    for app in "$HOME"/Applications/*.app /Applications/DSH.app; do
+      [ -d "$app" ] || continue
+      bid="$(defaults read "$app/Contents/Info.plist" CFBundleIdentifier 2>/dev/null || true)"
+      # Ours by bundle-id prefix; the stock Desktop app by name (its id is set at release time, not in-tree).
+      case "$bid" in
+        io.github.taliesinb.dsh-dock-app*|*deepseek*) ;;
+        *) case "$(basename "$app")" in DSH.app) ;; *) continue ;; esac ;;
+      esac
+      log "removing $(basename "$app") ($bid)"
+      [ "$DRY" = 1 ] || { osascript -e "tell application id \"$bid\" to quit" >/dev/null 2>&1 || true; pkill -f "$app/Contents/MacOS/" 2>/dev/null || true; sleep 1; rm -rf "$app"; }
+    done
+    # A globally installed stock CLI (npm/pnpm/bun/Homebrew), so the gate and PATH are clean afterwards.
+    if command -v dsh >/dev/null 2>&1; then
+      DSH_BIN="$(command -v dsh)"
+      log "removing the global dsh CLI at $DSH_BIN"
+      if [ "$DRY" = 0 ]; then
+        npm uninstall -g @deepseek-ai/dsh >/dev/null 2>&1 || true
+        pnpm remove -g @deepseek-ai/dsh >/dev/null 2>&1 || true
+        bun remove -g @deepseek-ai/dsh >/dev/null 2>&1 || true
+        brew uninstall dsh >/dev/null 2>&1 || true
+        [ -e "$DSH_BIN" ] && { rm -f "$DSH_BIN" || warn "could not remove $DSH_BIN — remove it by hand"; }
+      fi
+    fi
+    # The tailnet route: whatever `tailscale serve` publishes for DSH gets re-created by our plugin below.
+    if [ -x "$TS" ] && [ "$DRY" = 0 ]; then
+      if "$TS" serve status 2>/dev/null | grep -qE "127\.0\.0\.1:30[89][0-9]"; then
+        log "resetting the Tailscale Serve config (it pointed at a local DSH)"
+        "$TS" serve reset >/dev/null 2>&1 || warn "tailscale serve reset failed — check 'tailscale serve status'"
+      fi
+    fi
+    # A profile assembled by another DSH version cannot be layered on; sessions, settings and credentials stay.
+    if [ -d "$DSH_HOME_DIR/profiles" ] && [ ! -f "$DSH_HOME_DIR/bootstrap-mac.json" ] && [ ! -f "$DSH_HOME_DIR/tailscale-remote.json" ]; then
+      log "moving the foreign $DSH_HOME_DIR/profiles aside (→ profiles.stock-backup); sessions/settings/credentials kept"
+      [ "$DRY" = 1 ] || { rm -rf "$DSH_HOME_DIR/profiles.stock-backup"; mv "$DSH_HOME_DIR/profiles" "$DSH_HOME_DIR/profiles.stock-backup"; }
+    fi
     if [ "$DRY" = 0 ]; then
-      port_busy "$WEB_PORT" && die "something still listens on :$WEB_PORT after the teardown"
+      for port in $(seq 3080 3099); do port_busy "$port" && die "something still listens on :$port after the teardown"; done
       pgrep -u "$(id -u)" -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' >/dev/null 2>&1 && die "a dsh process survived the teardown"
     fi
     ok "old install stopped and removed; ~/.dsh kept$( [ -d "$HOME/Applications/$DOCK_NAME.app" ] && echo '; the Dock app will be rebuilt' )"
@@ -469,7 +519,6 @@ has_<private> || EXCLUDED+=(<private-plugin>)
 excluded() { case " ${EXCLUDED[*]-} " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }   # ${arr[*]-}: bash 3.2 + set -u treats an empty array as unbound
 
 # ===========================================================================
-TS=/Applications/Tailscale.app/Contents/MacOS/Tailscale
 # ts_field state|login|dns over `tailscale status --self --json` (empty on any failure). python3 (Command Line
 # Tools) rather than node: this runs before brew node exists on a fresh machine.
 ts_field() {
