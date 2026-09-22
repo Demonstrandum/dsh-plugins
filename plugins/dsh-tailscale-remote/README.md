@@ -19,6 +19,9 @@ Tailscale part, from scratch, in ~600 lines:
   Enable / Disable, the URL with copy-to-clipboard, a comma-separated list of
   allowed Tailscale users, a QR code of the URL *with* the access token, and a
   **This Mac** group with the two pieces below;
+- a **per-session QR button** in the Session header (top right, beside the
+  right-dock toggle; `src/client/session-qr.tsx`): a QR code and link that
+  open *that one Session* chrome-less on a phone ([below](#per-session-qr-code));
 - a **Dock app** for this Mac (`dock-app/`, `dock-app.mjs`): a WKWebView
   wrapper built with `swiftc` that opens the tailnet URL — admitted by the
   node's *own* Tailscale identity, so it never holds a token or an expiring
@@ -103,6 +106,10 @@ WebSocket upgrades take the same gate. Index responses get a head script that
 turns `https://node/dsh` into `https://node/dsh/` — both arrive as `/`, and
 without the slash the shell's relative asset URLs resolve at the site root.
 
+The token exchange keeps every other query parameter, like DSH's own
+(`?token=…&embed=<id>` → `<mount>/?embed=<id>`), which is what the
+per-session links rely on.
+
 **Threat model note.** Any local process can connect to the loopback
 listener and forge the identity headers — that equals full local access,
 which a local process already has. The gate protects against the tailnet,
@@ -159,6 +166,41 @@ anyway, override in the profile's `cordis.patch.yml` (later layer wins per row):
 Do not *also* insert those two ids from another layer — duplicate ids fail the
 boot. (`dsh-full-remote` carried the same pin; it disappeared with that plugin's
 removal on 2026-09-16, which is when the native dialog first appeared.)
+
+## Per-session QR code
+
+The QR-glyph button in the Session header's utilities row (slot
+`conversation.session.header.utilities`, after the `…` menu) opens a panel
+with a QR code and link for the Session on screen:
+
+```
+https://<node>.ts.net/dsh/?token=<standing token>&embed=<sessionId>   # "Include access token" (default when readable)
+https://<node>.ts.net/dsh/?embed=<sessionId>                          # identity only
+```
+
+`?embed=<sessionId>` is the DSH fork's chrome-less presentation (branch
+`feat/embed-session`, the same page `dsh-remote-workspaces` frames): one
+Session, no sidebar, navigation pinned to it and its subagent children,
+composer and approvals intact, persisted browser state namespaced per
+Session. At phone width it lays out well as it is. Facts and limits:
+
+- **It is a presentation choice, not a permission.** A tokened link admits
+  the device exactly like the Settings QR code does — drop `?embed=` and the
+  whole GUI is there. Identity-only links need the device's Tailscale login
+  on the allow list. Rotating the token voids every tokened link.
+- The public URL and the token come from the control channel's `status`
+  (operators only). Off the host — a tailnet tab, a direct-remote Dock app —
+  the panel falls back to the document's own directory URL, token-less, and
+  says "Tailscale login required". On a loopback tab with the route off it
+  explains instead of showing a QR.
+- The button is not registered inside an embedded page itself
+  (`embedPresentation()` set), so a phone never sees it.
+- Session ids keep their `session-` prefix; a bare UUID shows the blank hero.
+- The QR is rendered in the browser (`uqr`, bundled); nothing runs while the
+  panel is closed, and opening it makes one `status` call.
+- Not verified on a real phone yet: iOS "Add to Home Screen" (separate
+  cookie store; the saved URL is the post-exchange one without the token) and
+  the right dock at phone width.
 
 ## Control channel
 

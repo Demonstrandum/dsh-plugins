@@ -454,6 +454,15 @@ can reproduce or maintain it:
   `__DSH_DOCK__` + `!important` copy of the rules so DSH Remote reads right
   with no plugin on its server; rebuilding the three Dock apps from their
   `dsh-dock-app.json` specs.
+- `per-session-qr-code.md` — a QR button in the Session header (top right)
+  whose code opens *that one Session* chrome-less on a phone: the fork's
+  `?embed=<sessionId>` page at the tailnet route, riding the standing token
+  (or identity) — a UI feature, deliberately not a security boundary (what
+  real per-session scoping of `/api` + the mux would take, and why not); the
+  `conversation.session.header.utilities` slot, the proxy exchange now
+  keeping the query, the `session-` prefix trap, phone-width facts, the
+  `/tmp`-copy trial so the live bundle is not hot-swapped, and the `CI=true
+  pnpm install` purge trap.
 - `preview-identity.md` — superseded stub (2026-09-05 red favicon + "DSH-dev"
   manifest for the Safari Dock preview; the dev-overlay/profile collision rule).
 - `promotion-loop-and-duplicate-dsh-tools.md` — the two faults that made the

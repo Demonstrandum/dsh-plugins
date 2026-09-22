@@ -11,6 +11,11 @@
  *   (the WKWebView wrapper under ~/Applications) and the relay LaunchAgent
  *   [Install/Remove] that starts DSH when the Dock app is opened cold.
  *
+ * Plus a per-session QR button in the Session header's utilities row
+ * (`session-qr.tsx`): the chrome-less `?embed=<sessionId>` page of the
+ * Session on screen, at the tailnet URL, for a phone. Not registered inside
+ * an embedded page itself.
+ *
  * Talks to the host half over the plugin's own RPC channel
  * (`/tailscale-remote/<endpoint>`) through `ctx.connection.rpc`, which is
  * document-relative on the patched DSH — but the proxy refuses to forward that
@@ -20,10 +25,12 @@ import type { Context } from '@deepseek-ai/cordis'
 // Type-only (erased at build): merges `ctx.slots` onto the Cordis Context.
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/client'
+import { embedPresentation } from '@deepseek-ai/dsh-client-store'
 import { Button, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
+import { SessionQrAction, type SessionQrInjected } from './session-qr.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
@@ -199,6 +206,16 @@ export function apply(ctx: Context): void {
     ]
     return () => { for (const dispose of disposers) dispose() }
   })
+  // The per-session QR button. An embedded page (`?embed=<id>`, the phone's
+  // own view or a remote-workspaces frame) has nothing to share on: skip it.
+  if (embedPresentation() === undefined) {
+    ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
+      name: 'conversation.session.header.utilities',
+      id: 'tailscale-remote-session-qr',
+      order: 50,
+      inject: (): SessionQrInjected => ({ api, documentBase: new URL('./', document.baseURI).href }),
+    }, SessionQrAction))
+  }
   ctx.effect(() => installDockLoopbackLinks(), 'tailscale-remote: loopback links leave the Dock app')
 }
 

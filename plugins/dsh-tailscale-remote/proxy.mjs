@@ -354,8 +354,17 @@ export async function startProxy(spec) {
    * arrive as `/`), so the redirect names the mount directory outright — a
    * relative `./` from the slash-less form would resolve to the site root.
    * Directly on the loopback listener the request path is the real one.
+   * Every query parameter other than the token survives the redirect, as in
+   * DSH's own exchange: `?token=…&embed=<session>` lands on `?embed=<session>`,
+   * so a per-session QR code (the header's QR button) opens that one Session
+   * chrome-less instead of the whole GUI.
    */
-  const exchangeTarget = req => (req.headers['x-forwarded-host'] !== undefined && mount !== '/' ? `${mount}/` : './')
+  const exchangeTarget = (req, params) => {
+    const rest = new URLSearchParams(params)
+    rest.delete(TOKEN_QUERY)
+    const base = req.headers['x-forwarded-host'] !== undefined && mount !== '/' ? `${mount}/` : './'
+    return rest.size === 0 ? base : `${base}?${rest.toString()}`
+  }
 
   const setCookieHeader = (req, value, maxAge) => `${spec.cookieName}=${value}; Max-Age=${String(maxAge)}; Path=/; HttpOnly; SameSite=Lax${requestIsHttps(req) ? '; Secure' : ''}`
 
@@ -387,7 +396,7 @@ export async function startProxy(spec) {
         res.writeHead(303, {
           'cache-control': 'no-store',
           'referrer-policy': 'no-referrer',
-          'location': exchangeTarget(req),
+          'location': exchangeTarget(req, url.searchParams),
           'set-cookie': setCookieHeader(req, cookieValueFor(spec.token()), 400 * 24 * 3600),
         })
         res.end()

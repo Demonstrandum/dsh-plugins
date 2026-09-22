@@ -140,6 +140,15 @@ describe('gate', () => {
     assert.equal(setCookie.split(';')[0].split('=')[1], cookieValueFor(token))
   })
 
+  it('keeps every other query parameter across the exchange (per-session `embed` links)', async () => {
+    const res = await fetchProxy(`/?token=${token}&embed=session-abc`, { headers: servePeer() })
+    assert.equal(res.status, 303)
+    assert.equal(res.headers.location, '/dsh/?embed=session-abc')
+    const direct = await fetchProxy(`/?embed=session-abc&token=${token}&x=1`)
+    assert.equal(direct.status, 303)
+    assert.equal(direct.headers.location, './?embed=session-abc&x=1')
+  })
+
   it('rejects a wrong token, a token on a deep path, and a token on POST', async () => {
     assert.equal((await fetchProxy('/?token=nope')).status, 401)
     assert.equal((await fetchProxy(`/api/x?token=${token}`)).status, 401)
