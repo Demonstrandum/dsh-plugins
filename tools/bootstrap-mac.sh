@@ -325,11 +325,13 @@ if wants preflight; then
         [ -e "$DSH_BIN" ] && { rm -f "$DSH_BIN" || warn "could not remove $DSH_BIN — remove it by hand"; }
       fi
     fi
-    # The tailnet route: whatever `tailscale serve` publishes for DSH gets re-created by our plugin below.
+    # The tailnet route for THIS instance's mount only (the plugin re-publishes it below). Never `serve reset`:
+    # Serve config is per node, so on a shared machine that would take every other account's route down
+    # (it did, once, 2026-09-22 — restored by restarting their instances).
     if [ -x "$TS" ] && [ "$DRY" = 0 ]; then
-      if "$TS" serve status 2>/dev/null | grep -qE "127\.0\.0\.1:30[89][0-9]"; then
-        log "resetting the Tailscale Serve config (it pointed at a local DSH)"
-        "$TS" serve reset >/dev/null 2>&1 || warn "tailscale serve reset failed — check 'tailscale serve status'"
+      if "$TS" serve status 2>/dev/null | grep -qE "[|]--[[:space:]]+${MOUNT}[[:space:]]"; then
+        log "removing the Tailscale Serve path $MOUNT (re-published by the plugin below)"
+        "$TS" serve --https=443 --set-path="$MOUNT" off >/dev/null 2>&1 || warn "tailscale serve … off failed for $MOUNT — check 'tailscale serve status'"
       fi
     fi
     # A profile assembled by another DSH version cannot be layered on; sessions, settings and credentials stay.
@@ -338,7 +340,7 @@ if wants preflight; then
       [ "$DRY" = 1 ] || { rm -rf "$DSH_HOME_DIR/profiles.stock-backup"; mv "$DSH_HOME_DIR/profiles" "$DSH_HOME_DIR/profiles.stock-backup"; }
     fi
     if [ "$DRY" = 0 ]; then
-      for port in $(seq 3080 3099); do port_busy "$port" && die "something still listens on :$port after the teardown"; done
+      for port in $(seq 3080 3099); do [ -n "$(lsof -u "$(id -u)" -a -ti tcp:$port -sTCP:LISTEN 2>/dev/null || true)" ] && die "a process of yours still listens on :$port after the teardown"; done
       pgrep -u "$(id -u)" -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' >/dev/null 2>&1 && die "a dsh process survived the teardown"
     fi
     ok "old install stopped and removed; ~/.dsh kept$( [ -d "$HOME/Applications/$DOCK_NAME.app" ] && echo '; the Dock app will be rebuilt' )"
