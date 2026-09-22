@@ -68,6 +68,11 @@ before(async () => {
   })
   backend.on('upgrade', (req, socket) => {
     seen.push({ url: req.url, method: 'UPGRADE', headers: req.headers })
+    if (req.url.startsWith('/api/loopback-forward')) {
+      // A refused forward (forward.mjs): status + reason header + body, before any 101.
+      socket.end('HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nX-Dsh-Forward-Error: reserved\r\nContent-Length: 9\r\nConnection: close\r\n\r\nreserved\n')
+      return
+    }
     socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: fake\r\n\r\n')
     socket.write('hello-from-dsh')
     socket.on('data', chunk => socket.write(`echo:${chunk.toString()}`))
@@ -349,5 +354,21 @@ describe('websocket', () => {
     const upgrade = seen.findLast(entry => entry.method === 'UPGRADE')
     assert.equal(upgrade.headers.cookie, DSH_COOKIE)
     assert.equal(upgrade.headers.host, `127.0.0.1:${backendPort}`)
+  })
+
+  it('relays the status and reason header of an upgrade DSH refused, without its body', async () => {
+    const { connect } = await import('node:net')
+    const text = await new Promise((resolve) => {
+      const socket = connect(proxy.port, '127.0.0.1', () => {
+        socket.write('GET /api/loopback-forward?port=3080 HTTP/1.1\r\nHost: node.tailnet.ts.net\r\nX-Forwarded-Proto: https\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: abc\r\nSec-WebSocket-Version: 13\r\nX-Forwarded-For: 100.101.102.103\r\nTailscale-User-Login: alice@example.com\r\n\r\n')
+      })
+      let out = ''
+      socket.on('data', chunk => { out += chunk.toString() })
+      socket.on('close', () => resolve(out))
+    })
+    assert.match(text, /^HTTP\/1\.1 403/)
+    assert.match(text, /x-dsh-forward-error: reserved/i)
+    assert.match(text, /content-length: 0/i)
+    assert.doesNotMatch(text, /reserved\n$/)
   })
 })

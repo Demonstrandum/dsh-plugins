@@ -510,7 +510,16 @@ export async function startProxy(spec) {
     up.on('response', (upRes) => {
       if (upRes.statusCode === 401) void refreshUpstreamCookie()
       upRes.resume()
-      socket.end(`HTTP/1.1 ${String(upRes.statusCode ?? 502)} ${upRes.statusMessage ?? 'Bad Gateway'}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`)
+      // A refused upgrade: relay the status and DSH's own headers (a route such
+      // as forward.mjs names its reason in one, `x-dsh-forward-error`) but not
+      // the body — the client learns the verdict from the head alone.
+      const lines = [`HTTP/1.1 ${String(upRes.statusCode ?? 502)} ${upRes.statusMessage ?? 'Bad Gateway'}`]
+      for (const [key, value] of Object.entries(relayHeaders(upRes.headers))) {
+        if (key.toLowerCase() === 'content-length' || key.toLowerCase() === 'content-type') continue
+        for (const item of Array.isArray(value) ? value : [value]) lines.push(`${key}: ${String(item)}`)
+      }
+      lines.push('Connection: close', 'Content-Length: 0')
+      socket.end(`${lines.join('\r\n')}\r\n\r\n`)
     })
     up.on('error', () => socket.destroy())
     socket.on('error', () => up.destroy())
