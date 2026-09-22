@@ -70,15 +70,31 @@ packages/session/session-title-first-prompt-llm/tests/provider.spec.ts` from
 the checkout root (16 pass; running vitest inside the package dir finds no
 tests).
 
-## Fix on the remote (live `$DSH_HOME` — confirm with the maintainer first)
+## Rolled out on the remote (2026-09-22, on the maintainer's request)
 
-Append the YAML block above to `~/.dsh/profiles/web/cordis.patch.yml` on
-`<user>@<remote>`. The `web` profile ships `patchReload: 'live'`, so the running
-server should pick it up on save; to be sure,
-`kill -TERM $(pgrep -f 'bin.ts web --no-open --port 3090')` (the relay
-respawns it; pages open at the restart black-screen once unless
-`reload-on-restart` is installed — `recipes/black-screen-after-server-restart.md`).
-Existing titles are not rewritten; only new sessions change.
+The remote is **seven** per-user DSH instances, not two: `<user>` (:3080,
+`/dsh/<user>`), `tali` (:3090, `/dsh/tali`), `<user>` :3100, `<user>` :3110,
+`<user>` :3120, `<user>` :3130, `<user>` :3140 — each with its own
+`~/github/tali-dash-plugins` clone, `~/.dsh`, relay and Dock app
+(`ps -axo user,pid,command | grep 'bin.ts web'` lists them all from any
+user; each user's `lsof` shows only its own listeners). All seven accept
+key-based ssh from this Mac. Per user:
+
+```sh
+ssh <user>@<remote> 'git -C ~/github/tali-dash-plugins pull --ff-only'
+pnpm bootstrap-remote <user>@<remote> --only home        # from <plugins>; --dir defaults to ~/github/tali-dash-plugins
+```
+
+**No restart was needed.** `packages/boot/hmr/src/index.ts` watches the
+profile patch under the `web` profile (`patchReload: live`) and runs
+`reconcileProfilePatches` on change; a session started on `<user>@<remote>` right
+after the edit was titled `ls-command-explanation` by `anthropic/claude-haiku-4.5`
+while the old sessions kept their natural titles (titles are never rewritten).
+If a restart is ever wanted: `kill -TERM <that user's bin.ts web pid>` — the
+relay respawns it, and open pages black-screen once unless `reload-on-restart`
+is installed (`recipes/black-screen-after-server-restart.md`). the remote's `node`
+has no `zlib.ZstdDecompress` and no `zstd` binary, so read its session logs
+from this Mac (`scp`, then `zstd -dc`).
 
 Done the same day: `tools/bootstrap-mac.sh` step `home` now sets the row
 (idempotent; `grep style: slug` is the postcondition) through the new
