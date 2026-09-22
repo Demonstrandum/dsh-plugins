@@ -6,6 +6,9 @@ model names come out as natural phrases ("Symba status and profiles i…",
 (`symba-demo`, `<private>-plot-demo`). On this Mac's live DSH the same sessions
 would be `symba-status-and-profiles`. **Nothing is broken**: the slug shape is
 a *config override* that lives in `$DSH_HOME`, and the remote's home never got it.
+(Host names, accounts and ports of the shared remote machine live only in the
+private `extras/` submodule — `extras/AGENTS.md`, `extras/hosts/<host>.env`;
+this public recipe uses `<remote>` / `<user>` placeholders.)
 
 ## The two mechanisms (do not confuse them)
 
@@ -33,9 +36,9 @@ maxOutputTokens/timeoutMs`), so the default is `natural`. This Mac's
 ## Diagnosis trail
 
 1. **Is the code there?** `git merge-base --is-ancestor 4cbd1113d8 HEAD` in the
-   checkout that runs the instance. On the remote (`ssh <user>@<remote>`, checkout
-   `~/github/tali-dash-plugins/deepseek-harness`) it was the same commit as
-   here (`5029131621`) — present.
+   checkout that runs the instance. On the remote (`ssh <user>@<remote>`,
+   checkout `~/github/tali-dash-plugins/deepseek-harness`) it was the same
+   commit as here (`5029131621`) — present.
 2. **Is the override there?** `grep -A9 session-title-llm
    ~/.dsh/profiles/web/cordis.patch.yml` — on the remote the profile patch holds
    only the `tali-tailscale-remote` row. Effective composition
@@ -47,8 +50,8 @@ maxOutputTokens/timeoutMs`), so the default is `natural`. This Mac's
    `$DSH_HOME/sessions/<ws>/<session>/session.v3.jsonl.zstd` carry
    `source.kind` (`fallback` | `provider` | `user`) and, for `provider`, the
    route. Locally: dozens of `"kind":"provider"` slug titles from
-   `anthropic/claude-fable-5-1`. (The remote has no `zstd` on PATH, so read the log
-   there with the checkout's own reader or copy the file over.)
+   `anthropic/claude-fable-5-1`. (The remote has no `zstd` on PATH and its
+   `node` lacks `zlib.ZstdDecompress`, so `scp` the file here and `zstd -dc`.)
 4. **Why the gap:** `tools/bootstrap-mac.sh` (what `pnpm bootstrap-remote` ran
    on the remote) writes only the `tali-tailscale-remote` row into the profile
    patch; the older `tools/deploy-remote.sh` overlay did include the slug row.
@@ -72,29 +75,26 @@ tests).
 
 ## Rolled out on the remote (2026-09-22, on the maintainer's request)
 
-The remote is **seven** per-user DSH instances, not two: `<user>` (:3080,
-`/dsh/<user>`), `tali` (:3090, `/dsh/tali`), `<user>` :3100, `<user>` :3110,
-`<user>` :3120, `<user>` :3130, `<user>` :3140 — each with its own
-`~/github/tali-dash-plugins` clone, `~/.dsh`, relay and Dock app
-(`ps -axo user,pid,command | grep 'bin.ts web'` lists them all from any
-user; each user's `lsof` shows only its own listeners). All seven accept
-key-based ssh from this Mac. Per user:
+The shared remote machine runs **one DSH instance per macOS account** (seven at
+the time; inventory and the `sync-host` tool are in the private extras —
+`extras/AGENTS.md`), each with its own `~/github/tali-dash-plugins` clone,
+`~/.dsh`, relay and Dock app (`ps -axo user,pid,command | grep 'bin.ts web'`
+lists them all from any account; each account's `lsof` shows only its own
+listeners). Per account, from this Mac:
 
 ```sh
 ssh <user>@<remote> 'git -C ~/github/tali-dash-plugins pull --ff-only'
-pnpm bootstrap-remote <user>@<remote> --only home        # from <plugins>; --dir defaults to ~/github/tali-dash-plugins
+pnpm bootstrap-remote <user>@<remote> --only home   # from <plugins>; --dir defaults to ~/github/tali-dash-plugins
 ```
 
 **No restart was needed.** `packages/boot/hmr/src/index.ts` watches the
 profile patch under the `web` profile (`patchReload: live`) and runs
-`reconcileProfilePatches` on change; a session started on `<user>@<remote>` right
+`reconcileProfilePatches` on change; a session started on one instance right
 after the edit was titled `ls-command-explanation` by `anthropic/claude-haiku-4.5`
 while the old sessions kept their natural titles (titles are never rewritten).
-If a restart is ever wanted: `kill -TERM <that user's bin.ts web pid>` — the
+If a restart is ever wanted: `kill -TERM <that account's bin.ts web pid>` — the
 relay respawns it, and open pages black-screen once unless `reload-on-restart`
-is installed (`recipes/black-screen-after-server-restart.md`). the remote's `node`
-has no `zlib.ZstdDecompress` and no `zstd` binary, so read its session logs
-from this Mac (`scp`, then `zstd -dc`).
+is installed (`recipes/black-screen-after-server-restart.md`).
 
 Done the same day: `tools/bootstrap-mac.sh` step `home` now sets the row
 (idempotent; `grep style: slug` is the postcondition) through the new

@@ -704,7 +704,7 @@ if wants home; then
   fi
   # Model-generated session titles as slugs (foo-bar-baz), the shape the hand-typed `slug:` convention of
   # session-title-slug produces: the fork's `style: slug` on the in-tree session-title-llm row. The base bundle
-  # leaves `style` unset (natural-language titles), so every new home needs this override — DSH Remote shipped
+  # leaves `style` unset (natural-language titles), so every new home needs this override — the remote instances shipped
   # without it (recipes/model-titles-not-slugs-on-new-instance.md). A patch row replaces the whole config, so
   # the bundle's other keys are restated.
   PATCH="$DSH_HOME_DIR/profiles/web/cordis.patch.yml"

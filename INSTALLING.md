@@ -507,8 +507,8 @@ keys restated: `targetWords: 5`, `targetCjkCharacters: 10`,
 `maxInputBytes: 4096`, `maxOutputTokens: 64`, `timeoutMs: 60000`), so
 model-generated titles come out as `foo-bar-baz`, matching the hand-typed
 `slug:` convention. `style` is a fork feature the base bundle leaves unset;
-a home without this row titles sessions in natural language (that is how DSH
-the remote instances shipped before 2026-09-22 —
+a home without this row titles sessions in natural language (that is how the
+remote instances shipped before 2026-09-22 —
 `recipes/model-titles-not-slugs-on-new-instance.md`). On an existing install,
 `tools/bootstrap-mac.sh --only home --yes` adds it and a `dsh web` restart
 (or the `web` profile's live patch reload) picks it up.

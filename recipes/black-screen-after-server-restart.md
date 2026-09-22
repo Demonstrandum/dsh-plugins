@@ -37,8 +37,9 @@ reference: `plugins/dsh-tailscale-remote/dock-app/Sources/main.swift`.
    could appear. The dark rectangle is the shell's `<body>` with the React
    root unmounted (an uncaught render error with no boundary above it).
 
-2. **Server side.** The remote runs one DSH per macOS user (`/dsh/` = `<owner>`,
-   `/dsh/tali/` = `tali`, port 3090); ssh as the *right* user. The relay log
+2. **Server side.** The remote runs one DSH per macOS account (`/dsh/<user>/`,
+   one port decade each; inventory in the private `extras/`); ssh as the
+   *right* account. The relay log
    (`~/.dsh/logs/relay.log`) is **UTC** while the Dock log is local (BST here):
    `23:19:35 relay: dsh web exited (code 0) … started dsh web` = 00:19:35 BST.
    So the server had restarted **ten minutes before** the page noticed (the
@@ -103,7 +104,7 @@ DSH process, page `performance.timeOrigin` changes ~3 s after the relay reports
 |---|---|---|
 | preview | row in `cordis.dev.yml` (done) | `launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay.preview` |
 | this Mac, live | `pnpm install-plugins` (list includes it) or `pnpm dsh plugin --profile web add plugins/reload-on-restart` from the checkout | bundle rows are **boot-time**: takes effect at the next `dsh web` start; pages open at that restart still run the old client and will black-screen once → ⌘R |
-| <user>@<remote> | `cd ~/github/tali-dash-plugins && git pull && (cd plugins/reload-on-restart && pnpm install && pnpm build) && (cd deepseek-harness && pnpm dsh plugin --profile web add ../plugins/reload-on-restart)`, then `kill -TERM $(pgrep -f 'bin.ts web --no-open --port 3090')` (relay respawns) | same one-time ⌘R caveat for the DSH Remote Dock app; the other accounts' instances are separate and were left alone |
+| `<user>@<remote>` | `cd ~/github/tali-dash-plugins && git pull && (cd plugins/reload-on-restart && pnpm install && pnpm build) && (cd deepseek-harness && pnpm dsh plugin --profile web add ../plugins/reload-on-restart)`, then `kill -TERM $(pgrep -f 'bin.ts web --no-open --port <web port>')` (relay respawns); today `extras/bin/sync-host <host> --restart` does this for every account | same one-time ⌘R caveat for the DSH Remote Dock app; each account's instance is separate |
 
 ## Troubleshooting
 
