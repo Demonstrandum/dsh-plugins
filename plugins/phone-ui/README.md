@@ -29,7 +29,7 @@ becomes 8px (the composer card follows, so it stays flush with the text —
 48px more text per line on a 390px phone), every fenced code block loses
 its **banner row** (`python … Copy`, also on language-less blocks), and
 the **corner radius** of code blocks (12→6px) and of your own message
-bubbles (22→11px) is halved.
+bubbles (22→6px) is cut to the code-block radius.
 
 ## Config
 
@@ -41,8 +41,8 @@ bubbles (22→11px) is halved.
 | `stats` | `true` | hide the composer dock (stats pills + context meter) |
 | `sideMargin` | `8` | transcript and composer-card side padding, CSS px, integer `0`–`64`. Stock is 32 (text) / 16 (card); `32` leaves both alone |
 | `codeHeaders` | `true` | hide the code-block banner row (language label + Copy) |
-| `halfRadius` | `true` | halve the corner radius of code blocks (12→6px) and user bubbles (22→11px) |
-| `compactBlocks` | `true` | less padding inside boxed blocks: code blocks 16→8/10px, tool-card IN/OUT sections and command-card bodies 12/16→8/10px, context-injection bodies, table cells 10/16→6/10px, blockquote indent 14→8px, user bubbles 10/16→8/12px |
+| `halfRadius` | `true` | 6px corners on code blocks (12→6px) and user bubbles (22→6px) |
+| `compactBlocks` | `true` | less padding inside boxed blocks: code blocks 16→8/10px, tool-card IN/OUT sections and command-card bodies 12/16→8/10px, context-injection bodies, table cells 10/16→6/10px, blockquote indent 14→8px, user bubbles 10/16→6/10px |
 
 All flags `false` and `sideMargin: 32` disables the plugin (no style row).
 
@@ -108,7 +108,7 @@ table and pushes one style row:
   [data-chat-flow] .md-code-block { --dsl-code-block-border-radius: 6px }
   :is([data-chat-flow-kind="user"],[data-chat-flow-kind="steering"])
     > [data-slot="conversation.chat.node"] > div > div:first-child > div:not([data-message-attachments])
-  { border-radius: 11px }
+  { border-radius: 6px }
 }
 /* … and the same rules once more, each selector prefixed html[data-dsh-view="mobile"] */
 ```
@@ -150,7 +150,7 @@ trial style does not reproduce this because it lands last.
 Measured on the preview server (2026-09-23, Safari Technology Preview at
 390×844): all hide selectors resolve to `display:none`, the scrollport
 starts at y=0, text / composer card / code blocks all start at x=8 and are
-364px wide, code blocks report 6px and bubbles 11px radius, no banner on
+364px wide, code blocks and bubbles report 6px radius, no banner on
 any of the four fenced blocks; at 1100px nothing changes.
 
 ## Test

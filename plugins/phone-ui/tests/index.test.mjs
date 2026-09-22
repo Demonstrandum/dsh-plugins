@@ -36,14 +36,14 @@ test('defaults: 640px, every group on, 8px side margin', () => {
   assert.match(css, /div:has\(> \[data-chat-flow\]\)\{padding-left:8px;padding-right:8px\}/)
   assert.match(css, /\.md-code-block pre\{border-top-left-radius/)
   assert.match(css, /\.md-code-block\{--dsl-code-block-border-radius:6px\}/)
-  assert.ok(css.includes(`${USER_BUBBLE_SELECTOR}{border-radius:11px}`))
+  assert.ok(css.includes(`${USER_BUBBLE_SELECTOR}{border-radius:6px}`))
   for (const [selector, declarations] of COMPACT_BLOCK_RULES) assert.ok(css.includes(`${selector}{${declarations}}`), selector)
 })
 
 test('compactBlocks off keeps the stock padding', () => {
   const css = phoneStyle({ ...ALL_ON, compactBlocks: false })
   assert.doesNotMatch(css, /padding:8px 10px|\[data-context-injection-body\]|_ioSection/)
-  assert.ok(css.includes(`${USER_BUBBLE_SELECTOR}{border-radius:11px}`), 'radius group untouched')
+  assert.ok(css.includes(`${USER_BUBBLE_SELECTOR}{border-radius:6px}`), 'radius group untouched')
 })
 
 test('every rule is emitted twice: inside the media query and under the html[data-dsh-view="mobile"] flag', () => {
@@ -79,7 +79,7 @@ test('codeHeaders off keeps the banner and adds no pre radius; halfRadius off ke
   assert.ok(!noHeaders.includes(SELECTORS.codeHeaders[0]))
   assert.doesNotMatch(noHeaders, /pre\{border-top/)
   const noRadius = phoneStyle({ ...ALL_ON, halfRadius: false })
-  assert.doesNotMatch(noRadius, /border-radius:6px|border-radius:11px/)
+  assert.doesNotMatch(noRadius, /border-radius:6px/)
 })
 
 test('config: maxWidth integer 320-1200, flags boolean, everything else rejected loudly', () => {

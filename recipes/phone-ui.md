@@ -49,7 +49,7 @@ The collapsed sidebar rail in the full GUI is out of scope here.
   [data-chat-flow] .md-code-block { --dsl-code-block-border-radius: 6px }
   :is([data-chat-flow-kind="user"],[data-chat-flow-kind="steering"])
     > [data-slot="conversation.chat.node"] > div > div:first-child > div:not([data-message-attachments])
-  { border-radius: 11px }
+  { border-radius: 6px }
 }
 ```
 
@@ -138,7 +138,7 @@ own. What *is* stable:
   re-measure after the relay restart, not only in the console.
 - Measured at 390×844 (STP): header 0→hidden, scrollport top at y=0; text,
   composer card and code blocks all at x=8, 364px wide; blocks 6px, bubbles
-  11px; 4 of 4 banners `display:none`. At 1100×800 every selector reports
+  6px (22→11 at first, →6 on 2026-09-22 afternoon); 4 of 4 banners `display:none`. At 1100×800 every selector reports
   its normal value.
 
 ## Trial procedure (what was done)

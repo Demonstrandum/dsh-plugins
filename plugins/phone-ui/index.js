@@ -31,13 +31,14 @@
  *   codeHeaders     hide the code-block banner row (language label + Copy)
  *                   on every fenced block, incl. language-less ones.
  *                   Default true.
- *   halfRadius      halve the corner radius of code blocks (12→6px) and of
- *                   the user's own message bubbles (22→11px). Default true.
+ *   halfRadius      6px corners on code blocks (12→6px) and on the user's
+ *                   own message bubbles (22→6px — the same radius as the
+ *                   blocks; "half" is historical). Default true.
  *   compactBlocks   less padding inside the transcript's boxed blocks: code
  *                   blocks 16 → 8/10px, tool-card IN/OUT sections and
  *                   command-card bodies 12/16 → 8/10px, context-injection
  *                   bodies, table cells 10/16 → 6/10px, blockquote indent
- *                   14 → 8px, user bubbles 10/16 → 8/12px. Default true.
+ *                   14 → 8px, user bubbles 10/16 → 6/10px. Default true.
  *
  * HOW. One `<style>` row through the webserver's structured
  * `webserver/index-inject` table, no client bundle (the sibling
@@ -100,8 +101,8 @@ export const MAX_SIDE_MARGIN = 64
  * @property {number} sideMargin - transcript + composer side padding, CSS px
  *   (stock 32 / 16; `STOCK_SIDE_MARGIN` leaves the stock values alone).
  * @property {boolean} codeHeaders - hide the code-block banner row (language + Copy).
- * @property {boolean} halfRadius - halve the corner radius of code blocks (12→6)
- *   and user bubbles (22→11).
+ * @property {boolean} halfRadius - 6px corners on code blocks (12→6) and user
+ *   bubbles (22→6).
  * @property {boolean} compactBlocks - less padding inside boxed blocks.
  */
 
@@ -182,7 +183,7 @@ export const COMPACT_BLOCK_RULES = Object.freeze([
   // Markdown blockquote: 14px indent beside the 2px bar.
   ['[data-chat-flow] blockquote', 'padding-left:8px'],
   // User bubble: 10 16.
-  [USER_BUBBLE_SELECTOR, 'padding:8px 12px'],
+  [USER_BUBBLE_SELECTOR, 'padding:6px 10px'],
 ])
 
 /**
@@ -213,7 +214,7 @@ export function phoneStyle(config) {
   }
   if (config.halfRadius) {
     rules.push({ selectors: ['[data-chat-flow] .md-code-block'], declarations: '--dsl-code-block-border-radius:6px' })
-    rules.push({ selectors: [USER_BUBBLE_SELECTOR], declarations: 'border-radius:11px' })
+    rules.push({ selectors: [USER_BUBBLE_SELECTOR], declarations: 'border-radius:6px' })
   }
   if (config.compactBlocks) {
     for (const [selector, declarations] of COMPACT_BLOCK_RULES) rules.push({ selectors: [selector], declarations })
