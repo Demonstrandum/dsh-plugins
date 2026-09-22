@@ -24,6 +24,13 @@ transcript, the composer card (with its attach / permission / model
 controls), approvals and the queue dock are untouched, and anything wider
 (iPad portrait is 768–834 px) keeps the full chrome.
 
+It also tightens what remains: the transcript's **32px side padding**
+becomes 8px (the composer card follows, so it stays flush with the text —
+48px more text per line on a 390px phone), every fenced code block loses
+its **banner row** (`python … Copy`, also on language-less blocks), and
+the **corner radius** of code blocks (12→6px) and of your own message
+bubbles (22→11px) is halved.
+
 ## Config
 
 | key | default | meaning |
@@ -32,8 +39,11 @@ controls), approvals and the queue dock are untouched, and anything wider
 | `header` | `true` | hide the Session header (title row + view tabs) |
 | `messageActions` | `true` | hide the per-message icon rows (assistant turn tails and user/steering bubbles — the user row's clock goes with it) |
 | `stats` | `true` | hide the composer dock (stats pills + context meter) |
+| `sideMargin` | `8` | transcript and composer-card side padding, CSS px, integer `0`–`64`. Stock is 32 (text) / 16 (card); `32` leaves both alone |
+| `codeHeaders` | `true` | hide the code-block banner row (language label + Copy) |
+| `halfRadius` | `true` | halve the corner radius of code blocks (12→6px) and user bubbles (22→11px) |
 
-All three flags `false` disables the plugin (no style row).
+All flags `false` and `sideMargin: 32` disables the plugin (no style row).
 
 Bundle install:
 
@@ -73,8 +83,18 @@ table and pushes one style row:
   [data-turn-tail][data-actions-reveal] > div:not([data-slot]),
   :is([data-chat-flow-kind="user"],[data-chat-flow-kind="steering"])
     > [data-slot="conversation.chat.node"] > div > div:nth-child(2),
-  [data-slot="conversation.composer.bar"] div:has(> [data-slot="conversation.composer.dock"])
+  [data-slot="conversation.composer.bar"] div:has(> [data-slot="conversation.composer.dock"]),
+  [data-chat-flow] .md-code-block > div:has(> [data-code-block-banner])
   { display: none }
+
+  [data-conversation-content][data-content-phase] { --dsh-composer-side-clearance: 8px }
+  [data-conversation-scroll] div:has(> [data-chat-flow]) { padding-left: 8px; padding-right: 8px }
+  [data-chat-flow] .md-code-block pre { border-top-left-radius: var(--dsl-code-block-border-radius);
+                                        border-top-right-radius: var(--dsl-code-block-border-radius) }
+  [data-chat-flow] .md-code-block { --dsl-code-block-border-radius: 6px }
+  :is([data-chat-flow-kind="user"],[data-chat-flow-kind="steering"])
+    > [data-slot="conversation.chat.node"] > div > div:first-child > div:not([data-message-attachments])
+  { border-radius: 11px }
 }
 ```
 
@@ -95,12 +115,28 @@ around every rendered slot:
 - the InputBar's `.dock` wrapper is identified by the dock slot outlet it
   contains, so the ContextMeter beside the pills goes too
   (`ui-conversation` `InputBar.tsx`). `:has()` needs Safari ≥ 15.4 /
-  Chrome ≥ 105.
+  Chrome ≥ 105;
+- ChatView's `.scroll` (`padding: 16px calc(var(--dsh-composer-side-clearance) + 16px)`)
+  is the parent of `[data-chat-flow]`; the variable itself is defined on
+  ConversationContent's `.body` (`[data-conversation-content]`) and read by
+  the InputBar root, so overriding it moves the card with the text;
+- `md-code-block` is the one unhashed class on `ui-primitives` `CodeBlock`;
+  the block defines `--dsl-code-block-border-radius: 12px` on itself and the
+  banner, block and `<pre>` all read it. The banner wrapper is the child
+  holding `[data-code-block-banner]`. With the banner gone the `<pre>`'s
+  opaque fill needs the top radii it normally leaves to the banner.
+
+**Cascade trap:** the client's stylesheets are injected *after* this
+`<style>`, so a selector that only ties the stock rule's specificity
+(`[data-conversation-content]` vs `.body`) loses. Every rule here out-ranks
+its stock counterpart by at least one attribute/class; a console-appended
+trial style does not reproduce this because it lands last.
 
 Measured on the preview server (2026-09-23, Safari Technology Preview at
-390×844): all four selectors resolve to `display:none`, the scrollport
-starts at y=0, the composer card sits at the bottom edge; at 1100px nothing
-changes.
+390×844): all hide selectors resolve to `display:none`, the scrollport
+starts at y=0, text / composer card / code blocks all start at x=8 and are
+364px wide, code blocks report 6px and bubbles 11px radius, no banner on
+any of the four fenced blocks; at 1100px nothing changes.
 
 ## Test
 

@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  DEFAULT_MAX_WIDTH, MAX_MAX_WIDTH, MIN_MAX_WIDTH, SELECTORS, apply, normalizeConfig, phoneStyle,
+  DEFAULT_MAX_WIDTH, DEFAULT_SIDE_MARGIN, MAX_MAX_WIDTH, MAX_SIDE_MARGIN, MIN_MAX_WIDTH, SELECTORS,
+  STOCK_SIDE_MARGIN, USER_BUBBLE_SELECTOR, apply, normalizeConfig, phoneStyle,
 } from '../index.js'
 
 function fakeContext() {
@@ -19,15 +20,42 @@ function fakeContext() {
   return { ctx, listeners, logs }
 }
 
-const ALL_ON = { maxWidth: DEFAULT_MAX_WIDTH, header: true, messageActions: true, stats: true }
+const ALL_ON = {
+  maxWidth: DEFAULT_MAX_WIDTH, header: true, messageActions: true, stats: true,
+  sideMargin: DEFAULT_SIDE_MARGIN, codeHeaders: true, halfRadius: true,
+}
 
-test('defaults: 640px, all three groups hidden', () => {
+test('defaults: 640px, every group on, 8px side margin', () => {
   assert.deepEqual(normalizeConfig(undefined), ALL_ON)
   assert.deepEqual(normalizeConfig({}), ALL_ON)
   const css = phoneStyle(ALL_ON)
   assert.match(css, /^@media \(max-width:640px\)\{/)
   for (const selector of Object.values(SELECTORS).flat()) assert.ok(css.includes(selector), selector)
-  assert.match(css, /\{display:none\}\}$/)
+  assert.match(css, /\{display:none\}/)
+  assert.match(css, /\[data-conversation-content\]\[data-content-phase\]\{--dsh-composer-side-clearance:8px\}/)
+  assert.match(css, /div:has\(> \[data-chat-flow\]\)\{padding-left:8px;padding-right:8px\}/)
+  assert.match(css, /\.md-code-block pre\{border-top-left-radius/)
+  assert.match(css, /\.md-code-block\{--dsl-code-block-border-radius:6px\}/)
+  assert.ok(css.includes(`${USER_BUBBLE_SELECTOR}{border-radius:11px}`))
+  assert.match(css, /\}\}$/)
+})
+
+test('sideMargin: integer 0-64; the stock value emits no padding rules', () => {
+  assert.equal(normalizeConfig({ sideMargin: 0 }).sideMargin, 0)
+  assert.equal(normalizeConfig({ sideMargin: MAX_SIDE_MARGIN }).sideMargin, MAX_SIDE_MARGIN)
+  for (const bad of [-1, MAX_SIDE_MARGIN + 1, 8.5, '8']) {
+    assert.throws(() => normalizeConfig({ sideMargin: bad }), /sideMargin must be an integer/, String(bad))
+  }
+  const css = phoneStyle({ ...ALL_ON, sideMargin: STOCK_SIDE_MARGIN })
+  assert.doesNotMatch(css, /side-clearance|padding-left/)
+})
+
+test('codeHeaders off keeps the banner and adds no pre radius; halfRadius off keeps 12px/22px', () => {
+  const noHeaders = phoneStyle({ ...ALL_ON, codeHeaders: false })
+  assert.ok(!noHeaders.includes(SELECTORS.codeHeaders[0]))
+  assert.doesNotMatch(noHeaders, /pre\{border-top/)
+  const noRadius = phoneStyle({ ...ALL_ON, halfRadius: false })
+  assert.doesNotMatch(noRadius, /border-radius:6px|border-radius:11px/)
 })
 
 test('config: maxWidth integer 320-1200, flags boolean, everything else rejected loudly', () => {
@@ -36,7 +64,7 @@ test('config: maxWidth integer 320-1200, flags boolean, everything else rejected
   for (const bad of [MIN_MAX_WIDTH - 1, MAX_MAX_WIDTH + 1, 400.5, '640', null, NaN]) {
     assert.throws(() => normalizeConfig({ maxWidth: bad }), /maxWidth must be an integer/, String(bad))
   }
-  for (const key of ['header', 'messageActions', 'stats']) {
+  for (const key of ['header', 'messageActions', 'stats', 'codeHeaders', 'halfRadius']) {
     assert.equal(normalizeConfig({ [key]: false })[key], false)
     assert.throws(() => normalizeConfig({ [key]: 'yes' }), new RegExp(`${key} must be a boolean`))
   }
@@ -58,12 +86,12 @@ test('apply pushes one style row into the index-inject table', () => {
   assert.equal(table[0].kind, 'style')
   assert.match(table[0].text, /^\/\* tali-phone-ui \*\//)
   assert.match(table[0].text, /max-width:480px/)
-  assert.match(logs[0], /≤480px hides header, messageActions, stats/)
+  assert.match(logs[0], /≤480px → header, messageActions, stats, codeHeaders, halfRadius, sideMargin 8px/)
 })
 
 test('all groups off disables the rule: no listener, no style', () => {
   const { ctx, listeners, logs } = fakeContext()
-  const off = { header: false, messageActions: false, stats: false }
+  const off = { header: false, messageActions: false, stats: false, codeHeaders: false, halfRadius: false, sideMargin: STOCK_SIDE_MARGIN }
   apply(ctx, off)
   assert.equal(phoneStyle(normalizeConfig(off)), '')
   assert.equal(listeners.has('webserver/index-inject'), false)

@@ -467,9 +467,14 @@ can reproduce or maintain it:
   (`phone-ui` plugin, host-only `<style>` row in a `max-width` media query):
   hides the Session header + Chat/Trajectory tabs, the per-message icon
   rows and the composer stats dock (incl. the context meter) below 640px,
-  in the full GUI and the `?embed` page alike; the `data-slot="…"` outlets
-  as the unhashed hooks for chrome without attributes of its own, the DOM
-  facts per target, the STP `safari_set_viewport_size 390×844` trial (no
+  in the full GUI and the `?embed` page alike, then 8px side margins (text
+  and composer card on one edge), no code-block banner rows and half the
+  code-block/user-bubble rounding; the `data-slot="…"` outlets as the
+  unhashed hooks for chrome without attributes of its own, the DOM facts
+  per target (`.md-code-block` + its radius variable, the `.scroll`
+  padding formula), the **cascade trap** (client CSS is injected after the
+  `index-inject` rows, so a specificity tie loses — and a console-appended
+  trial hides it), the STP `safari_set_viewport_size 390×844` trial (no
   device emulation needed), and the rest of the phone pass still open
   (sidebar rail, safe-area padding, right dock).
 - `preview-identity.md` — superseded stub (2026-09-05 red favicon + "DSH-dev"

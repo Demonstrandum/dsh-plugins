@@ -23,6 +23,14 @@
  *                   user/steering bubbles. Default true.
  *   stats           hide the composer dock (stats pills + context meter).
  *                   Default true.
+ *   sideMargin      transcript and composer-card side padding in CSS px,
+ *                   0–64. Stock is 32 (text) / 16 (card); 32 leaves both
+ *                   alone. Default 8 — a 390px phone gains 48px of text.
+ *   codeHeaders     hide the code-block banner row (language label + Copy)
+ *                   on every fenced block, incl. language-less ones.
+ *                   Default true.
+ *   halfRadius      halve the corner radius of code blocks (12→6px) and of
+ *                   the user's own message bubbles (22→11px). Default true.
  *
  * HOW. One `<style>` row through the webserver's structured
  * `webserver/index-inject` table, no client bundle (the sibling
@@ -45,6 +53,18 @@
  *       the InputBar's `.dock` wrapper, identified by the dock slot outlet it
  *       contains; hiding the wrapper also hides the ContextMeter beside the
  *       pills (ui-conversation InputBar.tsx). `:has()` — Safari ≥ 15.4.
+ *   [data-conversation-scroll] div:has(> [data-chat-flow])
+ *       ChatView's `.scroll` (padding `16px calc(clearance + 16px)`), found
+ *       as the parent of the message column.
+ *   [data-conversation-content] { --dsh-composer-side-clearance }
+ *       the variable ConversationRoot.module.css defines on `.body` (16px);
+ *       the InputBar root pads by it, so the card follows the text column.
+ *   [data-chat-flow] .md-code-block
+ *       ui-primitives CodeBlock: the one unhashed class; it defines
+ *       `--dsl-code-block-border-radius: 12px` on itself, so a
+ *       higher-specificity override of the variable re-rounds banner, block
+ *       and <pre> together. The banner wrapper is the child holding
+ *       `[data-code-block-banner]`.
  *
  * Measured 2026-09-23 on the preview server at 390×844: all four selectors
  * resolve, the scrollport starts at y=0, the composer card sits at the
@@ -58,6 +78,11 @@ export const inject = ['webServer']
 export const DEFAULT_MAX_WIDTH = 640
 export const MIN_MAX_WIDTH = 320
 export const MAX_MAX_WIDTH = 1200
+export const DEFAULT_SIDE_MARGIN = 8
+
+/** Stock transcript side padding (ChatView `.scroll`: composer clearance 16 + 16). */
+export const STOCK_SIDE_MARGIN = 32
+export const MAX_SIDE_MARGIN = 64
 
 /**
  * @typedef {object} PhoneUiConfig
@@ -65,6 +90,11 @@ export const MAX_MAX_WIDTH = 1200
  * @property {boolean} header - hide the Session header (title row + tabs).
  * @property {boolean} messageActions - hide per-message icon rows.
  * @property {boolean} stats - hide the composer dock (pills + context meter).
+ * @property {number} sideMargin - transcript + composer side padding, CSS px
+ *   (stock 32 / 16; `STOCK_SIDE_MARGIN` leaves the stock values alone).
+ * @property {boolean} codeHeaders - hide the code-block banner row (language + Copy).
+ * @property {boolean} halfRadius - halve the corner radius of code blocks (12→6)
+ *   and user bubbles (22→11).
  */
 
 /**
@@ -74,19 +104,30 @@ export const MAX_MAX_WIDTH = 1200
  */
 export function normalizeConfig(raw) {
   const input = raw !== null && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {}
-  const maxWidth = input.maxWidth === undefined ? DEFAULT_MAX_WIDTH : input.maxWidth
-  if (typeof maxWidth !== 'number' || !Number.isInteger(maxWidth) || maxWidth < MIN_MAX_WIDTH || maxWidth > MAX_MAX_WIDTH) {
-    throw new Error(`phone-ui: maxWidth must be an integer ${MIN_MAX_WIDTH}-${MAX_MAX_WIDTH} (px), got ${JSON.stringify(maxWidth)}`)
+  const int = (/** @type {string} */ key, /** @type {number} */ fallback, /** @type {number} */ min, /** @type {number} */ max) => {
+    const value = input[key] === undefined ? fallback : input[key]
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+      throw new Error(`phone-ui: ${key} must be an integer ${min}-${max} (px), got ${JSON.stringify(value)}`)
+    }
+    return value
   }
   const flag = (/** @type {string} */ key) => {
     const value = input[key] === undefined ? true : input[key]
     if (typeof value !== 'boolean') throw new Error(`phone-ui: ${key} must be a boolean, got ${JSON.stringify(value)}`)
     return value
   }
-  return { maxWidth, header: flag('header'), messageActions: flag('messageActions'), stats: flag('stats') }
+  return {
+    maxWidth: int('maxWidth', DEFAULT_MAX_WIDTH, MIN_MAX_WIDTH, MAX_MAX_WIDTH),
+    header: flag('header'),
+    messageActions: flag('messageActions'),
+    stats: flag('stats'),
+    sideMargin: int('sideMargin', DEFAULT_SIDE_MARGIN, 0, MAX_SIDE_MARGIN),
+    codeHeaders: flag('codeHeaders'),
+    halfRadius: flag('halfRadius'),
+  }
 }
 
-/** Selectors per group; each group is one comma list that gets `display:none`. */
+/** Selectors per hide-group; each group is one comma list that gets `display:none`. */
 export const SELECTORS = Object.freeze({
   header: ['[data-slot="conversation.session.header"] > header'],
   messageActions: [
@@ -94,7 +135,15 @@ export const SELECTORS = Object.freeze({
     ':is([data-chat-flow-kind="user"],[data-chat-flow-kind="steering"]) > [data-slot="conversation.chat.node"] > div > div:nth-child(2)',
   ],
   stats: ['[data-slot="conversation.composer.bar"] div:has(> [data-slot="conversation.composer.dock"])'],
+  // The CodeBlock banner wrapper (ui-primitives CodeBlock.tsx): the sticky
+  // `.bannerWrap` div is identified by the `[data-code-block-banner]` row it
+  // holds. `.md-code-block` is the one unhashed class the block carries.
+  codeHeaders: ['[data-chat-flow] .md-code-block > div:has(> [data-code-block-banner])'],
 })
+
+/** The user/steering bubble inside `userRow > userStack` (attachments row excluded). */
+export const USER_BUBBLE_SELECTOR =
+  ':is([data-chat-flow-kind="user"],[data-chat-flow-kind="steering"]) > [data-slot="conversation.chat.node"] > div > div:first-child > div:not([data-message-attachments])'
 
 /**
  * The style row's text for a configuration.
@@ -102,11 +151,32 @@ export const SELECTORS = Object.freeze({
  * @returns {string} CSS, '' when every group is off.
  */
 export function phoneStyle(config) {
-  const selectors = /** @type {(keyof typeof SELECTORS)[]} */ (Object.keys(SELECTORS))
+  /** @type {string[]} */
+  const rules = []
+  const hidden = /** @type {(keyof typeof SELECTORS)[]} */ (Object.keys(SELECTORS))
     .filter(group => config[group])
     .flatMap(group => SELECTORS[group])
-  if (selectors.length === 0) return ''
-  return `@media (max-width:${config.maxWidth}px){${selectors.join(',')}{display:none}}`
+  if (hidden.length > 0) rules.push(`${hidden.join(',')}{display:none}`)
+  if (config.sideMargin !== STOCK_SIDE_MARGIN) {
+    // ChatView `.scroll` pads `calc(var(--dsh-composer-side-clearance) + 16px)`
+    // (32px stock); the composer card sits at the clearance (16px). Both go to
+    // the same value so the card stays flush with the text column. Two
+    // attributes: `.body` defines the variable at class specificity and the
+    // client's stylesheet is injected after this <style>, so a tie loses.
+    rules.push(`[data-conversation-content][data-content-phase]{--dsh-composer-side-clearance:${config.sideMargin}px}`)
+    rules.push(`[data-conversation-scroll] div:has(> [data-chat-flow]){padding-left:${config.sideMargin}px;padding-right:${config.sideMargin}px}`)
+  }
+  if (config.codeHeaders) {
+    // With the banner gone the <pre>'s opaque fill would square off the
+    // block's top corners (it only carries the bottom radii by default).
+    rules.push('[data-chat-flow] .md-code-block pre{border-top-left-radius:var(--dsl-code-block-border-radius);border-top-right-radius:var(--dsl-code-block-border-radius)}')
+  }
+  if (config.halfRadius) {
+    rules.push('[data-chat-flow] .md-code-block{--dsl-code-block-border-radius:6px}')
+    rules.push(`${USER_BUBBLE_SELECTOR}{border-radius:11px}`)
+  }
+  if (rules.length === 0) return ''
+  return `@media (max-width:${config.maxWidth}px){${rules.join('')}}`
 }
 
 /**
@@ -121,6 +191,8 @@ export function apply(ctx, rawConfig) {
       table.push({ kind: 'style', text: `/* tali-phone-ui */\n${style}` })
     })
   }
-  const groups = ['header', 'messageActions', 'stats'].filter(group => config[/** @type {'header'|'messageActions'|'stats'} */ (group)])
-  ctx.logger.info(`phone-ui: ≤${config.maxWidth}px hides ${groups.length === 0 ? 'nothing (disabled)' : groups.join(', ')}`)
+  const groups = /** @type {const} */ (['header', 'messageActions', 'stats', 'codeHeaders', 'halfRadius'])
+    .filter(group => config[group])
+  if (config.sideMargin !== STOCK_SIDE_MARGIN) groups.push(`sideMargin ${config.sideMargin}px`)
+  ctx.logger.info(`phone-ui: ≤${config.maxWidth}px → ${style === '' ? 'nothing (disabled)' : groups.join(', ')}`)
 }

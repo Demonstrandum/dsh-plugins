@@ -14,9 +14,12 @@ under it, the copy / thumbs / branch / usage / clock icon row under the
 assistant turn, and the `2 turns 93 steps · 23M tok · Cache h… · 30%`
 dock under the composer. Wanted, on mobile, in the full GUI as well as the
 embed page: hide the header and tabs entirely (Trajectory is pointless on a
-phone), hide the message action row, hide the stats line. First step of a
-phone-UI pass; the collapsed sidebar rail in the full GUI is out of scope
-here.
+phone), hide the message action row, hide the stats line. Second round
+(same day, from a CleanShot measuring the transcript's left margin at
+32px): 8px side margins, no `python … Copy` banner row on fenced blocks
+(incl. language-less ones such as an "Output (example)" block), and half
+the corner rounding on code blocks and on the user's own message bubbles.
+The collapsed sidebar rail in the full GUI is out of scope here.
 
 ## Answer: one media-queried `<style>` row, no fork, no client bundle
 
@@ -26,15 +29,25 @@ here.
   [data-turn-tail][data-actions-reveal] > div:not([data-slot]),
   :is([data-chat-flow-kind="user"],[data-chat-flow-kind="steering"])
     > [data-slot="conversation.chat.node"] > div > div:nth-child(2),
-  [data-slot="conversation.composer.bar"] div:has(> [data-slot="conversation.composer.dock"])
+  [data-slot="conversation.composer.bar"] div:has(> [data-slot="conversation.composer.dock"]),
+  [data-chat-flow] .md-code-block > div:has(> [data-code-block-banner])
   { display: none }
+  [data-conversation-content][data-content-phase] { --dsh-composer-side-clearance: 8px }
+  [data-conversation-scroll] div:has(> [data-chat-flow]) { padding-left: 8px; padding-right: 8px }
+  [data-chat-flow] .md-code-block pre { border-top-left-radius: var(--dsl-code-block-border-radius);
+                                        border-top-right-radius: var(--dsl-code-block-border-radius) }
+  [data-chat-flow] .md-code-block { --dsl-code-block-border-radius: 6px }
+  :is([data-chat-flow-kind="user"],[data-chat-flow-kind="steering"])
+    > [data-slot="conversation.chat.node"] > div > div:first-child > div:not([data-message-attachments])
+  { border-radius: 11px }
 }
 ```
 
 Contributed through `webserver/index-inject`, exactly like
 `transcript-grace-margin` and `instance-identity`. Config: `maxWidth`
-(default 640, integer 320–1200), `header` / `messageActions` / `stats`
-booleans (default all `true`). README: `plugins/phone-ui/README.md`.
+(default 640, integer 320–1200), `header` / `messageActions` / `stats` /
+`codeHeaders` / `halfRadius` booleans (default all `true`), `sideMargin`
+(default 8, integer 0–64; 32 = stock). README: `plugins/phone-ui/README.md`.
 
 ## DOM facts (checkout `<dsh-src>`, measured live on the preview)
 
@@ -80,9 +93,43 @@ own. What *is* stable:
   wrapper via `div:has(> [data-slot="conversation.composer.dock"])` takes
   the meter with it. In the hero variant the dock slot is not rendered, so
   the rule does not fire there.
-- Measured at 390×844 (STP): header 0→hidden, scrollport top at y=0; the
-  composer card ends 4px above the viewport bottom (the InputBar root's own
-  padding). At 1100×800 every selector reports its normal `display`.
+- **Side margin.** The 32px is ChatView `.scroll`
+  (`packages/client/ui-chat/src/client/chat/ChatView.module.css`):
+  `padding: 16px calc(var(--dsh-composer-side-clearance) + 16px)` —
+  "the transcript stays exactly 32px narrower than the input card". The
+  variable is defined on ConversationContent's `.body`
+  (`ConversationRoot.module.css`, 16px; 8px in `.embeddedBody`, which is the
+  *embedded-occurrence* variant, not the `?embed=` page) and read by the
+  InputBar root's padding. Setting both the variable and `.scroll`'s
+  padding to 8px puts text and card on one edge. `.scroll` has no
+  attribute; it is the parent of `[data-chat-flow]`.
+- **Code blocks.** `ui-primitives/src/markdown/CodeBlock.tsx` renders
+  `div.block.md-code-block > (div.bannerWrap > div[data-code-block-banner]
+  (lang, Copy)) + div[data-code-block-content] > pre`. `md-code-block` is
+  the only unhashed class. `.block` sets
+  `--dsl-code-block-border-radius: 12px` on itself; banner, block and `pre`
+  read it, so one variable override re-rounds everything. The `pre` carries
+  only the *bottom* radii (comment in the CSS: `overflow:hidden` on the
+  block would kill the sticky banner) — with the banner hidden its opaque
+  fill squares the top corners unless the top radii are added. The
+  "Output (example)" block is the same component with `lang` undefined:
+  empty label, Copy button, same banner — one rule covers both.
+- **User bubble.** `MessageItem.module.css` `.bubble { border-radius: 22px }`
+  inside `userRow > userStack`, whose other possible children are the
+  attachments row (`[data-message-attachments]`) and the reference-summary
+  line (radius harmless). The composer card's own 22px is untouched.
+- **Cascade trap.** The client's CSS is injected into `<head>` *after* the
+  `index-inject` style rows, so a selector that merely ties the stock
+  rule's specificity loses: `[data-conversation-content]` (0,1,0) vs
+  `.body` (0,1,0) left the clearance at 16px on the real page although the
+  console-appended trial (which lands *last*) had worked.
+  `[data-conversation-content][data-content-phase]` (0,2,0) wins. Rule of
+  thumb for this mechanism: out-rank the stock rule by one attribute, and
+  re-measure after the relay restart, not only in the console.
+- Measured at 390×844 (STP): header 0→hidden, scrollport top at y=0; text,
+  composer card and code blocks all at x=8, 364px wide; blocks 6px, bubbles
+  11px; 4 of 4 banners `display:none`. At 1100×800 every selector reports
+  its normal value.
 
 ## Trial procedure (what was done)
 
@@ -103,7 +150,10 @@ own. What *is* stable:
 4. Screenshots at 390×844: the embed page (transcript from the very top,
    no rows under the user bubble, composer at the bottom) and the full GUI
    with the session open (same, plus the collapsed sidebar rail — out of
-   scope). `pnpm test`: 5 node:test cases.
+   scope). `pnpm test`: 7 node:test cases.
+5. Round two followed the same loop (console trial → plugin → kickstart →
+   served-CSS grep → DOM measurement) and is where the cascade trap above
+   surfaced: only the post-restart measurement caught it.
 
 ## Alternatives considered
 
@@ -148,4 +198,6 @@ own. What *is* stable:
 | Style present, chrome still there | Viewport wider than `maxWidth` (iPad, landscape phone > 640, desktop window) | Lower/raise `maxWidth`; check `innerWidth` in the console |
 | Header hidden but `Chat \| Trajectory` visible | Cannot happen with this DOM — the tablist is inside the header; if it does, the client moved the tabs: re-measure with the DOM script in this recipe | |
 | Stats gone but the `30%` ring remains | The client moved `ContextMeter` out of the `.dock` wrapper | Add its new hook to `SELECTORS.stats` |
-| Boot fails: "maxWidth must be an integer 320-1200" / "… must be a boolean" | Malformed `config` in a patch | Bare integer / bare boolean |
+| Boot fails: "maxWidth must be an integer 320-1200" / "sideMargin must be an integer 0-64" / "… must be a boolean" | Malformed `config` in a patch | Bare integer / bare boolean |
+| Text at 8px but the composer card still 16px in | A variable override that ties the stock rule's specificity (see Cascade trap) | Out-rank with a second attribute; check `getComputedStyle(el).getPropertyValue('--dsh-composer-side-clearance')` on `[data-conversation-content]` |
+| Code block has square top corners | Banner hidden but the `pre` top-radius rule missing/overridden | `codeHeaders` emits both rules together; check `.md-code-block pre` radii |
