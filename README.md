@@ -241,3 +241,7 @@ config blocks and commands, the *why* behind non-obvious choices, and what
 Thirty-odd so far, from `apple-foundation-model-provider.md` and
 `bootstrap-mac-installer.md` through `rebase-fork-on-upstream.md` and
 `<private-plugin>-graphics3d.md`; the annotated index is in `AGENTS.md`.
+
+## Credits
+
+The hat-and-glasses logo is by [Demonstrandum](https://github.com/Demonstrandum).
