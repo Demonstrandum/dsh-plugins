@@ -40,12 +40,16 @@
  *   relayLogDir  relay + DSH logs ('' = $DSH_HOME/logs)            ''
  *   dockAppName  bundle name under ~/Applications                 DSH
  *   dockAppGlyphColor / dockAppTileColor  icon colours            #000000 / #ffffff
+ *   loopbackForward  who may forward this host's loopback ports to their device
+ *                (forward.mjs; the Dock app's port forwarding): `admitted`
+ *                (anyone the proxy let in), `operators`, or `off`        admitted
  */
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import Schema from '@deepseek-ai/schemastery'
 import { renderSVG } from 'uqr'
 import { bundlePathFor, dockAppStatus, installDockApp, uninstallDockApp } from './dock-app.mjs'
+import { FORWARD_PATH, handleForwardUpgrade } from './forward.mjs'
 import { startProxy } from './proxy.mjs'
 import { defaultLogDir, installRelayAgent, relayStatus, restartRelayAgent, stopRelayAgent, uninstallRelayAgent } from './relay/launch-agent.mjs'
 import { attachClientTracker, performAction, processTable, workspaceOfSession } from './server.mjs'
@@ -72,6 +76,7 @@ export const Config = Schema.object({
   dockAppName: Schema.string().default('DSH'),
   dockAppGlyphColor: Schema.string().default('#000000'),
   dockAppTileColor: Schema.string().default('#ffffff'),
+  loopbackForward: Schema.union(['admitted', 'operators', 'off']).default('admitted'),
 })
 
 /** RPC channel the browser half calls (`POST /tailscale-remote/<endpoint>`); the proxy refuses to forward it. */
@@ -166,6 +171,9 @@ export function apply(ctx, config) {
   let state
   /** @type {Awaited<ReturnType<typeof startProxy>> | undefined} */
   let proxy
+  /** Open loopback forwards (forward.mjs), one token per piped connection. */
+  /** @type {Set<unknown>} */
+  const forwards = new Set()
   let disposed = false
   /** Serialize enable/disable/rotate so two panel clicks cannot interleave CLI calls. */
   let chain = Promise.resolve()
@@ -277,6 +285,7 @@ export function apply(ctx, config) {
       instance,
       relay: relay === undefined ? undefined : { ...relay, spec: relaySpec() },
       dockApp: { ...dockApp, name: config.dockAppName, fallbackUrl: fallbackUrl() },
+      loopbackForward: { policy: config.loopbackForward, open: forwards.size, path: FORWARD_PATH },
     }
   }
 
@@ -459,6 +468,37 @@ export function apply(ctx, config) {
     path: CONTROL_CHANNEL,
     handler: (req, res) => controlRoute(req, res, ctx.connection, dispatch),
   }), 'tailscale-remote: control channel')
+
+  // ---- loopback port forwarding (forward.mjs) ---------------------------------
+  // One WebSocket per forwarded TCP connection, opened by the Dock app through
+  // the proxy (which admits it and tags how). DSH's own browser-session gate
+  // runs first, like every /api upgrade; then forward.mjs applies the policy,
+  // refuses this instance's own ports, and lets only this uid's listeners
+  // through. Registered on the web server directly for the same reason as the
+  // control channel above.
+  const reservedPorts = () => {
+    const ports = new Set([ctx.webServer.port, config.listenPort])
+    if (config.publishPort !== 0) ports.add(config.publishPort)
+    if (proxy !== undefined) ports.add(proxy.port)
+    return ports
+  }
+  ctx.effect(() => ctx.webServer.registerUpgrade({
+    path: FORWARD_PATH,
+    handler: (req, socket, head) => {
+      const rejection = ctx.connection.requestRejection(req)
+      if (rejection !== undefined) {
+        socket.end(`HTTP/1.1 ${String(rejection)} ${rejection === 401 ? 'Unauthorized' : 'Forbidden'}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`)
+        return
+      }
+      return handleForwardUpgrade(req, socket, head, {
+        policy: () => config.loopbackForward,
+        selfUid: typeof process.getuid === 'function' ? process.getuid() : -1,
+        reservedPorts,
+        connections: forwards,
+        log,
+      })
+    },
+  }), 'tailscale-remote: loopback forward route')
 
   // ---- boot: restore persisted intent -----------------------------------
   const boot = (async () => {

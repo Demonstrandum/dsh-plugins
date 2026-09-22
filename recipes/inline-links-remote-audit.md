@@ -172,6 +172,57 @@ Facts that fix the design space for a fix:
    "translate remote loopback to a reachable URL" scheme has to be per
    instance, not per host.
 
+## Implementation: transparent loopback forwarding in the Dock app (2026-09-23)
+
+Priority was the DSH Remote Dock app, and the chosen mechanism is the one the
+summary above points at: **TCP-over-WebSocket through DSH's own authenticated
+channel**, so the URL the agent printed works *verbatim* on the client (Host
+header, absolute paths, cookies, HMR socket). Rejected on the way: Tailscale
+Serve publishing (`Host` stays the tailnet FQDN — measured in
+`tailscale-remote-plugin.md` — so Vite's default `allowedHosts` blocks it, and
+the URL changes), a path mount under `/dsh/<user>/` (absolute paths break),
+SSH `-L` over Tailscale SSH (works, zero DSH code, but needs `tailscale up
+--ssh` + an ACL rule and per-account SSH process management — kept as the
+fallback idea).
+
+Everything lives in `plugins/dsh-tailscale-remote`; the README's **Loopback
+port forwarding** section is the authoritative description. In one paragraph:
+`forward.mjs` registers `/api/loopback-forward?port=N` as an upgrade route on
+the remote's DSH server (behind DSH's browser-session gate, forwarded by the
+existing proxy like any admitted upgrade), applies `loopbackForward`
+(`admitted` default / `operators` / `off`), refuses the instance's own ports
+(`reserved`), and lets only ports through whose listener `lsof` shows as owned
+by **the uid running that DSH** — on the shared remote machine with one DSH per
+account that is exactly "a server this account's agent started", and other
+accounts' ports are invisible to an unprivileged `lsof` (→ 404). Denials are
+HTTP statuses before the 101 with `X-Dsh-Forward-Error`; then it pipes bytes.
+`dock-app/Sources/PortForward.swift` recognises loopback URLs in
+`decidePolicyFor` (subframes included — the Sidebar Browser iframe) and
+`createWebViewWith`, probes the endpoint once (the refusal code arrives via
+`URLSessionWebSocketTask.response`), binds `127.0.0.1:<same port>` with
+`NWListener` (substitute port when busy; URL rewritten), and pumps each
+accepted connection over its own WebSocket. A `reserved` refusal maps
+`$DSH_WEB_URL`-style links onto the app's own mount. View ▸ Forwarded Ports.
+
+Things that only a real run found:
+
+| Symptom | Cause / fix |
+|---|---|
+| `NWListener` state `.failed(EINVAL)` on `start`, every parameter variant | no `newConnectionHandler` installed before `start` — set a placeholder first, the real one after init |
+| `requiredLocalEndpoint(hostPort)` suspected | red herring; a standalone probe showed every variant binds; the interface-type form (`requiredInterfaceType = .loopback`) is kept as the supported spelling |
+| multi-file `swiftc` build: "statements are not allowed at the top level" | only `main.swift` may hold top-level code; the smoke harness is staged under that name (`scripts/forward-smoke.mjs`); `dock-app.mjs` now compiles every `Sources/*.swift` |
+| smoke test forwarded on a substitute port | expected on one Mac: the echo target already holds the port locally — the `EADDRINUSE → free port` path is what got exercised |
+
+Verified: `pnpm check` (64 tests incl. real `lsof` and the route end to end
+with Node's `WebSocket`), `pnpm forward:smoke` (Swift ↔ Node: refusal codes,
+bind, 3 MiB in order, close propagation). **Not yet measured:** WKWebView
+mixed content for an `http://127.0.0.1` iframe inside the HTTPS page; the
+chain through Serve + proxy on a real remote; the Dock app was **built, not
+installed** (`pnpm dock-app:build`) — install with the existing spec when
+ready (`pnpm dock-app:install …` / `pnpm remote-app …`). The host route ships
+with the next restart of any instance that has the plugin linked; it adds a
+route and nothing else, `loopbackForward: off` disables it.
+
 ## Troubleshooting (symptoms this audit explains)
 
 | Symptom | Why |

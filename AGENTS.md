@@ -409,7 +409,10 @@ can reproduce or maintain it:
   always the *client's*, `localWebUrl` hard-codes the server's, the Browser's
   `application-origin` check is against the local origin inside the frame,
   file links stay correct via the document-relative API; the seams a fix
-  would use.
+  would use — and the fix built on them (2026-09-23): transparent loopback
+  port forwarding in the DSH Remote Dock app (`forward.mjs` upgrade route
+  with the `lsof` uid guard + `PortForward.swift`; the `NWListener` EINVAL
+  and multi-file `swiftc` traps; what is still unmeasured).
 - `install-rewind-plugin.md` — session rewind plugin install.
 - `model-titles-not-slugs-on-new-instance.md` — model-generated session
   titles come out as natural phrases instead of `foo-bar-baz` on a freshly

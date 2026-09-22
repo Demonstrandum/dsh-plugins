@@ -170,12 +170,15 @@ export async function buildDockApp(options = {}) {
   // Through xcrun so the SDK is resolved; the CLT binary invoked directly cannot find the standard library.
   const swiftc = '/usr/bin/xcrun'
   await mkdir(BUILD_DIR, { recursive: true })
-  const source = join(DOCK_APP_DIR, 'Sources', 'main.swift')
+  // Every file under Sources/ is one module; main.swift carries the top-level code.
+  const sourceDir = join(DOCK_APP_DIR, 'Sources')
+  const sources = (await readdir(sourceDir)).filter(name => name.endsWith('.swift')).sort().map(name => join(sourceDir, name))
   const executable = join(BUILD_DIR, EXECUTABLE)
   const target = `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macos13.0`
-  if (options.force || (await mtime(executable)) < (await mtime(source))) {
+  const newestSource = Math.max(...(await Promise.all(sources.map(mtime))))
+  if (options.force || (await mtime(executable)) < newestSource) {
     log('dock-app: compiling the wrapper')
-    await execFileAsync(swiftc, ['swiftc', '-O', '-target', target, '-o', executable, source, '-framework', 'Cocoa', '-framework', 'WebKit'], { maxBuffer: 8 * 1024 * 1024 })
+    await execFileAsync(swiftc, ['swiftc', '-O', '-target', target, '-o', executable, ...sources, '-framework', 'Cocoa', '-framework', 'WebKit', '-framework', 'Network'], { maxBuffer: 8 * 1024 * 1024 })
   }
   const iconTool = join(BUILD_DIR, 'make-icon')
   const iconSource = join(DOCK_APP_DIR, 'Tools', 'make-icon.swift')

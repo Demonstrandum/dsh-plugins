@@ -22,6 +22,12 @@
 //     the app name wins over the server's label inside the app;
 //   - opens links that leave the DSH mount (other ports, other hosts, and
 //     every window.open) in the default browser instead of a new window;
+//   - makes `localhost` / `127.0.0.1` links work: they name the *remote's*
+//     loopback (an agent's dev server), so before such a URL loads the app
+//     forwards that port from the DSH host to this Mac over one WebSocket per
+//     connection (PortForward.swift; forward.mjs on the host) and lets the
+//     navigation proceed — the URL works verbatim. View ▸ Forwarded Ports
+//     lists and closes them;
 //   - persistent data store, standard menu bar (⌘R reload, zoom, full screen,
 //     "Open in Browser"), remembered window frame, Web Inspector enabled
 //     (Safari ▸ Develop ▸ <this Mac> ▸ DSH), downloads into ~/Downloads.
@@ -98,22 +104,37 @@ struct Scope {
     }
 
     func contains(_ url: URL) -> Bool {
-        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return false }
+        mountBase(for: url) != nil
+    }
+
+    /// The mount directory (`https://node/dsh/user/`) of the entry point a URL belongs to, or nil when foreign.
+    func mountBase(for url: URL) -> URL? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
         let host = (url.host ?? "").lowercased()
         let port = url.port ?? (scheme == "https" ? 443 : 80)
         let path = url.path.isEmpty ? "/" : url.path
-        return origins.contains { origin in
+        guard let origin = origins.first(where: { origin in
             origin.scheme == scheme && origin.host == host && origin.port == port
                 && (path == String(origin.pathPrefix.dropLast()) || path.hasPrefix(origin.pathPrefix))
-        }
+        }) else { return nil }
+        var components = URLComponents()
+        components.scheme = origin.scheme
+        components.host = origin.host
+        if origin.port != (origin.scheme == "https" ? 443 : 80) { components.port = origin.port }
+        components.path = origin.pathPrefix
+        return components.url
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKDownloadDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKDownloadDelegate, NSWindowDelegate, NSMenuDelegate {
     let config = DockConfig.load()
     var window: NSWindow!
     var webView: WKWebView!
     var scope: Scope!
+    var forwarder: PortForwarder!
+    let forwardedPortsMenu = NSMenu(title: "Forwarded Ports")
+    /// Last refusal shown per remote port, so a failing iframe does not stack alerts.
+    private var lastForwardAlert: [Int: Date] = [:]
     var titleObservation: NSKeyValueObservation?
     var showingOfflinePage = false
     var retryTimer: Timer?
@@ -126,8 +147,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        buildMenu()
         scope = Scope(urls: [remoteURL] + (fallbackBase.map { [$0] } ?? []))
+        forwarder = PortForwarder(endpointBase: { [weak self] in self?.currentMountBase() }, log: { [weak self] line in self?.appendLog(line) })
+        buildMenu()
 
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
@@ -205,6 +227,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationWillTerminate(_ notification: Notification) { forwarder.closeAll() }
+
+    /// The DSH mount the page is loaded from right now (tailnet or loopback fallback), or nil while offline.
+    func currentMountBase() -> URL? {
+        if showingOfflinePage { return nil }
+        if let current = webView.url, let base = scope.mountBase(for: current) { return base }
+        return scope.mountBase(for: remoteURL)
+    }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { window.makeKeyAndOrderFront(nil) }
@@ -336,9 +367,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
         if url.scheme == "about" || url.scheme == "blob" || url.scheme == "data" { decisionHandler(.allow); return }
+        let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+        // A loopback URL outside our own entry points names the remote's loopback:
+        // forward the port first, then let the load proceed (an iframe such as the
+        // GUI's Sidebar Browser) or hand a top-level navigation to the default
+        // browser like any other foreign link — the tunnel stays up either way.
+        if !scope.contains(url), let link = LoopbackLink(url) {
+            forwardLoopback(link) { [weak self] target in
+                guard let self else { decisionHandler(.cancel); return }
+                guard let target else { decisionHandler(.cancel); return }
+                if self.scope.contains(target) {
+                    // The remote's own DSH port → this app: main frame loads it here, a subframe gets a window.
+                    if isMainFrame { webView.load(URLRequest(url: target)) } else { self.openPopupWindow(target) }
+                    decisionHandler(.cancel)
+                } else if isMainFrame {
+                    NSWorkspace.shared.open(target)
+                    decisionHandler(.cancel)
+                } else if target == url {
+                    decisionHandler(.allow)
+                } else {
+                    // The subframe cannot be redirected onto the substitute local port; open it outside.
+                    NSWorkspace.shared.open(target)
+                    decisionHandler(.cancel)
+                }
+            }
+            return
+        }
         // Only user-initiated top-level navigations are subject to the scope rule;
         // redirects and in-scope loads (including the token exchange) pass.
-        let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
         if isMainFrame && !scope.contains(url) {
             if navigationAction.navigationType == .linkActivated || navigationAction.targetFrame == nil || navigationAction.navigationType == .other {
                 if url.scheme == "http" || url.scheme == "https" || url.scheme == "mailto" {
@@ -378,19 +434,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let url = navigationAction.request.url else { return nil }
+        // A loopback URL (target=_blank link, "Open in system browser" from the GUI's
+        // Browser tab): forward the port, then open it in the default browser — the
+        // user's real browser is the better host for a dev server than a wrapper window.
+        if !scope.contains(url), let link = LoopbackLink(url) {
+            forwardLoopback(link) { [weak self] target in
+                guard let self, let target else { return }
+                if self.scope.contains(target) { self.openPopupWindow(target) } else { NSWorkspace.shared.open(target) }
+            }
+            return nil
+        }
         // Out of scope → the default browser, as before.
         guard scope.contains(url) else { NSWorkspace.shared.open(url); return nil }
         // In scope → a real second window. (Until 2026-09-22 this loaded the URL into the MAIN
         // window: clicking a <private>_show image replaced the whole GUI with the bare image, and
         // the red button then closed the app's only window.) WebKit requires the returned view to
         // be created with the configuration it hands us.
+        return makePopup(configuration: configuration, title: url.lastPathComponent)
+    }
+
+    /// A second window of ours for an in-scope URL we choose to load (not a page-initiated popup).
+    private func openPopupWindow(_ url: URL) {
+        let popup = makePopup(configuration: webView.configuration.copy() as! WKWebViewConfiguration, title: url.lastPathComponent)
+        popup.load(URLRequest(url: url))
+    }
+
+    private func makePopup(configuration: WKWebViewConfiguration, title: String) -> WKWebView {
         let popup = WKWebView(frame: .zero, configuration: configuration)
         popup.navigationDelegate = self
         popup.uiDelegate = self
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 720),
                          styleMask: [.titled, .closable, .miniaturizable, .resizable],
                          backing: .buffered, defer: false)
-        w.title = url.lastPathComponent.isEmpty ? config.name : url.lastPathComponent
+        w.title = title.isEmpty ? config.name : title
         w.contentView = popup
         w.isReleasedWhenClosed = false
         w.tabbingMode = .disallowed
@@ -402,6 +478,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
         w.makeKeyAndOrderFront(nil)
         return popup
+    }
+
+    // MARK: loopback forwarding
+
+    /// Forward the remote port a loopback link names, then call back with the URL to
+    /// use here: the link itself when the same local port could be bound, a rewritten
+    /// one when it could not, this app's own mount when the port is the remote DSH
+    /// instance itself, or nil when the remote refused (an alert says why).
+    func forwardLoopback(_ link: LoopbackLink, completion: @escaping (URL?) -> Void) {
+        forwarder.ensure(remotePort: link.port) { [weak self] result in
+            guard let self else { completion(nil); return }
+            switch result {
+            case .success(let listener):
+                completion(link.rewritten(toLocalPort: listener.localPort))
+            case .failure(let error):
+                if error.refusalCode == "reserved", let base = self.currentMountBase() {
+                    // `$DSH_WEB_URL`-style links (http://127.0.0.1:<dsh port>/...) mean this very GUI.
+                    var relative = link.url.path.isEmpty ? "" : String(link.url.path.dropFirst())
+                    if let query = link.url.query { relative += "?\(query)" }
+                    completion(URL(string: relative, relativeTo: base)?.absoluteURL ?? base)
+                    return
+                }
+                self.reportForwardFailure(port: link.port, error: error)
+                completion(nil)
+            }
+        }
+    }
+
+    private func reportForwardFailure(port: Int, error: ForwardError) {
+        appendLog("forward: \(port): \(error)")
+        let now = Date()
+        if let last = lastForwardAlert[port], now.timeIntervalSince(last) < 30 { return }
+        lastForwardAlert[port] = now
+        let alert = NSAlert()
+        alert.messageText = "Cannot open 127.0.0.1:\(port) on the DSH host"
+        alert.informativeText = "\(error)"
+        alert.addButton(withTitle: "OK")
+        if let window { alert.beginSheetModal(for: window) } else { alert.runModal() }
+    }
+
+    @objc func closeForward(_ sender: NSMenuItem) {
+        guard let port = sender.representedObject as? Int else { return }
+        forwarder.close(remotePort: port)
+    }
+
+    @objc func closeAllForwards() { forwarder.closeAll() }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === forwardedPortsMenu else { return }
+        menu.removeAllItems()
+        let rows = forwarder.rows
+        if rows.isEmpty {
+            let none = menu.addItem(withTitle: "No forwarded ports", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            return
+        }
+        for row in rows {
+            let label = row.localPort == row.remotePort
+                ? "127.0.0.1:\(row.remotePort)"
+                : "127.0.0.1:\(row.localPort) → remote :\(row.remotePort)"
+            let suffix = row.connections == 0 ? "" : "  (\(row.connections) connection\(row.connections == 1 ? "" : "s"))"
+            let item = menu.addItem(withTitle: "Close \(label)\(suffix)", action: #selector(closeForward(_:)), keyEquivalent: "")
+            item.representedObject = row.remotePort
+            item.target = self
+        }
+        menu.addItem(.separator())
+        let all = menu.addItem(withTitle: "Close All", action: #selector(closeAllForwards), keyEquivalent: "")
+        all.target = self
     }
 
     /// `window.close()` from a popup page.
@@ -541,6 +685,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         openInBrowser.keyEquivalentModifierMask = [.command, .shift]
         let copy = view.addItem(withTitle: "Copy Address", action: #selector(copyURL), keyEquivalent: "c")
         copy.keyEquivalentModifierMask = [.command, .shift]
+        view.addItem(.separator())
+        let forwards = view.addItem(withTitle: "Forwarded Ports", action: nil, keyEquivalent: "")
+        forwardedPortsMenu.delegate = self
+        forwardedPortsMenu.autoenablesItems = false
+        forwards.submenu = forwardedPortsMenu
         view.addItem(.separator())
         let fullScreen = view.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         fullScreen.keyEquivalentModifierMask = [.command, .control]

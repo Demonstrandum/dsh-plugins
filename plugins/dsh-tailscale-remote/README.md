@@ -127,6 +127,7 @@ not the machine.
 | `dockAppName` | `DSH` | `~/Applications/<name>.app` |
 | `identityOperators` | `true` | identity-admitted users may use the control channel and get `ownsHost`; `false` = this node's own device only |
 | `dockAppGlyphColor` / `dockAppTileColor` | `#000000` / `#ffffff` | icon: `dock-app/icon.svg` on a rounded tile |
+| `loopbackForward` | `admitted` | who may forward this host's loopback ports to their device ([below](#loopback-port-forwarding)): `admitted` (anyone the proxy let in), `operators`, `off` |
 
 Persisted: `{ enabled, allowedUsers, token }`. tailscaled persists the route
 itself; on boot the plugin restarts the proxy when `enabled` and republishes
@@ -212,6 +213,13 @@ reload, Reconnect, zoom, full screen, ⌘⇧O open in browser, ⌘⇧C copy addr
 frame autosave, real second windows for in-scope `window.open`/`target=_blank` (until 2026-09-22 the URL was loaded into the main window — a <private>_show image click replaced the whole GUI and the red button then closed the app; popups share the app's cookie store and `window.close()` works), a menu fix (WKWebView's mousedown default on a Radix `menuitemradio`/`menuitemcheckbox` row moves focus to `<body>`, the menu's focus-outside guard unmounts it before `pointerup`, and the click selects nothing — model and reasoning-effort rows were unselectable in every Dock app until 2026-09-21; the wrapper now `preventDefault()`s that mousedown, radio/checkbox rows only, plain `menuitem`s such as "Model ›" work unaided and break when touched), page diagnostics to `~/Library/Logs/DSH Dock/<app>.log` (uncaught errors, unhandled rejections, console.error/warn, failed or non-GET fetches, WebSocket closes, RPC replies carrying `ok:false`), a one-shot `open-panel` hint from the page (`dshDock` message: start directory, hidden files, prompt — used by `/import-api-keys` to open in `~/.pi/agent`), `isInspectable` (Safari ▸ Develop ▸ this Mac), downloads to
 ~/Downloads. Not Safari: no Web Notifications, no Safari extensions.
 
+**Loopback links (2026-09-23).** A `localhost` / `127.0.0.1` URL in the page
+names the *remote's* loopback (an agent's dev server, `$DSH_WEB_URL`), so
+before such a URL loads the wrapper forwards that port from the DSH host to
+this Mac and lets the navigation proceed — see [Loopback port
+forwarding](#loopback-port-forwarding). View ▸ **Forwarded Ports** lists and
+closes them.
+
 **Identity (2026-09-21).** The wrapper carries its own name and icon colour
 into the page: a document-start script sets `globalThis.__DSH_DOCK__ =
 { name, glyphColor }` and appends a `<style>` (all rules `!important`) that
@@ -238,6 +246,93 @@ it with `lsregister`, pins a Dock tile unless one already points at the path
 JSON round trip fails silently), and launches it. Bundle id
 `io.github.taliesinb.dsh-dock-app` is stable, so WebKit data persists across
 reinstalls.
+
+## Loopback port forwarding
+
+**The problem.** An agent on the DSH host starts a dev server and writes
+`http://127.0.0.1:5173/`; the GUI turns that into a link (Markdown allowlist,
+inline-code URLs — see `recipes/inline-links-remote-audit.md`). In the Dock
+app that link names *this Mac's* loopback: connection refused, or the wrong
+service. Nothing in DSH knows that "loopback" means the server's. The same
+applies to `$DSH_WEB_URL` (`http://127.0.0.1:3080`), which the model is told
+is "this GUI".
+
+**The mechanism** — one WebSocket per TCP connection, through the channel the
+page already uses, so the URL works *verbatim* (Host header, absolute paths,
+cookies, HMR socket):
+
+```
+client Mac                                                    DSH host
+Dock app                                                       dsh-tailscale-remote
+  NWListener 127.0.0.1:5173 ──URLSessionWebSocketTask──▶ <mount>api/loopback-forward?port=5173
+        ▲              (Serve: TLS + identity; proxy.mjs forwards any admitted upgrade)   │
+        │ WKWebView / Safari                                   forward.mjs on DSH's http.Server ──▶ net.connect(127.0.0.1:5173)
+   http://127.0.0.1:5173/  (verbatim)                          (uid guard via lsof, then a byte pipe)
+```
+
+- **Host half, `forward.mjs`** — an exact-path upgrade route
+  (`ctx.webServer.registerUpgrade`) behind DSH's own browser-session gate.
+  Policy, in order: (1) `loopbackForward` — `admitted` (default; a token
+  holder already drives an agent with a shell here, so forwarding this
+  account's ports adds no privilege), `operators` (`x-dsh-tailscale-remote-self`
+  = this node's own device / identity-admitted users), `off`; direct loopback
+  callers (no proxy headers) pass. (2) **Reserved ports** — this instance's
+  DSH, proxy and relay ports are 403 `reserved` (the remote serves them; a raw
+  forward would only bypass the fence). (3) **The uid guard** —
+  `lsof -nP -iTCP:<port> -sTCP:LISTEN -F pcun` must show the listener and every
+  visible one must belong to the uid running this DSH. On the shared remote machine
+  with one DSH per account that is exactly "a server *this account's* agent
+  started"; other accounts' listeners are invisible to an unprivileged `lsof`
+  → 404 `nothing-listening`. Denials are HTTP statuses **before** the 101
+  (`X-Dsh-Forward-Error: reserved|nothing-listening|foreign-owner|disabled|
+  not-operator|connect-failed|lsof-unavailable|too-many-connections`), so the
+  client can tell them apart; after the handshake the server sends a text
+  frame `{"type":"connected",port,pid,command}` and then pipes binary frames
+  both ways (own RFC 6455 framing, no `ws` dependency — the remote deploy
+  installs third-party deps from a pinned manifest). Cap 64 connections,
+  connect timeout 5 s, close code 1000 on target EOF / 1011 on target error.
+- **Client half, `dock-app/Sources/PortForward.swift`** — `LoopbackLink`
+  recognises `localhost`, `127.*`, `[::1]`, `0.0.0.0`, `*.localhost`;
+  `PortForwarder.ensure(remotePort:)` opens one **probe** WebSocket (the
+  remote's verdict arrives as the HTTP status via `task.response`, or as the
+  `connected` frame), then binds `127.0.0.1:<same port>` with `NWListener`
+  (`requiredInterfaceType = .loopback`; **a `newConnectionHandler` must be set
+  before `start` or the bind fails with EINVAL**), falling back to a free port
+  when the number is taken here (the URL is rewritten to it; still loopback,
+  so Vite's default host check stays happy). Each accepted connection is a
+  `ForwardConnection`: NWConnection ↔ `URLSessionWebSocketTask`, one ordered
+  outbound queue (the browser speaks first; its bytes wait for `connected`),
+  high-water pause at 32 chunks, teardown from either side. The request
+  carries the WKWebView data store's cookies for the host (token-exchanged
+  fallback entry); on the tailnet path tailscaled injects identity anyway.
+  Listeners live until quit, View ▸ Forwarded Ports ▸ Close, or an idle hour.
+- **Where the app intercepts (`main.swift`).** `decidePolicyFor
+  navigationAction` (fires for **subframes** too — the GUI's Sidebar Browser
+  iframe) and `createWebViewWith` (target=_blank, `window.open`, the Browser
+  tab's "Open in system browser"): a loopback URL outside the app's own entry
+  points → `forwardLoopback` → then the iframe is allowed to load (same port)
+  or the URL goes to the default browser (top-level / popup / substitute
+  port). A `reserved` refusal means "the remote DSH itself": the link is
+  mapped onto the app's mount (`$DSH_WEB_URL/…` → `https://node/dsh/user/…`)
+  and loaded in the app. Other refusals show one sheet per port per 30 s and
+  are logged to `~/Library/Logs/DSH Dock/<app>.log`.
+
+**Tests.** `pnpm test` covers the host half (policy helpers, frame codec,
+real `lsof` on a listener we own, the upgrade handler end to end with Node's
+`WebSocket` client). `pnpm forward:smoke` compiles `PortForward.swift` with a
+CLI harness (`dock-app/Tools/forward-smoke.swift`) and runs it against the
+real route: refusal codes reach Swift, the listener binds (on a substitute
+port here, since the echo target is on the same Mac), 3 MiB round-trips in
+order, target close propagates. Needs swiftc.
+
+**Not yet measured (2026-09-23).** (a) WKWebView mixed content: does an
+`http://127.0.0.1:N` iframe load inside the `https://…/dsh/` page? WebKit
+treats loopback as potentially trustworthy, so it should; if not, the Sidebar
+Browser's "Open in system browser" path still works. (b) The full chain
+through Serve + proxy on a real remote (the proxy's upgrade passthrough is
+tested against a fake DSH; `/api/remote.mux` uses the same path in
+production). (c) `lsof -F` output on the remote's macOS version — the parser
+accepts the documented field letters.
 
 ## The relay (`relay/`)
 
