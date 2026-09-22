@@ -58,6 +58,16 @@ disabled in a session, a denial is final.
 
 ## Ground rules
 
+- **This repo is public.** Nothing that identifies a real deployment goes into
+  it — no host names, macOS account names, tailnet/MagicDNS names, tailnet
+  logins, LAN IPs, or internal repo names — not in code, comments, recipes,
+  this file, or commit messages. Write `<remote>`, `<user>`,
+  `<host>.example.ts.net`, "the shared remote machine", "DSH Remote" instead, and
+  put the concrete facts in the private `extras/` submodule (its `AGENTS.md`
+  has the full rule, the grep to run on every staged diff, and the history
+  rewrite procedure). Before committing: `git diff --cached -- . ':!extras' |
+  grep -i` for the identifiers listed there. Two history rewrites already
+  (2026-09-21, 2026-09-22); there must not be a third.
 - Plugins are developed **out-of-tree** (this repo). Never fork/patch DSH to
   add a feature: "There is no privileged core to patch: you extend dsh by
   mounting a plugin beside the others" (`docs/architecture.md`).
@@ -295,6 +305,9 @@ can reproduce or maintain it:
   are what save the next agent hours.
 - Include a troubleshooting table when the task had failure modes.
 - Cross-reference plugin READMEs rather than duplicating them.
+- No real host / account / tailnet names (Ground rules): `<remote>`,
+  `<user>`, `<host>.example.ts.net`; the concrete inventory and any
+  per-account rollout log go into the private `extras/AGENTS.md`.
 - Add the new recipe to the index below.
 
 ### Recipe index
