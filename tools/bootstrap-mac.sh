@@ -15,6 +15,9 @@
 #   --no-apps             do not offer to install Safari Technology Preview / Chrome (Tailscale is always required)
 #   --no-tailnet          skip the relay LaunchAgent, the tailnet route and the Dock app
 #   --no-apple            skip afm + the Apple on-device provider/preset
+#   --without NAME,NAME   leave these plugins out of the bundle install (on top of the paid-app gating),
+#                         e.g. --without dsh-remote-workspaces on a shared server whose instances must not
+#                         act as remote-workspace clients themselves (no tunnel inside the tunnel)
 #   --rebuild             rebuild the fork and the plugins even if built artifacts exist
 #   --tailscale-timeout S give up waiting for the Tailscale login after S seconds (default 10: the login is a
 #                         precondition, not something this script waits around for)
@@ -68,6 +71,7 @@ DRY=0
 APPS=1
 TAILNET=1
 APPLE=1
+USER_WITHOUT=""
 REBUILD=0
 FORCE=0
 REPLACE=0
@@ -93,6 +97,8 @@ while [ $# -gt 0 ]; do
     --no-apps) APPS=0; shift ;;
     --no-tailnet) TAILNET=0; shift ;;
     --no-apple) APPLE=0; shift ;;
+    --without) USER_WITHOUT="$2"; shift 2 ;;
+    --without=*) USER_WITHOUT="${1#--without=}"; shift ;;
     --rebuild) REBUILD=1; shift ;;
     --force) FORCE=1; shift ;;
     --replace) REPLACE=1; shift ;;
@@ -689,7 +695,8 @@ if wants install-plugins; then
   banner "Install the plugins into the web profile as bundles"
   [ -x "$DIR/tools/install-plugins.sh" ] || [ "$DRY" = 1 ] || die "tools/install-plugins.sh missing in $DIR"
   WITHOUT=""
-  for p in "${EXCLUDED[@]}"; do WITHOUT="$WITHOUT,$p"; done
+  for p in "${EXCLUDED[@]-}"; do [ -n "$p" ] && WITHOUT="$WITHOUT,$p"; done
+  [ -z "${USER_WITHOUT:-}" ] || WITHOUT="$WITHOUT,$USER_WITHOUT"
   WITHOUT="${WITHOUT#,}"
   IP_ARGS=(--checkout "$CK"); [ -z "$WITHOUT" ] || IP_ARGS+=(--without "$WITHOUT")
   if [ "$DRY" = 1 ] && [ ! -d "$DIR" ]; then log "would run tools/install-plugins.sh ${IP_ARGS[*]}"
