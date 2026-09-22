@@ -61,3 +61,8 @@
     # reloads the page instead. Recipe: recipes/black-screen-after-server-restart.md
     - id: tali-reload-on-restart
       name: '/Users/USER/github/tali-dash-plugins/plugins/reload-on-restart/index.js'
+    # Under trial (2026-09-22): transcript-grace-margin — 160px of empty space
+    # under the transcript's last row so the end of a long session is
+    # unmistakable (host-only <style> row). Recipe: recipes/transcript-grace-margin.md
+    - id: tali-transcript-grace-margin
+      name: '/Users/USER/github/tali-dash-plugins/plugins/transcript-grace-margin/index.js'

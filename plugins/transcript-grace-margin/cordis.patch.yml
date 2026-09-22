@@ -1,0 +1,10 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# Default: 160px of empty space under the transcript's last row. Override
+# `config` in the profile's cordis.patch.yml (a later layer replaces the
+# whole value):
+#   - id: tali-transcript-grace-margin
+#     config:
+#       margin: 200            # px, integer 0-600; 0 disables the rule
+- insert:
+    - id: tali-transcript-grace-margin
+      name: tali-transcript-grace-margin

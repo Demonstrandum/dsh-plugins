@@ -1,0 +1,25 @@
+{
+  "name": "tali-transcript-grace-margin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin: a visible grace margin under the last row of a Chat transcript, so scrolling to the bottom of a long session unmistakably reads as the end. Host-only, no client bundle.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "check": "node --check index.js",
+    "test": "node --test tests/*.test.mjs"
+  }
+}

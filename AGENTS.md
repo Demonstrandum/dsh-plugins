@@ -515,6 +515,14 @@ can reproduce or maintain it:
   `fix/tailscale-mounting` (document-relative Host URLs; why a worktree), the
   measured Tailscale path-strip facts, and the trailing-slash trap. Ports and
   the Dock app / relay moved on in `dock-app-via-tailnet.md`.
+- `transcript-grace-margin.md` — visible "end of transcript" space under the
+  last row of an active session (`transcript-grace-margin` plugin, host-only):
+  why the shipped client leaves only 16px under a 36px composer fade band,
+  the two unhashed hooks (`data-conversation-scroll`, `data-chat-flow`) vs
+  the `<hash>_<local>` classes, why padding on the column is safe for
+  ChatView's auto-follow / back-to-bottom / turn navigation, the
+  console-first verification on the preview and the relay's boot-on-demand
+  503.
 - `<private-plugin>-graphics3d.md` — native three.js `<private>_show` for
   `Graphics3D` (experiment + implementation, 2026-09-21): the ~26-head box IR that
   `ToBoxes` normalizes every 3D primitive/plot into (and the regions that pass
