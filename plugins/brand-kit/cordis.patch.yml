@@ -1,0 +1,6 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# With no config the plugin changes nothing; set the row's `config` in the
+# profile patch (~/.dsh/profiles/<profile>/cordis.patch.yml) — see README.
+- insert:
+    - id: tali-brand-kit
+      name: tali-brand-kit

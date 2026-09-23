@@ -132,7 +132,7 @@ generated API in `docs/cordis-api/`):
    `dsh plugin --profile <name> add ./plugins/<dir>` (pnpm-links the local
    directory; `remove` undoes it). Layer order, git installs, and the pnpm
    `allowBuilds` catch: `docs/user/develop/basic/publish.md`.
-   **All eighteen live plugins at once:** `pnpm install-plugins [--profile web]`
+   **All nineteen live plugins at once:** `pnpm install-plugins [--profile web]`
    (`tools/install-plugins.sh`; `pnpm remove-plugins` undoes it). Rows then
    resolve by package name from the profile's hoisted `node_modules`, so no
    patch carries an absolute path. A "superplugin" package that merely lists
@@ -367,6 +367,16 @@ can reproduce or maintain it:
   (LaunchAgents, this user's processes and Serve paths, apps → Trash + Dock
   tiles, global CLI; keeps `~/.dsh` and the checkouts) with the two `pgrep`
   facts it surfaced (ancestor exclusion → `-a`; the script text as argv).
+- `brand-kit-plugin.md` — re-branding the Web GUI from config (`brand-kit`
+  plugin, no brand built in): mark file as a CSS mask (or image) in the
+  three `single` brand slots (replacing the whale AND the version chip),
+  fonts served from a directory with document-relative `@font-face`,
+  typography, one-hex accent re-pointing the shipped `--dsw-static-deepseek-*`
+  ramp via `color-mix` on `html>body` (the theme-sheet cascade trap), the
+  two locale-owned strings ("Into the Unknown", "Deep diving...") swapped in
+  place by a MutationObserver; why the brand is a private *configuration
+  profile* (assets + a profile-patch block) and not a plugin; a new bundle
+  row taking effect live without a restart.
 - `browser-automation-plugin.md` — per-chat Safari Technology Preview /
   Chrome windows and the isolated page reader (`browser-automation` plugin):
   why a plugin and not MCP config, the STP `--mcp` facts that shape it, the
