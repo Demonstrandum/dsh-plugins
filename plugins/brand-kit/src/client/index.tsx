@@ -2,7 +2,7 @@
  * tali-brand-kit — browser half.
  *
  * Reads `globalThis.__DSH_BRAND_KIT__` (published by the host half from the
- * validated config) and occupies the shell's brand cells for the parts that
+ * active profile) and occupies the shell's brand cells for the parts that
  * are configured — all `single` slots, so registering replaces the shipped
  * fallback (whale / "DSH Local Build" + version chip) outright:
  *   - `sidebar.brand.mark`            the configured mark at the size the shell asks for
@@ -14,6 +14,10 @@
  * Mark modes: `mask` renders a span whose CSS mask is the file and whose
  * background is the text colour (theme-following, like the whale);
  * `image` renders the file as an <img>.
+ *
+ * The bundle's page in the Plugins panel gets a "Brand" card
+ * (profiles-card.tsx, `plugins.bundle.config` keyed by the package name):
+ * brand profiles — apply, new, duplicate, rename, export/import, edit.
  *
  * Two shipped strings have no slot and are locale-owned (`t('hero.headline')`,
  * `t('chat.deepDiving')`; one occupant per namespace), so their text nodes
@@ -28,8 +32,14 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+// Type-only: the Plugins panel's `plugins.bundle.config` slot.
+import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
+import { BrandProfilesCard } from './profiles-card.tsx'
 
 export const inject = ['slots']
+
+/** This package's name (package.json): the key of its configuration card on the Plugins page. */
+const BUNDLE_NAME = 'tali-brand-kit'
 
 /** The host half's payload ('' / null = that part keeps the shipped look). */
 interface BrandKit {
@@ -99,4 +109,6 @@ export function apply(ctx: Context): void {
     ctx.slots.inject('sidebar.brand.name', () => ctx.slots.register({ name: 'sidebar.brand.name' }, SidebarName))
   }
   ctx.effect(() => substituteTexts(kit))
+  ctx.slots.inject('plugins.bundle.config', () =>
+    ctx.slots.register({ name: 'plugins.bundle.config', key: BUNDLE_NAME }, BrandProfilesCard))
 }

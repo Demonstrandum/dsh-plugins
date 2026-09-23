@@ -9,7 +9,7 @@ const dir = mkdtempSync(join(tmpdir(), 'brand-kit-'))
 writeFileSync(join(dir, 'mark.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
 writeFileSync(join(dir, 'Face.woff2'), '')
 
-test('empty config is the shipped look', () => {
+test('empty profile is the shipped look', () => {
   const config = normalizeConfig(undefined)
   assert.equal(config.name, '')
   assert.equal(config.mark, '')
@@ -17,19 +17,20 @@ test('empty config is the shipped look', () => {
   assert.deepEqual(clientPayload(config), { name: '', headline: '', turnStatus: '', mark: null })
 })
 
-test('full config: files, faces, payload', () => {
+test('full profile (resolved form): files, faces, payload', () => {
   const config = normalizeConfig({
     name: 'Acme', mark: join(dir, 'mark.svg'), headline: 'Hello', turnStatus: 'Working...', hidePreviewBadge: true,
     accent: '#7678ed', fontsDir: dir, fonts: [{ file: 'Face.woff2', family: 'Face', weight: 300 }],
     brandFont: { family: '"Face", serif', weight: 300, size: 22, offsetY: -1 }, headlineFont: { family: 'Face', size: 32, lineHeight: 36 },
   })
   const css = brandStyle(config)
-  assert.match(css, /@font-face\{font-family:"Face";font-weight:300;.*src:url\(\.\/brand-kit\/fonts\/Face\.woff2\)/)
+  assert.match(css, /@font-face\{font-family:"Face";font-weight:300;.*src:url\(\.\/api\/brand-kit\/asset\?s=&k=font&f=Face\.woff2\)/)
   assert.match(css, /\.brand-kit-name\{font-family:"Face", serif;white-space:nowrap;font-weight:300;font-size:22px;.*translateY\(-1px\)/)
-  assert.match(css, /\.brand-kit-mark\{.*mask:url\(\.\/brand-kit\/mark\.svg\)/)
+  assert.match(css, /\.brand-kit-mark\{.*mask:url\(\.\/api\/brand-kit\/asset\?s=&k=mark&f=mark\.svg\)/)
   assert.match(css, /_previewBadge"\]\{display:none\}/)
   assert.match(css, /--dsw-static-deepseek-500:#7678ed;--dsw-static-blue-500:#7678ed;/)
-  assert.deepEqual(clientPayload(config).mark, { url: './brand-kit/mark.svg', mode: 'mask' })
+  assert.deepEqual(clientPayload(config).mark, { url: './api/brand-kit/asset?s=&k=mark&f=mark.svg', mode: 'mask' })
+  assert.match(brandStyle(config, 'Acme 1'), /asset\?s=Acme\+1&k=font/)
 })
 
 test('accent ramp derives its 600 step unless given', () => {

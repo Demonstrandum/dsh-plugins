@@ -376,7 +376,16 @@ can reproduce or maintain it:
   two locale-owned strings ("Into the Unknown", "Deep diving...") swapped in
   place by a MutationObserver; why the brand is a private *configuration
   profile* (assets + a profile-patch block) and not a plugin; a new bundle
-  row taking effect live without a restart.
+  row taking effect live without a restart. Then the **profiles UI**: the
+  bundle's Plugins-panel card (`plugins.bundle.config`) over a Fetch route
+  — profiles as directories under `$DSH_HOME/brand-profiles/` (portable
+  `profile.json` + assets, fflate zip export/import, staging-dir import,
+  upload of mark/font files, full editor), apply = reload because
+  `index-inject` is emitted per request, one asset route instead of
+  registration-time exact routes, and why a dev-overlay row shows no card.
+  Then the row `config` was retired: a brand is only ever a profile
+  (`cli.mjs import <dir|zip> --name X --apply` for provisioning; none active
+  = shipped look).
 - `browser-automation-plugin.md` — per-chat Safari Technology Preview /
   Chrome windows and the isolated page reader (`browser-automation` plugin):
   why a plugin and not MCP config, the STP `--mcp` facts that shape it, the
