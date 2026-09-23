@@ -36,6 +36,16 @@ optional layers (`tools/bootstrap-mac.sh`, see `INSTALLING.md`):
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/taliesinb/dsh-plugins/main/tools/bootstrap-mac.sh)"
 ```
 
+An existing DSH on the Mac is taken over (stopped, apps/CLI removed, `~/.dsh`
+kept) unless `--no-replace`. Only want a Dock app that opens a DSH running on
+**another** Mac of your tailnet (your instance on a shared server), without
+building anything locally? The thin client, minutes instead of an hour
+(`tools/bootstrap-mac-thin-client.sh`; `<host>` is that Mac's tailnet name):
+
+```sh
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/taliesinb/dsh-plugins/main/tools/bootstrap-mac-thin-client.sh)" <host>
+```
+
 Tooling: `pnpm install-plugins` / `remove-plugins`, `pnpm bootstrap-remote user@host`
 (the bootstrap over ssh), `pnpm deploy-remote user@host` (ship the built fork
 to another Mac as a headless remote), `pnpm remote-app <host>` (a Dock app

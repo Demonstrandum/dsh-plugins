@@ -344,11 +344,18 @@ can reproduce or maintain it:
   (Virtualization.framework vs UTM / Tart / VirtualBuddy) and the pending
   clean-VM test plan; `pnpm bootstrap-remote user@host` (ssh runner) and
   `--replace`, which turned the remote Mac from a deploy-remote (Path B) host into a
-  standalone install while keeping `~/.dsh`, and `--instance`/`--allow` for one
+  standalone install while keeping `~/.dsh` — the default since 2026-09-23
+  (`--no-replace` restores the fresh-machine abort), and `--instance`/`--allow` for one
   DSH per macOS user on a shared machine (Tailscale is one node per Mac, Serve
   paths are additive; 2026-09-21; the five-run log of
   what only a real run finds: ssh submodule URL, masked `runq` failures,
   lefthook vs a fresh submodule's `core.worktree`, pnpm 12 build scripts).
+  Also the **thin client** (2026-09-23): the `thin-client` step /
+  `--thin-client HOST` (a blue `DSH <Host>` Dock app to another Mac's
+  `/dsh/<user>` via `pnpm remote-app`) and the standalone
+  `tools/bootstrap-mac-thin-client.sh [HOST [USER]]` (CLT, Tailscale, node
+  tarball, shallow clone, `dock-app:remote`; nothing built locally), plus why
+  `bash -c "$(curl …)"` needs a `$0` placeholder word before any flags.
 - `browser-automation-plugin.md` — per-chat Safari Technology Preview /
   Chrome windows and the isolated page reader (`browser-automation` plugin):
   why a plugin and not MCP config, the STP `--mcp` facts that shape it, the

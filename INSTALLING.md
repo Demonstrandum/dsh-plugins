@@ -51,19 +51,32 @@ port 3088) is deliberately left out.
 > already present), clones, builds the fork and the plugins, initialises
 > `~/.dsh`, installs the plugin bundles, sets up afm + the Apple provider and
 > preset, installs the relay, enables the route and builds the Dock app —
-> i.e. A1, A2, A4, A6, C1–C5 below, in order. Two hard gates: it **aborts if
-> DSH already seems installed or running** on the Mac (fresh machines only;
-> `--force` overrides), and it **requires Tailscale installed, connected and
-> logged in before cloning anything** — it installs the cask if you agree,
-> reconnects a stopped backend with `tailscale up`, and drives the browser
-> login (prints/opens the URL, waits). Idempotent (re-run to resume); `--dry-run` shows the plan,
+> i.e. A1, A2, A4, A6, C1–C5 below, in order. Two hard gates: when **DSH
+> already seems installed or running** on the Mac it **takes it over by
+> default** (`--replace`: stops every `dsh web`, removes DSH Dock/Desktop apps,
+> a global `dsh`, this instance's Serve path and a deploy-remote `~/dsh`; keeps
+> `~/.dsh` — sessions, settings, credentials; one confirmation) — `--no-replace`
+> makes it abort instead (`--force` then layers on top); and it **requires
+> Tailscale installed, connected and logged in before cloning anything** — it
+> installs the cask if you agree, reconnects a stopped backend with
+> `tailscale up`, and drives the browser login (prints/opens the URL, waits).
+> Idempotent (re-run to resume); `--dry-run` shows the plan,
 > `--no-apps` / `--no-tailnet` / `--no-apple` / `--skip STEP` trim it,
 > `--yes` takes every default. The manual steps remain the hand-off list it
 > prints at the end (Apple Intelligence toggle, STP licence, provider keys).
-> Over ssh: `pnpm bootstrap-remote user@host [flags]`; to turn a Path B host
-> into a standalone Path C install: `pnpm bootstrap-remote <user>@<remote>
-> --replace` — stops the deploy-remote LaunchAgent, removes `~/dsh`, keeps
-> `~/.dsh`, reinstalls. Several people on one Mac: give each an Administrator
+> Its last build step asks for the tailnet host of another DSH (e.g. the
+> shared server) and, given one, also builds a **thin client** — a blue Dock
+> app `DSH <Host>` opening `https://<host>/dsh/<user>/` by identity
+> (`--thin-client HOST [--thin-client-user U]`; empty host = skipped). For the
+> thin client **alone** (no fork, no plugin builds, no Homebrew, minutes):
+> `bash -c "$(curl -fsSL https://raw.githubusercontent.com/taliesinb/dsh-plugins/main/tools/bootstrap-mac-thin-client.sh)" <host>`
+> — installs the CLT if needed, requires the Tailscale login, uses/downloads
+> node, shallow-clones this repo to `~/.dsh-thin-client/` and runs
+> `dock-app:remote`.
+> Over ssh: `pnpm bootstrap-remote user@host [flags]`; a Path B host becomes a
+> standalone Path C install the same way (the default take-over stops the
+> deploy-remote LaunchAgent, removes `~/dsh`, keeps `~/.dsh`, reinstalls).
+> Several people on one Mac: give each an Administrator
 > account (logged in once via Fast User Switching) and run it with
 > `--instance <name> --allow <their tailnet login>` — own ports, own
 > `/dsh-<name>` route, own Dock app, one shared Tailscale node. The rest of
@@ -92,7 +105,7 @@ Local fallback: http://127.0.0.1:3084/?token=<standing token>   (Dock app uses i
 | Logs (launchd stdout/stderr) | `~/dsh/logs/dsh.log`, `~/dsh/logs/afm.log` |
 | Dock app | `~/Applications/DSH.app` (`Contents/Resources/dsh-dock-app.json` holds url/fallback/tokenFile) |
 
-Path C (what the remote runs since 2026-09-21, after `pnpm bootstrap-remote <user>@<remote> --replace`) differs: the checkout is this repo's submodule
+Path C (what the remote runs since 2026-09-21, after `pnpm bootstrap-remote <user>@<remote> --replace` — `--replace` is the default since 2026-09-23) differs: the checkout is this repo's submodule
 `tali-dash-plugins/deepseek-harness` (the plugins link into it relatively) run
 through `pnpm dsh web`, an always-on **relay** LaunchAgent (`io.github.taliesinb.dsh-web-relay`,
 port 3083) starts DSH on demand, and the plugins load from

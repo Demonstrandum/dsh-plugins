@@ -1,10 +1,11 @@
 {
   "name": "tali-dash-plugins",
   "private": true,
-  "description": "the maintainer's DSH plugins, recipes and deployment tooling. Scripts: bootstrap (fresh-machine installer, tools/bootstrap-mac.sh); bootstrap-remote user@host [flags] (same, over ssh; --replace redeploys a deploy-remote host); remote-app <host[/path]> [--name N] (blue Dock app straight to a remote DSH); install-plugins / remove-plugins [--profile web] (all live plugins as bundles); deploy-remote [user@host] [--no-build] [--credentials] [--port=N]; remote-logs / remote-status / remote-restart [user@host].",
+  "description": "the maintainer's DSH plugins, recipes and deployment tooling. Scripts: bootstrap (fresh-machine installer, tools/bootstrap-mac.sh); bootstrap-remote user@host [flags] (same, over ssh; an existing DSH there is taken over by default, --no-replace refuses); bootstrap-thin-client [HOST [USER]] (tools/bootstrap-mac-thin-client.sh: only the blue Dock app to a remote DSH, no local build); remote-app <host[/path]> [--name N] (blue Dock app straight to a remote DSH); install-plugins / remove-plugins [--profile web] (all live plugins as bundles); deploy-remote [user@host] [--no-build] [--credentials] [--port=N]; remote-logs / remote-status / remote-restart [user@host].",
   "scripts": {
     "bootstrap": "tools/bootstrap-mac.sh",
     "bootstrap-remote": "tools/bootstrap-remote.sh",
+    "bootstrap-thin-client": "tools/bootstrap-mac-thin-client.sh",
     "remote-app": "node plugins/dsh-tailscale-remote/scripts/cli.mjs dock-app:remote",
     "install-plugins": "tools/install-plugins.sh",
     "remove-plugins": "tools/install-plugins.sh --remove",

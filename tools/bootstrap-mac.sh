@@ -21,12 +21,21 @@
 #   --rebuild             rebuild the fork and the plugins even if built artifacts exist
 #   --tailscale-timeout S give up waiting for the Tailscale login after S seconds (default 10: the login is a
 #                         precondition, not something this script waits around for)
-#   --force               proceed even though DSH already seems installed or running on this Mac (see below)
-#   --replace             take over ANY existing DSH on this Mac (stock Desktop app / global CLI / our Dock apps /
-#                         relay / Serve route / foreign profile), keeping sessions, settings and credentials; then install.
-#                         Also: REDEPLOY: stop the existing DSH (both LaunchAgents, the listeners), delete the
-#                         deploy-remote.sh tree (~/dsh, ~/.dsh/deploy) and reinstall from scratch, keeping
-#                         ~/.dsh (settings, credentials, sessions, tailscale-remote.json) and any clone at --dir
+#   --no-replace          do NOT take over an existing DSH: abort when one is found (fresh-machine gate; see below),
+#                         unless this is a resume of an earlier run (marker) or --force is given
+#   --force               with --no-replace: proceed even though DSH already seems installed or running on this Mac
+#   --replace             (the default since 2026-09-23) take over ANY existing DSH on this Mac (stock Desktop app /
+#                         global CLI / our Dock apps / relay / Serve route / foreign profile), keeping sessions,
+#                         settings and credentials; then install. Also: REDEPLOY: stop the existing DSH (both
+#                         LaunchAgents, the listeners), delete the deploy-remote.sh tree (~/dsh, ~/.dsh/deploy) and
+#                         reinstall from scratch, keeping ~/.dsh (settings, credentials, sessions,
+#                         tailscale-remote.json) and any clone at --dir. Nothing found → nothing to take over.
+#   --thin-client HOST    also build a Dock app "DSH <Host>" that opens a DSH on ANOTHER Mac over the tailnet
+#                         (pnpm remote-app HOST/dsh/USER; blue whale, identity admission). Without the flag the
+#                         thin-client step asks for a host; an empty answer skips it. The lighter sister script
+#                         tools/bootstrap-mac-thin-client.sh builds ONLY that app (no fork, no plugin builds).
+#   --thin-client-user U  the instance on HOST to open (mounted at /dsh/U); asked otherwise, default = the local
+#                         part of your tailnet login (jo@example.com → jo)
 #   --instance NAME       one DSH per macOS user on a shared machine: this user's install gets its own ports
 #                         (a free decade ≥ 3090: web/relay/proxy = base/base+3/base+4; --port-base N to pick),
 #                         Serve path /dsh-NAME and Dock app DSH-NAME, written as a row override into
@@ -39,14 +48,16 @@
 #   --list                list the step names and exit
 #
 # Steps (in order): preflight clt brew tools apps tailscale clone fork plugins
-#                   home install-plugins preset apple tailnet verify
+#                   home install-plugins preset apple tailnet thin-client verify
 #
-# Two hard gates. (1) This is a FRESH-Mac installer: preflight aborts when DSH
-# already appears to be installed or running here (a dsh process or listener on
-# :3080/:3083/:3084, an existing $DSH_HOME/profiles, a DSH LaunchAgent,
-# ~/Applications/DSH.app, a built checkout at the target directory) unless it
-# is a resume of this very script (marker $DSH_HOME/bootstrap-mac.json, written
-# once preflight passes) or --force is given. (2) Tailscale must be installed,
+# Two hard gates. (1) Preflight looks for an existing DSH (a dsh process or
+# listener on :3080/:3083/:3084, an existing $DSH_HOME/profiles, a DSH
+# LaunchAgent, a DSH Dock/Desktop app, a global `dsh`, a deploy-remote tree, a
+# built checkout at the target directory). By default it then TAKES IT OVER
+# (--replace: stop it, remove the apps/CLI/route, keep ~/.dsh) after one
+# confirmation; with --no-replace it aborts instead, unless it is a resume of
+# this very script (marker $DSH_HOME/bootstrap-mac.json, written once preflight
+# passes) or --force is given. (2) Tailscale must be installed,
 # connected and reporting a tailnet login before anything is cloned: the
 # `tailscale` step installs the cask if you agree, reconnects a stopped
 # backend with `tailscale up`, and drives a login (prints/opens the auth URL,
@@ -77,7 +88,9 @@ USER_WITHOUT=""
 TS=/Applications/Tailscale.app/Contents/MacOS/Tailscale
 REBUILD=0
 FORCE=0
-REPLACE=0
+REPLACE=1
+THIN_HOST=""
+THIN_USER=""
 INSTANCE=""
 PORT_BASE=""
 ALLOW=""
@@ -85,7 +98,7 @@ MOUNT_OPT=""
 TS_TIMEOUT=""
 SKIP=""
 ONLY=""
-STEPS=(preflight clt brew tools apps tailscale clone fork plugins home install-plugins preset apple tailnet verify)
+STEPS=(preflight clt brew tools apps tailscale clone fork plugins home install-plugins preset apple tailnet thin-client verify)
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -105,6 +118,11 @@ while [ $# -gt 0 ]; do
     --rebuild) REBUILD=1; shift ;;
     --force) FORCE=1; shift ;;
     --replace) REPLACE=1; shift ;;
+    --no-replace) REPLACE=0; shift ;;
+    --thin-client) THIN_HOST="$2"; shift 2 ;;
+    --thin-client=*) THIN_HOST="${1#--thin-client=}"; shift ;;
+    --thin-client-user) THIN_USER="$2"; shift 2 ;;
+    --thin-client-user=*) THIN_USER="${1#--thin-client-user=}"; shift ;;
     --instance) INSTANCE="$2"; shift 2 ;;
     --instance=*) INSTANCE="${1#--instance=}"; shift ;;
     --port-base) PORT_BASE="$2"; shift 2 ;;
@@ -118,7 +136,7 @@ while [ $# -gt 0 ]; do
     --repo) REPO="$2"; shift 2 ;;
     --repo=*) REPO="${1#--repo=}"; shift ;;
     --list) printf '%s\n' "${STEPS[@]}"; exit 0 ;;
-    -h|--help) sed -n "2,58p" "$0"; exit 0 ;;
+    -h|--help) sed -n "2,71p" "$0"; exit 0 ;;
     *) echo "unknown argument: $1 (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -262,20 +280,44 @@ if wants preflight; then
   dseditgroup -o checkmember -m "$USER" admin >/dev/null 2>&1 || warn "$USER is not an admin — Homebrew and the Command Line Tools install will fail without sudo"
   ok "macOS $(sw_vers -productVersion) on $(uname -m), user $USER"
 
-  # Fresh-machine gate: refuse to run on top of an existing DSH unless resuming (marker) or --force.
+  # Existing-DSH gate. Detection first (always); then, by default, take whatever was found over (--replace),
+  # or with --no-replace refuse unless resuming (marker) or --force.
   DSH_HOME_DIR="${DSH_HOME:-$HOME/.dsh}"
   MARKER="$DSH_HOME_DIR/bootstrap-mac.json"
   [ -n "$DIR" ] && DIR="${DIR/#\~/$HOME}"
   set_ports "$MARKER"
   [ -z "$INSTANCE" ] || ok "instance '$INSTANCE': ports web $WEB_PORT / relay $RELAY_PORT / proxy $PROXY_PORT, route $MOUNT, Dock app $DOCK_NAME"
+  marker_dir() { node -p "require('$MARKER').dir" 2>/dev/null || python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["dir"])' "$MARKER" 2>/dev/null || true; }
   FOUND=()
-  if [ "$REPLACE" = 1 ]; then
-    # Redeploy: stop whatever DSH runs here and remove the deploy-remote.sh (Path B) tree; ~/.dsh stays.
-    banner "Replace the existing DSH install (--replace)"
-    [ -f "$MARKER" ] && rm -f "$MARKER"
+  for port in "$WEB_PORT" "$RELAY_PORT" "$PROXY_PORT"; do
+    port_busy "$port" && FOUND+=("a server is listening on 127.0.0.1:$port$(pid="$(lsof -ti tcp:$port -sTCP:LISTEN 2>/dev/null | head -1 || true)"; [ -n "$pid" ] && echo " (pid $pid: $(ps -o comm= -p "$pid" 2>/dev/null))")")
+  done
+  # This user's dsh processes only: on a shared machine other accounts legitimately run their own.
+  pgrep -u "$(id -u)" -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' >/dev/null 2>&1 && FOUND+=("a dsh process of yours is running ($(pgrep -u "$(id -u)" -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' | head -1))")
+  pgrep -u "$(id -u)" -f 'dsh (web|serve)|@deepseek-ai/dsh|DSH\.app/Contents/MacOS/' >/dev/null 2>&1 && FOUND+=("a stock dsh / DSH.app process of yours is running")
+  [ -d "$DSH_HOME_DIR/profiles" ] && FOUND+=("$DSH_HOME_DIR/profiles exists (DSH home already initialised)")
+  for la in io.github.taliesinb.dsh-web-relay ai.symbolica.dsh-remote; do
+    [ -f "$HOME/Library/LaunchAgents/$la.plist" ] && FOUND+=("LaunchAgent $la is installed")
+  done
+  [ -d "$HOME/Applications/$DOCK_NAME.app" ] && FOUND+=("$HOME/Applications/$DOCK_NAME.app exists")
+  [ -d /Applications/DSH.app ] && FOUND+=("/Applications/DSH.app exists (stock Desktop app)")
+  [ -f "$HOME/dsh/checkout/apps/cli/lib/bin.js" ] && FOUND+=("a deploy-remote.sh tree exists at ~/dsh")
+  command -v dsh >/dev/null 2>&1 && FOUND+=("a 'dsh' command is on PATH ($(command -v dsh))")
+  CAND="${DIR:-$HOME/github/tali-dash-plugins}"
+  [ -f "$CAND/deepseek-harness/apps/cli/lib/bin.js" ] && FOUND+=("a built DSH checkout exists at $CAND")
+  for f in "${FOUND[@]-}"; do [ -n "$f" ] && warn "$f"; done
+
+  if [ ${#FOUND[@]} = 0 ]; then
+    ok "no existing DSH found on this Mac"
+    if [ -f "$MARKER" ]; then ok "resuming an earlier bootstrap run ($MARKER)"; [ -n "$DIR" ] || DIR="$(marker_dir)"; fi
+  elif [ "$REPLACE" = 1 ]; then
+    # Take over: stop whatever DSH runs here and remove the deploy-remote.sh (Path B) tree, the apps, a global
+    # CLI and this instance's Serve path; ~/.dsh stays. A previous run's marker only lends its --dir default.
+    banner "Take over the existing DSH (the default; --no-replace to refuse instead)"
+    if [ -f "$MARKER" ]; then [ -n "$DIR" ] || DIR="$(marker_dir)"; rm -f "$MARKER"; fi
     if [ "$DRY" = 0 ]; then
-      confirm "Take over this Mac's DSH: stop every dsh web, remove DSH Dock/Desktop apps and a global dsh CLI, reset the Tailscale Serve route, drop a foreign ~/.dsh/profiles, then reinstall? Sessions, settings and credentials are kept" y \
-        || die "aborted"
+      confirm "Take over this Mac's DSH (found above): stop every dsh web, remove DSH Dock/Desktop apps and a global dsh CLI, reset the Tailscale Serve route, drop a foreign ~/.dsh/profiles, then (re)install? Sessions, settings and credentials are kept" y \
+        || die "aborted (re-run with --no-replace --force to layer on top instead)"
     fi
     for la in ai.symbolica.dsh-remote io.github.taliesinb.dsh-web-relay; do
       if [ -f "$HOME/Library/LaunchAgents/$la.plist" ] || launchctl print "gui/$(id -u)/$la" >/dev/null 2>&1; then
@@ -311,7 +353,10 @@ if wants preflight; then
       [ -d "$app" ] || continue
       bid="$(defaults read "$app/Contents/Info.plist" CFBundleIdentifier 2>/dev/null || true)"
       # Ours by bundle-id prefix; the stock Desktop app by name (its id is set at release time, not in-tree).
+      # Thin clients (…dsh-dock-app.remote-<host>-…, `pnpm remote-app`) open OTHER Macs' DSH and hold no local
+      # state — they stay.
       case "$bid" in
+        io.github.taliesinb.dsh-dock-app.remote-*) log "keeping $(basename "$app") (thin client for another Mac)"; continue ;;
         io.github.taliesinb.dsh-dock-app*|*deepseek*) ;;
         *) case "$(basename "$app")" in DSH.app) ;; *) continue ;; esac ;;
       esac
@@ -350,29 +395,11 @@ if wants preflight; then
     fi
     ok "old install stopped and removed; ~/.dsh kept$( [ -d "$HOME/Applications/$DOCK_NAME.app" ] && echo '; the Dock app will be rebuilt' )"
   elif [ -f "$MARKER" ]; then
-    ok "resuming an earlier bootstrap run ($MARKER)"
-    if [ -z "$DIR" ]; then DIR="$(node -p "require('$MARKER').dir" 2>/dev/null || python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["dir"])' "$MARKER" 2>/dev/null || true)"; fi
-  else
-    for port in "$WEB_PORT" "$RELAY_PORT" "$PROXY_PORT"; do
-      port_busy "$port" && FOUND+=("a server is listening on 127.0.0.1:$port$(pid="$(lsof -ti tcp:$port -sTCP:LISTEN 2>/dev/null | head -1 || true)"; [ -n "$pid" ] && echo " (pid $pid: $(ps -o comm= -p "$pid" 2>/dev/null))")")
-    done
-    # This user's dsh processes only: on a shared machine other accounts legitimately run their own.
-    pgrep -u "$(id -u)" -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' >/dev/null 2>&1 && FOUND+=("a dsh process of yours is running ($(pgrep -u "$(id -u)" -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' | head -1))")
-    [ -d "$DSH_HOME_DIR/profiles" ] && FOUND+=("$DSH_HOME_DIR/profiles exists (DSH home already initialised)")
-    for la in io.github.taliesinb.dsh-web-relay ai.symbolica.dsh-remote; do
-      [ -f "$HOME/Library/LaunchAgents/$la.plist" ] && FOUND+=("LaunchAgent $la is installed")
-    done
-    [ -d "$HOME/Applications/$DOCK_NAME.app" ] && FOUND+=("$HOME/Applications/$DOCK_NAME.app exists")
-    command -v dsh >/dev/null 2>&1 && FOUND+=("a 'dsh' command is on PATH ($(command -v dsh))")
-    CAND="${DIR:-$HOME/github/tali-dash-plugins}"
-    [ -f "$CAND/deepseek-harness/apps/cli/lib/bin.js" ] && FOUND+=("a built DSH checkout exists at $CAND")
-    if [ ${#FOUND[@]} -gt 0 ]; then
-      for f in "${FOUND[@]}"; do warn "$f"; done
-      if [ "$FORCE" = 1 ]; then warn "--force given: continuing anyway (every step still skips what is already in place)"
-      elif [ "$DRY" = 1 ]; then warn "a real run would ABORT here: DSH already appears to be installed or running on this Mac (use --force to override); continuing the dry run"
-      else die "DSH already appears to be installed or running on this Mac. This is a fresh-machine installer: use the existing setup (INSTALLING.md day-to-day commands), remove it first, or re-run with --force to layer on top."; fi
-    else ok "no existing DSH found on this Mac"; fi
-  fi
+    ok "resuming an earlier bootstrap run ($MARKER; --no-replace: nothing is torn down)"
+    [ -n "$DIR" ] || DIR="$(marker_dir)"
+  elif [ "$FORCE" = 1 ]; then warn "--no-replace --force: continuing anyway (every step still skips what is already in place)"
+  elif [ "$DRY" = 1 ]; then warn "a real run would ABORT here: DSH already appears to be installed or running on this Mac and --no-replace was given (drop it to take over, or add --force to layer on top); continuing the dry run"
+  else die "DSH already appears to be installed or running on this Mac and --no-replace was given. Drop --no-replace to take it over (sessions, settings and credentials are kept), use the existing setup (INSTALLING.md day-to-day commands), or add --force to layer on top."; fi
 
   if [ "$DRY" = 0 ] && { ! have_brew || ! xcode-select -p >/dev/null 2>&1; }; then
     log "some steps need sudo (Homebrew install, Command Line Tools); asking for your password once now"
@@ -953,6 +980,39 @@ JS
         run_in "$PLUG" pnpm dock-app:install "${DOCK_URL_ARGS[@]}" || warn "Dock app install failed (Settings → Tailscale remote → Install Dock app works too)"
       else todo "install the Command Line Tools, then: cd $PLUG && pnpm dock-app:install ${DOCK_URL_ARGS[*]}"; fi
   }
+fi
+
+# ===========================================================================
+# Thin client: a second, BLUE Dock app "DSH <Host>" that opens a DSH running on another Mac of the tailnet
+# (e.g. your instance on the shared server, mounted there at /dsh/<user>) — no relay, no token, admitted by
+# this node's Tailscale identity. `pnpm remote-app HOST/dsh/USER` (dsh-tailscale-remote's dock-app:remote);
+# needs only node + swiftc + a connected Tailscale, all guaranteed by the steps above. Same thing the sister
+# script tools/bootstrap-mac-thin-client.sh does on its own, without the fork and the plugin builds.
+if wants thin-client; then
+  banner "Thin client: a Dock app for a DSH on another Mac (optional)"
+  if [ -z "$THIN_HOST" ]; then
+    ask THIN_HOST "Tailnet host name of a Mac whose DSH you also want a Dock app for (e.g. hub; empty = skip)" ""
+  fi
+  THIN_HOST="$(printf '%s' "$THIN_HOST" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  if [ -z "$THIN_HOST" ]; then log "skipped (no host given)"
+  else
+    if [ -z "$THIN_USER" ]; then
+      default_user="$(ts_login | cut -d@ -f1 | tr '[:upper:]' '[:lower:]')"
+      ask THIN_USER "Your instance on $THIN_HOST (its DSH is mounted at /dsh/<user>)" "${default_user:-$USER}"
+    fi
+    THIN_USER="$(printf '%s' "$THIN_USER" | tr -d '[:space:]')"
+    [ -n "$THIN_USER" ] || die "--thin-client needs a user (the instance on $THIN_HOST)"
+    if [ "$DRY" = 0 ] && ! ts_ready; then die "Tailscale is not connected (state: $(ts_state)) — the thin client is admitted by its identity"; fi
+    if [ "$DRY" = 1 ]; then log "would run: pnpm remote-app $THIN_HOST/dsh/$THIN_USER  (in $DIR)"
+    elif ! xcrun --find swiftc >/dev/null 2>&1; then todo "install the Command Line Tools, then: cd $DIR && pnpm remote-app $THIN_HOST/dsh/$THIN_USER"
+    else
+      run_in "$DIR" pnpm remote-app "$THIN_HOST/dsh/$THIN_USER" || die "thin-client Dock app build failed (pnpm remote-app $THIN_HOST/dsh/$THIN_USER)"
+      # Same default name dock-app:remote uses: "DSH " + the host's first label title-cased on -/_ (hub → DSH Hub).
+      THIN_APP="$HOME/Applications/DSH $(printf '%s' "${THIN_HOST%%.*}" | tr '_-' '  ' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)}1').app"
+      [ -d "$THIN_APP" ] && ok "thin client installed: $THIN_APP → https://$THIN_HOST…/dsh/$THIN_USER/ (rebuild any time: cd $DIR && pnpm remote-app $THIN_HOST/dsh/$THIN_USER)" \
+        || warn "pnpm remote-app succeeded but $THIN_APP is not there — check its output above"
+    fi
+  fi
 fi
 
 # ===========================================================================

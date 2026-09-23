@@ -6,12 +6,14 @@ single interactive, idempotent Terminal script:
 
 ```sh
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/taliesinb/dsh-plugins/main/tools/bootstrap-mac.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/taliesinb/dsh-plugins/main/tools/bootstrap-mac.sh)" bootstrap --thin-client <host>
 # from a clone: pnpm bootstrap  /  tools/bootstrap-mac.sh [--dir DIR] [--yes] [--dry-run] [--skip STEP,…] [--only STEP,…]
-#               [--no-apps] [--no-tailnet] [--no-apple] [--rebuild] [--force] [--replace]
-#               [--tailscale-timeout S] [--repo URL] [--list]
+#               [--no-apps] [--no-tailnet] [--no-apple] [--rebuild] [--no-replace] [--force]
+#               [--thin-client HOST] [--thin-client-user U] [--tailscale-timeout S] [--repo URL] [--list]
 # on another Mac over ssh (copies the script, runs it with a tty when you have one, --yes otherwise):
-pnpm bootstrap-remote user@host [same flags]
-pnpm bootstrap-remote user@host --replace          # redeploy a Path B host (see § Redeploying a deploy-remote host)
+pnpm bootstrap-remote user@host [same flags]       # an existing DSH there is taken over (see § Redeploying a deploy-remote host)
+# the thin client alone — a Dock app for a DSH on ANOTHER Mac, nothing built locally (see § The thin client):
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/taliesinb/dsh-plugins/main/tools/bootstrap-mac-thin-client.sh)" <host>
 ```
 
 `bash -c "$(curl …)"` rather than `curl | bash`: when bash reads the script from
@@ -19,29 +21,51 @@ stdin, any child that reads stdin (pnpm, brew, sudo, `read`) swallows the rest
 of the script. Same reason `bootstrap-remote.sh` scp's the file instead of
 `ssh host bash -s < script`.
 
-Sixteen steps, each guarded by its own postcondition so a re-run resumes
+**Why the word `bootstrap` before the flags.** `bash -c STRING ARG0 ARG1…`
+binds the first word after the string to `$0` (the "script name"), and only the
+rest to `$1…`. So `bash -c "$(curl …)" --no-replace` silently makes
+`--no-replace` the program name and the script sees no flags at all; the
+placeholder `bootstrap` soaks up `$0` so the real flags land in `$1…` (`--`
+does not help: it becomes `$0` too). Any word works; `bootstrap` also makes the
+`--help`/`re-run: $0 …` messages read sensibly. The thin-client script turns
+this around: a bare word in `$0` that is not a shell or a path is taken as
+HOST, so `… thin-client.sh)" hub` works as written.
+
+Seventeen steps, each guarded by its own postcondition so a re-run resumes
 where it stopped: `preflight clt brew tools apps tailscale clone fork plugins
-home install-plugins preset apple tailnet verify`. The things only a human can do
+home install-plugins preset apple tailnet thin-client verify`. The things only a human can do
 are collected into a "Still to do by hand" list printed at the end: the Apple
 Intelligence toggle, STP's first-launch licence, provider keys in the GUI,
 and — if the wait timed out — the Tailscale login.
 
 ## The two hard gates
 
-**1. Fresh machine only.** Preflight aborts (exit 1, nothing written) when DSH
-already appears to be installed or running: a listener on `:3080`/`:3083`/
+**1. An existing DSH is taken over (default since 2026-09-23; before that:
+fresh machine only).** Preflight always looks for one: a listener on `:3080`/`:3083`/
 `:3084` (`lsof -ti tcp:PORT -sTCP:LISTEN`), a `dsh` process
-(`pgrep -f 'apps/cli/(lib/bin\.js|src/bin\.ts)'`), `$DSH_HOME/profiles`, the
+(`pgrep -f 'apps/cli/(lib/bin\.js|src/bin\.ts)'`) or a stock `dsh web` /
+`DSH.app` process, `$DSH_HOME/profiles`, the
 `io.github.taliesinb.dsh-web-relay` / `ai.symbolica.dsh-remote` LaunchAgent
-plists, `~/Applications/DSH.app`, a `dsh` on PATH, or a built checkout at the
-target directory. Two exemptions: `--force` (documented as "layer on top";
-every step still skips what exists), and a **resume marker**
-`$DSH_HOME/bootstrap-mac.json` (`{tool, started, dir}`) that preflight writes
-once the gate has passed — without it a re-run after a mid-way failure would
-trip its own footprint (the `home` step creates `profiles/`, the `tailnet`
-step starts a server). Verified on the development laptop: the real run reports all eight
-findings and aborts before touching `~/.dsh`; `--dry-run` reports them and
-continues.
+plists, `~/Applications/DSH.app`, `/Applications/DSH.app`, a deploy-remote
+`~/dsh`, a `dsh` on PATH, or a built checkout at the target directory. Every
+finding is printed. Nothing found → plain install. Something found → by default
+(`--replace`) the **take-over** described in § Redeploying runs after one
+confirmation (auto-yes with `--yes`); with `--no-replace` the script aborts
+instead (exit 1, nothing written), with two exemptions: `--force` ("layer on
+top"; every step still skips what exists) and the **resume marker**
+`$DSH_HOME/bootstrap-mac.json` (`{tool, started, dir, instance, portBase}`)
+that preflight writes once the gate has passed — without it a `--no-replace`
+re-run after a mid-way failure would trip its own footprint (the `home` step
+creates `profiles/`, the `tailnet` step starts a server). With the default
+take-over the marker only lends its `dir` as the `--dir` default and is then
+removed. Why the flip: the colleagues' Macs all had *something* (the stock
+Desktop app, an earlier run) and the fresh-machine abort was the first thing every
+one of them hit; the take-over keeps `~/.dsh` so nothing is lost. Thin-client
+apps (`…dsh-dock-app.remote-*`, § The thin client) are never removed by the
+take-over — they open other Macs' DSH and hold no local state. Verified on
+the development laptop 2026-09-23 (`--dry-run`): nine findings, the take-over plan lists
+the relay, the three listeners, the Dock apps and keeps `DSH Hub.app`;
+`--no-replace --dry-run` reports the would-be abort and continues.
 
 **2. Tailscale before anything is cloned.** The `tailscale` step (right after
 the casks) requires Tailscale.app installed, `BackendState == Running` and a
@@ -63,7 +87,7 @@ Dock app and the Remotes feature all hang off it, and installing a Mac
 without it produces exactly the half-working state INSTALLING.md's
 troubleshooting table is full of.
 
-## Redeploying a deploy-remote host (`--replace`)
+## Redeploying a deploy-remote host (`--replace`, the default)
 
 The first remote Mac was set up by `tools/deploy-remote.sh` (INSTALLING.md
 Path B; sessions `deepseek-harness/hybrid-local-remote` T15–T17/T39–T43 and
@@ -294,6 +318,61 @@ plugin that works on that Mac would have been excluded there). <private>:
 `/Applications/<private>.app`, `<private>.app`, `<private>script` on PATH, or
 the `com.<private>.*` bundle ids.
 
+## The thin client (`--thin-client HOST`, `tools/bootstrap-mac-thin-client.sh`)
+
+Added 2026-09-23 for the colleagues whose DSH runs on the shared server: what
+they need on their own Mac is only the blue Dock app `DSH <Host>` that opens
+`https://<host>.<tailnet>.ts.net/dsh/<user>/` by tailnet identity
+(`pnpm remote-app <host>/dsh/<user>`, i.e. `dsh-tailscale-remote`'s
+`dock-app:remote`; `recipes/dock-app-via-tailnet.md`). Two entry points:
+
+- **In the full installer**: the `thin-client` step (after `tailnet`, before
+  `verify`) asks *"Tailnet host name of a Mac whose DSH you also want a Dock app
+  for (empty = skip)"*, then *"Your instance on HOST"* with the local part of
+  the tailnet login as default (`jo@example.com` → `jo`; `$USER` if
+  there is none), and runs `pnpm remote-app HOST/dsh/USER` in the clone.
+  `--thin-client HOST [--thin-client-user U]` pre-answers; `--yes` without the
+  flag skips (empty default). Needs nothing the earlier steps have not
+  guaranteed (node, swiftc, a connected Tailscale, the clone).
+- **Alone**: `tools/bootstrap-mac-thin-client.sh [HOST [USER]]` (`pnpm
+  bootstrap-thin-client` from a clone). Seven steps, no Homebrew, no pnpm, no
+  fork, no plugin builds, no `~/.dsh`: preflight (asks HOST if missing; empty
+  = exit 0) → Command Line Tools (same headless `softwareupdate` path; `swiftc`
+  compiles the wrapper) → Tailscale (same gate as the full script, but the
+  login wait defaults to 180 s since it is the one real dependency; a missing
+  app is offered as a brew cask when brew exists, otherwise the download page
+  is opened and the script waits for `/Applications/Tailscale.app`) → node (an
+  existing node ≥ 20 on PATH / `/opt/homebrew/bin` / `/usr/local/bin`, else the
+  official `latest-v24.x` darwin tarball is extracted to
+  `~/.dsh-thin-client/node` — no sudo, ~50 MB; `dock-app:remote` needs only
+  node built-ins, so no `pnpm install` anywhere) → sources (`git clone --depth 1
+  --single-branch` of this repo into `~/.dsh-thin-client/dsh-plugins`, 3 MB;
+  a re-run `fetch --depth 1` + `reset --hard origin/main`; no submodule) →
+  `node plugins/dsh-tailscale-remote/scripts/cli.mjs dock-app:remote HOST/dsh/USER
+  --name "DSH <Host>"` → verification (the app exists; its URL, read from
+  `Contents/Resources/dsh-dock-app.json`, is curled: 200/303 admitted, 401 =
+  route live but not on that instance's allowlist, 000 = host down or no
+  route). Everything it leaves behind: `~/.dsh-thin-client/`, the CLT,
+  Tailscale, `~/Applications/DSH <Host>.app` + Dock tile. `--name`, `--dir`,
+  `--no-launch`, `--yes`, `--dry-run`, `--tailscale-timeout`, `--repo`.
+
+Verified 2026-09-23 on the development laptop: `tools/bootstrap-mac-thin-client.sh hub
+<user> --name "DSH Hub Test" --no-launch --yes` — clone, wrapper + icon
+compile (~20 s cold), install, pin, `→ 200 (the server admits you by
+identity)`; the re-run took the update path and replaced the wrapper; the node
+tarball path tested in isolation (24.21.0 runs `cli.mjs dock-app:status`);
+`bash -c "$(cat script)" hub --dry-run` takes `hub` from `$0` (see "Why
+the word `bootstrap`" above), `… thin-client hub jo` from `$1 $2`, and a
+bare `--yes` with no host prints "nothing to build" and exits 0. Test app
+removed with `cli.mjs dock-app:uninstall --name`.
+
+The default app name is `dock-app.mjs`'s `remoteAppName`: `DSH ` + the host's
+first label title-cased on `-`/`_` (`hub` → `DSH Hub`, `my-mac` → `DSH My
+Mac`); both scripts recompute it in awk to find the bundle afterwards. The
+bundle id is `io.github.taliesinb.dsh-dock-app.remote-<host>-dsh-<user>` — one
+WebKit data store per remote, and the prefix the full installer's take-over
+uses to leave these apps alone.
+
 ## Why a shell script and not a `.pkg` (the original ask)
 
 The request was "a once-off .pkg that forces you to pick a directory, installs
@@ -396,7 +475,11 @@ because everything is scriptable and a `tart clone` is a free snapshot.
 
 | Symptom | Cause / fix |
 |---|---|
-| `DSH already appears to be installed or running on this Mac` | the fresh-machine gate; it lists what it found. Use the existing install, remove it, or `--force` |
+| `DSH already appears to be installed or running on this Mac and --no-replace was given` | the gate with `--no-replace`; it lists what it found. Drop `--no-replace` to take it over (keeps `~/.dsh`), use the existing install, or add `--force` |
+| the flags after `bash -c "$(curl …)"` are ignored | the first word after the string is `$0`, not `$1`: write `bash -c "$(curl …)" bootstrap --flag …` (any word); the thin-client script takes a bare `$0` as HOST on purpose |
+| thin client: `→ 401: the route is live but <host> does not admit <login>` | your tailnet login is not on that instance's allowlist: its owner adds it (Settings → Tailscale remote → allowed users, or `--allow` when they bootstrap the instance) |
+| thin client: `→ no answer` | the host is offline, not serving `/dsh/<user>`, or MagicDNS/HTTPS certs are off on the tailnet; the app itself still installs |
+| thin client: `Tailscale.app did not appear within 15 minutes` | no brew and the manual install was not done: install from tailscale.com (or the App Store), log in, re-run |
 | `Tailscale is not connected with a tailnet login (state: NeedsLogin)` | the login was not completed within the timeout: open Tailscale.app, log in as the same tailnet user as your other DSH Macs, re-run |
 | `state: NeedsMachineAuth` | device approval is on for the tailnet: approve the new machine in the admin console, re-run |
 | `sudo needs a password but there is no terminal` | headless run: `sudo -v` (or `echo pw \| sudo -S -v`) first, then re-run |

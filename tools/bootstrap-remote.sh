@@ -2,10 +2,11 @@
 #
 # bootstrap-remote.sh — run tools/bootstrap-mac.sh on another Mac over ssh.
 #
-#   pnpm bootstrap-remote user@host [bootstrap flags…]
-#   pnpm bootstrap-remote user@host --replace            # redeploy a deploy-remote.sh host: stop its
-#                                                        # install, keep ~/.dsh, install Path C from scratch
-#   pnpm bootstrap-remote user@host --dry-run --replace
+#   pnpm bootstrap-remote user@host [bootstrap flags…]   # an existing DSH there (a deploy-remote.sh host, a
+#                                                        # stock install, an earlier run) is taken over by
+#                                                        # default: stopped, ~/.dsh kept, Path C installed
+#   pnpm bootstrap-remote user@host --dry-run
+#   pnpm bootstrap-remote user@host --no-replace         # refuse instead when a DSH is already there
 #
 # How: scp the script into the target user's home (~/.bootstrap-mac.sh — /tmp is shared
 # between users and a previous user's copy is not writable), then run it there. With a local
