@@ -79,6 +79,8 @@ struct DockConfig: Decodable {
     var fallbackUrl: String?
     var tokenFile: String?
     var glyphColor: String?
+    /// Present in the bundled app (DSH.dmg): run the server from Contents/Resources (EmbeddedServer.swift).
+    var embedded: EmbeddedSpec?
 
     /// Product title the shipped client uses for the wordmark and `document.title`.
     static let genericProductTitle = "DSH Local Build"
@@ -101,7 +103,7 @@ struct DockConfig: Decodable {
            let config = try? JSONDecoder().decode(DockConfig.self, from: data) {
             return config
         }
-        return DockConfig(name: "DSH", url: "http://127.0.0.1:3080/", fallbackUrl: nil, tokenFile: nil, glyphColor: nil)
+        return DockConfig(name: "DSH", url: "http://127.0.0.1:3080/", fallbackUrl: nil, tokenFile: nil, glyphColor: nil, embedded: nil)
     }
 }
 
@@ -215,8 +217,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var showingOfflinePage = false
     var retryTimer: Timer?
     var connecting = false
+    /// Embedded mode (bundled app): the server this process runs, and the tokened URL it announced.
+    var embedded: EmbeddedServer?
+    var embeddedURL: URL?
+    var embeddedRestarts = 0
 
-    var remoteURL: URL { URL(string: config.url)! }
+    /// Entry point: the announced embedded URL, else the configured one (a placeholder in embedded mode until the server speaks).
+    var remoteURL: URL { embeddedURL ?? URL(string: config.url)! }
     var fallbackBase: URL? { config.fallbackUrl.flatMap(URL.init(string:)) }
 
     // MARK: lifecycle
@@ -224,6 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         installSnapshotSignal()
+        installTerminateSignal()
         scope = Scope(urls: [remoteURL] + (fallbackBase.map { [$0] } ?? []))
         forwarder = PortForwarder(endpointBase: { [weak self] in self?.currentMountBase() }, log: { [weak self] line in self?.appendLog(line) })
         buildMenu()
@@ -284,7 +292,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        connect()
+        if let spec = config.embedded {
+            startEmbedded(spec)
+        } else {
+            connect()
+        }
+    }
+
+    // MARK: embedded server
+
+    func startEmbedded(_ spec: EmbeddedSpec) {
+        let server = EmbeddedServer(spec: spec, resources: Bundle.main.resourceURL!, log: { [weak self] line in self?.appendLog(line) })
+        server.onReady = { [weak self] url in
+            guard let self else { return }
+            self.embeddedURL = url
+            self.embeddedRestarts = 0
+            // The scope was built from the placeholder URL; the real port may differ (`--port 0`).
+            self.scope = Scope(urls: [url])
+            self.showingOfflinePage = false
+            self.webView.load(URLRequest(url: url))
+        }
+        server.onExit = { [weak self] status, tail in
+            guard let self else { return }
+            self.embeddedURL = nil
+            let detail = tail.isEmpty ? "" : "<pre style=\"text-align:left;font-size:.8em;white-space:pre-wrap\">" + tail.joined(separator: "\n").htmlEscaped + "</pre>"
+            self.showOffline(reason: "The bundled DSH server exited (status \(status)). Log: <code>\(self.embedded?.logFile.path ?? "")</code>" + detail, autoRetry: false)
+        }
+        embedded = server
+        showingOfflinePage = true
+        webView.loadHTMLString("<!doctype html><html><head><meta charset=utf-8><style>:root{color-scheme:light dark}body{margin:0;min-height:100vh;display:grid;place-items:center;font:15px -apple-system,system-ui;color:#888}</style></head><body>Starting DSH…</body></html>", baseURL: nil)
+        server.start()
     }
 
     /// All document-start scripts, in order. Re-run (after `removeAllUserScripts`)
@@ -475,6 +512,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     // MARK: window snapshot (View ▸ Save Window Snapshot, or `kill -USR1 <pid>`)
 
     private var snapshotSignal: DispatchSourceSignal?
+    private var terminateSignal: DispatchSourceSignal?
+
+    /// `kill <pid>` (SIGTERM) quits like ⌘Q so applicationWillTerminate runs and
+    /// an embedded server is stopped with the window instead of being orphaned.
+    func installTerminateSignal() {
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { NSApp.terminate(nil) }
+        source.resume()
+        terminateSignal = source
+    }
 
     /// `kill -USR1 <pid>` saves a PNG of the window — the way an agent without
     /// Screen Recording or Accessibility permission sees what the wrapper
@@ -599,7 +647,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    func applicationWillTerminate(_ notification: Notification) { forwarder.closeAll() }
+    func applicationWillTerminate(_ notification: Notification) {
+        forwarder.closeAll()
+        embedded?.stop()
+    }
 
     /// The DSH mount the page is loaded from right now (tailnet or loopback fallback), or nil while offline.
     func currentMountBase() -> URL? {
@@ -645,8 +696,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     @objc func connect() {
         if connecting { return }
-        connecting = true
         retryTimer?.invalidate()
+        if let server = embedded {
+            // Embedded: a retry restarts the server when it is down; while it runs, its announcement drives the load.
+            if server.process?.isRunning != true {
+                embeddedRestarts += 1
+                appendLog("embedded: restart #\(embeddedRestarts) requested")
+                server.start()
+            } else if let url = embeddedURL {
+                showingOfflinePage = false
+                webView.load(URLRequest(url: url))
+            }
+            return
+        }
+        connecting = true
         probe(remoteURL) { [weak self] reachable in
             guard let self else { return }
             self.connecting = false
@@ -671,8 +734,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
-    func showOffline(reason: String) {
+    func showOffline(reason: String, autoRetry: Bool = true) {
         showingOfflinePage = true
+        let footer = autoRetry ? "<p style=\"font-size:.9em\">Retrying automatically every 5 seconds.</p>" : ""
         let html = """
         <!doctype html><html><head><meta charset="utf-8"><title>\(config.name)</title>
         <style>:root{color-scheme:light dark}body{margin:0;min-height:100vh;display:grid;place-items:center;font:15px/1.5 -apple-system,system-ui,sans-serif;background:#fafafa;color:#222}
@@ -681,17 +745,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         button{font:inherit;padding:.4em 1.1em;border-radius:8px;border:1px solid #8884;background:#3b82f6;color:#fff;cursor:pointer}</style></head>
         <body><main><h1>DSH is unreachable</h1><p>\(reason)</p><p><code>\(config.url)</code></p>
         <p><button onclick="webkit.messageHandlers.dshDock.postMessage('retry')">Try again</button></p>
-        <p style="font-size:.9em">Retrying automatically every 5 seconds.</p></main></body></html>
+        \(footer)</main></body></html>
         """
         webView.loadHTMLString(html, baseURL: nil)
         retryTimer?.invalidate()
-        retryTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in self?.connect() }
+        if autoRetry {
+            retryTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in self?.connect() }
+        }
     }
 
     private lazy var logURL: URL = {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/DSH Dock", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("\(config.name).log")
+        // The bundled app logs beside, not into, a checkout-installed wrapper of the same name.
+        return dir.appendingPathComponent(config.embedded == nil ? "\(config.name).log" : "\(config.name) (bundled).log")
     }()
     private let logStamp: DateFormatter = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"; return f }()
     func appendLog(_ line: String) {
