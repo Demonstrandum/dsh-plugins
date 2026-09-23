@@ -25,12 +25,13 @@
     }
   },
   "scripts": {
-    "check": "node --check index.js && node scripts/smoke-config.mjs && node scripts/gen-tool-docs.mjs --check",
+    "check": "node --check index.js && node --test tests/*.test.mjs && node scripts/smoke-config.mjs && node scripts/gen-tool-docs.mjs --check",
     "live:reader": "node scripts/live-reader-test.mjs",
     "live:page-read": "node scripts/live-page-read-test.mjs",
     "live:chrome-read": "node scripts/live-chrome-read-test.mjs",
     "live:youtube": "node scripts/live-youtube-test.mjs",
     "live:screenshot": "node scripts/live-screenshot-test.mjs",
+    "live:wait": "node scripts/live-wait-recover-test.mjs",
     "live:windows": "node scripts/live-windows-test.mjs",
     "dump:tools": "node scripts/dump-server-tools.mjs",
     "docs": "node scripts/gen-tool-docs.mjs"

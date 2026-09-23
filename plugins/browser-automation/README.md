@@ -18,10 +18,26 @@ the definitions by `pnpm run docs`; `pnpm run check` fails when it is stale).
 | Area | Safari | Chrome |
 |---|---|---|
 | Windows | `safari_open`, `safari_close` | `chrome_open`, `chrome_close` |
-| Navigation / reading | `safari_navigate`, `safari_get_page_content` (isolated reader or window; expand / section / selectors / scope), `safari_get_page_structure` (outline with selectors), `safari_wait_for`, `safari_get_youtube_notes` | `chrome_navigate`, `chrome_get_page_content` (temporary page or window; same expand / section / selectors / scope; own DOM→markdown serializer), `chrome_get_page_structure`, `chrome_snapshot`, `chrome_wait_for` |
-| JavaScript | `safari_evaluate_expression`, `safari_evaluate_function` | `chrome_evaluate_expression`, `chrome_evaluate_function` |
-| Interaction | `safari_interact` (batch), `safari_click`, `safari_hover`, `safari_press_key`, `safari_type_text` | `chrome_interact` (batch, same format), `chrome_click`, `chrome_fill`, `chrome_fill_form`, `chrome_hover`, `chrome_press_key`, `chrome_type_text` |
-| Screenshots | `safari_get_screenshot` (inline, element crop), `safari_save_screenshot` | `chrome_get_screenshot`, `chrome_save_screenshot` |
+| Navigation / reading | `safari_navigate` (+ `wait`, `then`), `safari_get_page_content` (isolated reader or window; expand / section / selectors / scope), `safari_get_page_structure` (outline with selectors), `safari_wait_for` (text / selector / expression / settle), `safari_get_youtube_notes` | `chrome_navigate` (+ `wait`, `then`), `chrome_get_page_content` (temporary page or window; same expand / section / selectors / scope; own DOM→markdown serializer), `chrome_get_page_structure`, `chrome_snapshot`, `chrome_wait_for` (text / selector / expression / settle) |
+| JavaScript | `safari_evaluate_expression` (+ `wait`), `safari_evaluate_function` | `chrome_evaluate_expression` (+ `wait`), `chrome_evaluate_function` |
+| Interaction | `safari_interact` (batch), `safari_click`, `safari_hover`, `safari_press_key`, `safari_type_text` (targets: node, **selector**, text, point) | `chrome_interact` (batch, same format), `chrome_click`, `chrome_fill`, `chrome_hover` (targets: uid, **selector**, **text** — no snapshot needed), `chrome_fill_form`, `chrome_press_key`, `chrome_type_text` |
+| Screenshots | `safari_get_screenshot` (inline, element crop; + `wait`), `safari_save_screenshot` | `chrome_get_screenshot` (+ `wait`), `chrome_save_screenshot` |
+
+### Waiting (`waiting.mjs`)
+
+One host-side wait engine behind `*_wait_for` and the `wait` parameter of
+`*_navigate`, `*_evaluate_expression` and `*_get_screenshot`:
+`{ text?: string[], selector?, expression?, settleMs?, timeout? }`. `text`,
+`selector` and `expression` are alternatives (the wait ends when any holds);
+`settleMs` pauses afterwards (or alone). The page is polled in **short in-page
+slices** (≤ 5 s, a quarter of the MCP call timeout) from a host loop that owns
+the overall deadline (default 30 s), so long waits never trip the request
+timeout the way `await new Promise(r => setTimeout(r, 12000))` inside an
+expression does. A timeout is **reported, not thrown** (`wait timed out after
+30s for selector "#ready"`), and the main action still runs; `*_wait_for`
+returns the notice as its text. `then` on `*_navigate` runs a JS function body
+in the loaded page after the wait — rebuild → reload → settle → probe becomes
+one call.
 | Diagnostics | `safari_console_messages`, `safari_network_requests`, `safari_get_network_request`, `safari_handle_dialog`, `safari_set_viewport_size` | `chrome_console_messages`, `chrome_network_requests`, `chrome_get_network_request`, `chrome_handle_dialog`, `chrome_set_viewport_size` |
 
 Raw server names and schemas these forward to: `docs/server-tools.json`
@@ -41,11 +57,22 @@ Raw server names and schemas these forward to: `docs/server-tools.json`
 - **Chrome window = one page** of a single `chrome-devtools-mcp --isolated`
   instance per session, routed by `pageId`; windows share the session's
   cookies like tabs of one browser. Fresh temporary profile: no saved logins.
-- Every window tool takes optional `windowId`. Omitted, the browser must have
-  **zero or one** window in the calling session: zero opens one (`opened` is
-  reported), one is used, more is an error naming the open ids. Ids are
+- Every window tool takes optional `windowId`. Omitted: zero windows opens
+  one (`opened` is reported), one is used, several use the **most recently
+  used** one and the result says so, naming the others (`(2 windows open;
+  used c:0:1, the most recently used — pass windowId for c:0:0)`). Ids are
   validated against the caller's session; a window of another chat is
   unreachable.
+- **Reopen after a Chrome restart.** Pages remember their last navigated URL
+  (`chrome_open`, `chrome_navigate`). When the Chrome instance dies (crash,
+  idle close, `chrome-devtools-mcp` reconnect) a tool naming a lost `windowId`
+  — or no `windowId` when the session had windows — gets that window **reopened
+  at its URL under the same id** instead of `windowId … does not belong / is
+  not open`; the result starts with `Chrome had restarted; reopened c:0:4 at
+  <url> (page state was lost).` A call that fails mid-way with a stale-page
+  message (`No page found`, `Page ids have changed`, `Target closed`) is retried
+  once the same way (`withChrome` in `curated-tools.mjs`). `chrome_close`
+  forgets lost windows.
 - Per-session behavior needs **no dynamic tool registration**: the tool set is
   static (registered per agent at `agent/created`, also for agents already
   live when the plugin loads) and every call reads `exec.agent`.
@@ -244,12 +271,17 @@ live-reloaded).
 
 ## Checks
 
-- `pnpm run check` — offline smoke: config, preflight messages, the 42
+- `pnpm run check` — unit tests (`tests/`: environment remedies, the wait
+  engine) and the offline smoke: config, preflight messages, the 44
   registered tools per agent (child filter, disposal), window-id rules
-  (numbering, ambiguity, cross-session, browser mismatch), YouTube and
-  geometry helpers, page-content unwrapping (inline / spilled-to-file), the
-  page-read pipeline's planning, cleanup and script syntax; plus a freshness
-  check of `docs/tools.md`.
+  (numbering, most-recently-used default, lost-window bookkeeping,
+  cross-session, browser mismatch), YouTube and geometry helpers, page-content
+  unwrapping (inline / spilled-to-file), the page-read pipeline's planning,
+  cleanup and script syntax; plus a freshness check of `docs/tools.md`.
+- `pnpm run live:wait` — headless Chrome against a local page: `wait` on
+  wait_for / evaluate / navigate (+ `then`) / screenshot, timeout as a notice,
+  click / fill by selector and text, most-recently-used defaulting, and
+  reopen-after-restart (the chrome-devtools-mcp child is SIGKILLed twice).
 - `pnpm run docs` — regenerate `docs/tools.md` after changing a tool.
 - `pnpm run live:windows` — the live matrix through the real tool executes:
   two Safari windows, isolation, zero-or-one rule, window/isolated reads,

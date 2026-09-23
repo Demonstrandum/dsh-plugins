@@ -14,7 +14,8 @@ import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, extname, join, resolve as resolvePath } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { CHROME_FORMATS, chromeReadCall } from './chrome-read.mjs'
+import { CHROME_FORMATS, chromeReadCall, unfence } from './chrome-read.mjs'
+import { parseWait, runWait, WAIT_PARAM } from './waiting.mjs'
 import { describeCollapsed, extractPage, FORMATS, planRead, renderStructure, SCOPES, STRUCTURE_SCRIPT } from './page-read.mjs'
 import { describeBlocks, imageOf, parseJsonText, savedFileOf, textOf } from './servers.mjs'
 import { cropBox, cropImage, imageSize, measureScript, parseMeasurement, readPng, rectMoved } from './safari-screenshot.mjs'
@@ -22,8 +23,11 @@ import { canonicalWatchUrl, EXTRACT_SCRIPT, renderNotes, shapeNotes } from './yo
 
 const WINDOW_ID = (browser) => ({
   type: 'string',
-  description: `Window id (${browser === 'safari' ? 's' : 'c'}:<session>:<window>) from ${browser}_open. Omit when this session has at most one ${browser} window: it is used, or one is opened.`,
+  description: `Window id (${browser === 'safari' ? 's' : 'c'}:<session>:<window>) from ${browser}_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open.`,
 })
+
+/** Chrome server failures that mean "this page is gone" (server reconnected, page closed underneath us) rather than a bad request. */
+const STALE_CHROME_PAGE = /No page found|Page ids have changed|browser was restarted or reconnected|Target closed|Session closed|detached from target|Protocol error.*Target/i
 
 const textOutput = {
   schema: { type: 'string' },
@@ -34,8 +38,26 @@ const objectOutput = (render) => ({
   render: (_args, value) => [{ type: 'text', text: render(value) }],
 })
 
-/** Prefix a forwarded result with the window it ran in (always, so the model learns ids). */
-const tagged = (id, opened, text) => `${opened ? `Opened ${id}. ` : ''}[${id}]\n${text}`
+/** Per-window notes set by the resolvers (reopened / defaulted) and consumed by the next tagged() for that id. */
+const pendingNotes = new Map()
+/** A one-line account of how a window was resolved, when it is worth telling the model. */
+function resolutionNote(resolved) {
+  if (resolved.reopened) return `Chrome had restarted; reopened ${resolved.id} at ${resolved.reopened.url} (page state was lost). `
+  if (resolved.defaulted) return `(${resolved.defaulted.count} windows open; used ${resolved.id}, the most recently used — pass windowId for ${resolved.defaulted.others.join(' / ')}) `
+  return ''
+}
+function noteResolution(resolved) {
+  const note = resolutionNote(resolved)
+  if (note) pendingNotes.set(resolved.id, note); else pendingNotes.delete(resolved.id)
+  return resolved
+}
+function takeNote(id) {
+  const note = pendingNotes.get(id) ?? ''
+  pendingNotes.delete(id)
+  return note
+}
+/** Prefix a forwarded result with the window it ran in (always, so the model learns ids) and any resolution note. */
+const tagged = (id, opened, text) => `${opened ? `Opened ${id}. ` : ''}${takeNote(id)}[${id}]\n${text}`
 
 /**
  * @param {object} deps
@@ -61,7 +83,30 @@ export function createTools(deps, fallbackAgent) {
 
   async function safari(exec, windowId) {
     preflight('safari')
-    return sessions.resolveSafari(agentOf(exec), windowId)
+    return noteResolution(await sessions.resolveSafari(agentOf(exec), windowId))
+  }
+  /** Run a JS function body in a Safari window and return its parsed value. */
+  const safariEval = (conn, body) => conn.callText('evaluate_javascript', { expression: body }).then(parseJsonText)
+  /**
+   * Run an optional `wait` spec against a Safari window; returns the summary line (or '' when no wait).
+   * A timeout is reported in the summary, never thrown: the main action still runs.
+   */
+  async function safariWait(conn, spec) {
+    const wait = parseWait(spec)
+    if (wait === undefined) return ''
+    const outcome = await runWait(body => safariEval(conn, body), wait, { maxSliceMs: sliceMs() })
+    return `${outcome.summary}. `
+  }
+  /** In-page polling slice: well under the MCP call timeout. */
+  const sliceMs = () => Math.max(1000, Math.min(5000, Math.floor((limits.timeoutMs ?? 60_000) / 4)))
+  /** Resolve a CSS selector to the centre of its element (viewport CSS px), scrolling it into view; for point-based Safari steps. */
+  async function safariPointOf(conn, selector, scroll = true) {
+    const value = await safariEval(conn, `const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return { missing: true, count: document.querySelectorAll(${JSON.stringify(selector)}).length };
+${scroll ? 'el.scrollIntoView({ block: "center", inline: "center" }); await new Promise(r => setTimeout(r, 150));' : ''}
+const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, width: r.width, height: r.height };`)
+    if (!value || value.missing) throw new Error(`no element matches selector ${JSON.stringify(selector)}`)
+    if (value.width === 0 || value.height === 0) throw new Error(`selector ${JSON.stringify(selector)} matches an element with no size (hidden?)`)
+    return { x: Math.round(value.x), y: Math.round(value.y) }
   }
 
   tools.push(defineTool({
@@ -91,13 +136,21 @@ export function createTools(deps, fallbackAgent) {
 
   tools.push(defineTool({
     name: 'safari_navigate',
-    description: 'Load a URL in this chat\'s Safari window and wait for the navigation to finish. Returns the loaded page\'s title and URL; read the page with safari_get_page_content.',
-    parameters: { url: { type: 'string', required: true, description: 'URL to load.' }, windowId: WINDOW_ID('safari') },
-    output: objectOutput(value => `[${value.windowId}] Loaded ${value.url}${value.title ? ` — "${value.title}"` : ''}.`),
+    description: 'Load a URL in this chat\'s Safari window and wait for the navigation to finish. Returns the loaded page\'s title and URL; read the page with safari_get_page_content. Optionally `wait` for the page to be ready and run `then` (a JS function body) in the loaded page, all in this one call.',
+    parameters: {
+      url: { type: 'string', required: true, description: 'URL to load.' },
+      wait: WAIT_PARAM,
+      then: { type: 'string', description: 'JS function body to run after the navigation (and wait); `return` a value to get it back.' },
+      windowId: WINDOW_ID('safari'),
+    },
+    output: objectOutput(value => `${takeNote(value.windowId)}[${value.windowId}] Loaded ${value.url}${value.title ? ` — "${value.title}"` : ''}.${value.waited ? ` ${value.waited}` : ''}${value.then !== undefined ? `\nthen → ${typeof value.then === 'string' ? value.then : JSON.stringify(value.then)}` : ''}`),
     async execute(args, exec) {
       const { id, conn } = await safari(exec, args.windowId)
       const nav = parseJsonText(await conn.callText('navigate_to_url', { url: args.url }))
-      return { windowId: id, url: nav?.url ?? args.url, title: nav?.title }
+      const waited = (await safariWait(conn, args.wait)).trim()
+      const out = { windowId: id, url: nav?.url ?? args.url, title: nav?.title, ...(waited ? { waited } : {}) }
+      if (args.then) out.then = await safariEval(conn, args.then) ?? null
+      return out
     },
   }))
 
@@ -164,16 +217,18 @@ export function createTools(deps, fallbackAgent) {
 
   tools.push(defineTool({
     name: 'safari_evaluate_expression',
-    description: 'Run JavaScript statements in this chat\'s Safari window. `expression` is a FUNCTION BODY: use an explicit `return` for a value (await is allowed). `$uid(N)` references a node UID from safari_get_page_content. Returns the JSON-encoded result. (safari_evaluate_function takes a function + args instead.)',
+    description: 'Run JavaScript statements in this chat\'s Safari window. `expression` is a FUNCTION BODY: use an explicit `return` for a value (await is allowed). `$uid(N)` references a node UID from safari_get_page_content. Returns the JSON-encoded result. Use `wait` to wait for text / a selector / a condition (or settle N ms) BEFORE evaluating instead of sleeping inside the expression. (safari_evaluate_function takes a function + args instead.)',
     parameters: {
       expression: { type: 'string', required: true, description: 'JavaScript function body; `return` the value you want.' },
+      wait: WAIT_PARAM,
       windowId: WINDOW_ID('safari'),
       frameId: { type: 'string', description: 'Node UID of an iframe (or a node inside one) to run in that subframe.' },
     },
     output: textOutput,
     async execute(args, exec) {
       const { id, conn, opened } = await safari(exec, args.windowId)
-      return tagged(id, opened, await conn.callText('evaluate_javascript', { expression: args.expression, ...(args.frameId ? { frameId: args.frameId } : {}) }))
+      const waited = await safariWait(conn, args.wait)
+      return tagged(id, opened, waited + await conn.callText('evaluate_javascript', { expression: args.expression, ...(args.frameId ? { frameId: args.frameId } : {}) }))
     },
   }))
 
@@ -228,9 +283,9 @@ export function createTools(deps, fallbackAgent) {
     },
   }))
 
-  /** One page_interactions step from the simple-tool arguments. */
+  /** One page_interactions step from the simple-tool arguments (a `selector` is resolved to a point by the caller). */
   function step(type, purpose, args, extra = {}) {
-    if (!args.node && !args.text && !args.point) throw new Error(`${purpose}: give node (UID from safari_get_page_content), text (find-in-page), or point`)
+    if (!args.node && !args.text && !args.point && !args.selector) throw new Error(`${purpose}: give node (UID from safari_get_page_content), selector (CSS), text (find-in-page), or point`)
     return {
       type, purpose,
       ...(args.node ? { node: args.node } : {}),
@@ -242,29 +297,34 @@ export function createTools(deps, fallbackAgent) {
   }
   const TARGET = {
     node: { type: 'string', description: 'Node UID from safari_get_page_content (preferred).' },
+    selector: { type: 'string', description: 'CSS selector of the element (document.querySelector); resolved to its centre point after scrolling it into view.' },
     text: { type: 'string', description: 'Find-in-page text identifying the element when no node is known.' },
     point: { type: 'object', additionalProperties: false, description: 'Viewport coordinates, last resort.', properties: { x: { type: 'number', required: true }, y: { type: 'number', required: true } } },
     scrollToVisible: { type: 'boolean', description: 'Scroll the target into view first (default true).' },
   }
   async function interactOnce(exec, args, interaction) {
     const { id, conn, opened } = await safari(exec, args.windowId)
+    if (interaction.selector !== undefined) {
+      const { selector, ...rest } = interaction
+      interaction = { ...rest, point: await safariPointOf(conn, selector, interaction.scrollToVisible !== false) }
+    }
     return tagged(id, opened, await conn.callText('page_interactions', { interactions: [interaction] }))
   }
 
   tools.push(defineTool({
     name: 'safari_click',
-    description: 'Click an element in this chat\'s Safari window (by node UID, find-in-page text, or point). Waits for a triggered navigation. Returns the page diff. For several steps use safari_interact.',
+    description: 'Click an element in this chat\'s Safari window (by node UID, CSS selector, find-in-page text, or point). Waits for a triggered navigation. Returns the page diff. For several steps use safari_interact.',
     parameters: { ...TARGET, windowId: WINDOW_ID('safari') },
     output: textOutput,
-    async execute(args, exec) { return interactOnce(exec, args, step('click', 'click', args)) },
+    async execute(args, exec) { return interactOnce(exec, args, step('click', 'click', args, args.selector ? { selector: args.selector } : {})) },
   }))
 
   tools.push(defineTool({
     name: 'safari_hover',
-    description: 'Hover an element in this chat\'s Safari window (by node UID, text, or point). Returns the page diff.',
+    description: 'Hover an element in this chat\'s Safari window (by node UID, CSS selector, text, or point). Returns the page diff.',
     parameters: { ...TARGET, windowId: WINDOW_ID('safari') },
     output: textOutput,
-    async execute(args, exec) { return interactOnce(exec, args, step('hover', 'hover', args)) },
+    async execute(args, exec) { return interactOnce(exec, args, step('hover', 'hover', args, args.selector ? { selector: args.selector } : {})) },
   }))
 
   tools.push(defineTool({
@@ -280,10 +340,11 @@ export function createTools(deps, fallbackAgent) {
 
   tools.push(defineTool({
     name: 'safari_type_text',
-    description: 'Type text into a field in this chat\'s Safari window (target by node UID or find-in-page text), optionally replacing existing text and/or pressing Return to submit. Returns the page diff.',
+    description: 'Type text into a field in this chat\'s Safari window (target by node UID, CSS selector or find-in-page text), optionally replacing existing text and/or pressing Return to submit. Returns the page diff.',
     parameters: {
       text: { type: 'string', required: true, description: 'Text to type.' },
       node: TARGET.node,
+      selector: TARGET.selector,
       target: { type: 'string', description: 'Find-in-page text identifying the field when no node is known.' },
       replaceAll: { type: 'boolean', description: 'Replace existing field text (default false).' },
       pressReturn: { type: 'boolean', description: 'Press Return after typing (default false).' },
@@ -291,33 +352,26 @@ export function createTools(deps, fallbackAgent) {
     },
     output: textOutput,
     async execute(args, exec) {
-      const targetArgs = { node: args.node, text: args.target }
-      const interaction = step('type', 'type text', targetArgs, { value: args.text, ...(args.replaceAll ? { replaceAll: true } : {}), ...(args.pressReturn ? { pressReturn: true } : {}) })
+      const targetArgs = { node: args.node, text: args.target, selector: args.selector }
+      const interaction = step('type', 'type text', targetArgs, { value: args.text, ...(args.replaceAll ? { replaceAll: true } : {}), ...(args.pressReturn ? { pressReturn: true } : {}), ...(args.selector ? { selector: args.selector } : {}) })
       return interactOnce(exec, args, interaction)
     },
   }))
 
   tools.push(defineTool({
     name: 'safari_wait_for',
-    description: 'Wait until any of the given texts appears in this chat\'s Safari page (polls the page text). Returns which text matched, or a timeout notice.',
+    description: 'Wait until a condition holds in this chat\'s Safari page: any of `text` appears, `selector` matches, or `expression` (JS function body) returns truthy — whichever comes first — then optionally settle. Polled from the host, so long waits are safe. Returns what matched (and an expression\'s value) or a timeout notice.',
     parameters: {
-      text: { type: 'array', required: true, description: 'Texts; resolves when any appears.', items: { type: 'string' } },
-      timeout: { type: 'number', description: 'Milliseconds to wait (default 10000).' },
+      ...WAIT_PARAM.properties,
       windowId: WINDOW_ID('safari'),
     },
     output: textOutput,
     async execute(args, exec) {
       const { id, conn, opened } = await safari(exec, args.windowId)
-      const total = Math.max(0, args.timeout ?? 10_000)
-      const deadline = Date.now() + total
-      do {
-        const slice = Math.min(20_000, Math.max(50, deadline - Date.now()))
-        const expression = `const texts = ${JSON.stringify(args.text)}; const deadline = Date.now() + ${slice};
-while (true) { const t = document.body ? document.body.innerText : ''; const hit = texts.find(x => t.includes(x)); if (hit !== undefined) return { found: hit }; if (Date.now() >= deadline) return { found: null }; await new Promise(r => setTimeout(r, 100)); }`
-        const result = parseJsonText(await conn.callText('evaluate_javascript', { expression }))
-        if (result && result.found) return tagged(id, opened, `Found ${JSON.stringify(result.found)}.`)
-      } while (Date.now() < deadline)
-      return tagged(id, opened, `Timed out after ${total} ms waiting for ${args.text.map(t => JSON.stringify(t)).join(' / ')}.`)
+      const wait = parseWait({ text: args.text, selector: args.selector, expression: args.expression, settleMs: args.settleMs, timeout: args.timeout })
+      if (wait === undefined) throw new Error('safari_wait_for: give text, selector, expression, or settleMs')
+      const outcome = await runWait(body => safariEval(conn, body), wait, { maxSliceMs: sliceMs() })
+      return tagged(id, opened, `${outcome.summary}.${outcome.found?.kind === 'expression' ? `\n${JSON.stringify(outcome.found.value)}` : ''}`)
     },
   }))
 
@@ -399,6 +453,8 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
   // Screenshots (element-aware; see safari-screenshot.mjs).
   async function captureSafari(exec, args) {
     const { id, conn, opened } = await safari(exec, args.windowId)
+    const waited = (await safariWait(conn, args.wait)).trim()
+    const withWait = (value) => waited ? { ...value, notes: [...(value.notes ?? []), waited] } : value
     const viewportPath = join(tmpdir(), `dsh-safari-shot-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}.png`)
     const target = args.querySelector ? `element ${JSON.stringify(args.querySelector)}` : args.fullPage === true ? 'full page' : 'viewport'
     // Apple's `screenshot` answers with text only and writes the PNG to savePath; a success reply with no
@@ -416,7 +472,7 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
       if (args.querySelector === undefined || args.querySelector === '') {
         const byteLength = await shot()
         const size = await imageSize(viewportPath)
-        return { windowId: id, opened, bytes: await readPng(viewportPath), width: size.width, height: size.height, fullPage: args.fullPage === true, byteLength }
+        return withWait({ windowId: id, opened, bytes: await readPng(viewportPath), width: size.width, height: size.height, fullPage: args.fullPage === true, byteLength })
       }
       const measure = async (scroll) => parseMeasurement(await conn.callText('evaluate_javascript', { expression: measureScript(args.querySelector, scroll) }))
       const before = await measure(args.scrollTo !== false)
@@ -432,11 +488,11 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
       const size = await imageSize(viewportPath)
       const box = cropBox(after.rect, after.viewport, size)
       const bytes = await cropImage(viewportPath, box)
-      return {
+      return withWait({
         windowId: id, opened, bytes, width: box.width, height: box.height, querySelector: args.querySelector, byteLength: bytes.byteLength,
         rect: { x: Math.round(after.rect.x), y: Math.round(after.rect.y), width: Math.round(after.rect.width), height: Math.round(after.rect.height) },
         viewport: after.viewport, scale: Number(box.scale.toFixed(3)), clipped: box.clipped, settled: before.settled, unstable,
-      }
+      })
     } finally {
       void rm(viewportPath, { force: true }).catch(() => {})
     }
@@ -444,6 +500,7 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
 
   const safariShotParams = {
     windowId: WINDOW_ID('safari'),
+    wait: WAIT_PARAM,
     querySelector: { type: 'string', description: 'CSS selector of one element to capture (document.querySelector). Omit for the whole viewport.' },
     scrollTo: { type: 'boolean', description: 'With querySelector: scroll the element into view (centered) and wait for scrolling to settle first (default true).' },
     fullPage: { type: 'boolean', description: 'Without querySelector: capture the entire scrollable page instead of the viewport (default false).' },
@@ -491,15 +548,51 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
 
   async function chrome(exec, windowId) {
     preflight('chrome')
-    const resolved = await sessions.resolveChrome(agentOf(exec), windowId)
+    const resolved = noteResolution(await sessions.resolveChrome(agentOf(exec), windowId))
     chromeEverOpened = true
     return resolved
   }
-  /** Forward one page-scoped Chrome tool with pageId injected. */
+  /**
+   * Resolve a Chrome window and run `fn` on it; when the server says the page is gone (it reconnected,
+   * the page was closed underneath us) the window is reopened at its last URL under the same id and
+   * `fn` runs once more. The result carries the note via tagged()/describeShot().
+   */
+  async function withChrome(exec, windowId, fn) {
+    const resolved = await chrome(exec, windowId)
+    try {
+      return await fn(resolved)
+    } catch (error) {
+      if (!STALE_CHROME_PAGE.test(String(error?.message ?? error))) throw error
+      const recovered = await sessions.recoverChrome(agentOf(exec), resolved.id)
+      if (recovered === undefined) throw error
+      noteResolution(recovered)
+      return fn(recovered)
+    }
+  }
+  /** Run a JS function body in a Chrome page and return its parsed value. */
+  async function chromeEval(conn, pageId, body) {
+    const text = unfence(await conn.callText('evaluate_script', { function: `async () => { ${body}\n }`, pageId }))
+    try { return JSON.parse(text) } catch { return text }
+  }
+  /** Run an optional `wait` spec against a Chrome page; returns the summary line (or '' when no wait). */
+  async function chromeWait(conn, pageId, spec) {
+    const wait = parseWait(spec)
+    if (wait === undefined) return ''
+    const outcome = await runWait(body => chromeEval(conn, pageId, body), wait, { maxSliceMs: sliceMs() })
+    return `${outcome.summary}. `
+  }
+  /** Target of chrome_click / chrome_fill / chrome_hover: a snapshot uid, or a CSS selector / visible text found in the page. */
+  const CHROME_TARGET = {
+    uid: { type: 'string', description: 'Element uid from chrome_snapshot (preferred when you have a snapshot).' },
+    selector: { type: 'string', description: 'CSS selector (document.querySelector; the first match is used) — no snapshot needed.' },
+    text: { type: 'string', description: 'Visible text of the element (deepest visible element containing it) — no snapshot needed.' },
+  }
+  /** Forward one page-scoped Chrome tool with pageId injected (stale-page recovery included). */
   async function chromeCall(exec, args, rawName, mapArgs = (rest) => rest) {
-    const { id, pageId, conn, opened } = await chrome(exec, args.windowId)
-    const { windowId: _w, ...rest } = args
-    return { id, opened, text: await conn.callText(rawName, { ...mapArgs(rest), pageId }) }
+    return withChrome(exec, args.windowId, async ({ id, pageId, conn, opened }) => {
+      const { windowId: _w, wait: _wait, ...rest } = args
+      return { id, opened, text: await conn.callText(rawName, { ...mapArgs(rest), pageId }) }
+    })
   }
   const forwardChrome = (rawName, mapArgs) => async function execute(args, exec) {
     const { id, opened, text } = await chromeCall(exec, args, rawName, mapArgs)
@@ -531,16 +624,32 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
 
   tools.push(defineTool({
     name: 'chrome_navigate',
-    description: 'Navigate this chat\'s Chrome window: load a url, or go back / forward / reload. Waits for the navigation to complete.',
+    description: 'Navigate this chat\'s Chrome window: load a url, or go back / forward / reload. Waits for the navigation to complete. Optionally `wait` for the page to be ready (text / selector / condition / settle) and run `then` (a JS function body) in the loaded page — the rebuild → reload → probe loop in one call.',
     parameters: {
       url: { type: 'string', description: 'URL to load (type url).' },
       type: { type: 'string', enum: ['url', 'back', 'forward', 'reload'], description: 'Navigation kind (default url).' },
       ignoreCache: { type: 'boolean', description: 'For reload: bypass the cache.' },
       timeout: { type: 'number', description: 'Milliseconds to wait for the navigation (0 = no timeout).' },
+      wait: WAIT_PARAM,
+      then: { type: 'string', description: 'JS function body to run after the navigation (and wait); `return` a value to get it back.' },
       windowId: WINDOW_ID('chrome'),
     },
     output: textOutput,
-    execute: forwardChrome('navigate_page', (rest) => ({ type: rest.url && !rest.type ? 'url' : rest.type, ...rest })),
+    async execute(args, exec) {
+      return withChrome(exec, args.windowId, async ({ id, pageId, conn, opened }) => {
+        const { windowId: _w, wait, then, ...rest } = args
+        const navArgs = { type: rest.url && !rest.type ? 'url' : rest.type, ...rest }
+        let text = await conn.callText('navigate_page', { ...navArgs, pageId })
+        if (navArgs.type === 'url' && rest.url) sessions.noteChromeUrl(agentOf(exec), id, rest.url)
+        const waited = await chromeWait(conn, pageId, wait)
+        if (waited) text += `\n${waited.trim()}`
+        if (then) {
+          const value = await chromeEval(conn, pageId, then)
+          text += `\nthen → ${typeof value === 'string' ? value : JSON.stringify(value)}`
+        }
+        return tagged(id, opened, text)
+      })
+    },
   }))
 
   tools.push(defineTool({
@@ -616,6 +725,7 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
 
   const chromeShotParams = {
     windowId: WINDOW_ID('chrome'),
+    wait: WAIT_PARAM,
     uid: { type: 'string', description: 'Element uid from chrome_snapshot to capture just that element.' },
     fullPage: { type: 'boolean', description: 'Capture the whole scrollable page (default false).' },
     format: { type: 'string', enum: ['png', 'jpeg', 'webp'], description: 'Image format (default png).' },
@@ -632,8 +742,9 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
     const wanted = args.uid !== undefined ? 'element' : args.fullPage === true ? 'fullPage' : 'viewport'
     const target = wanted === 'element' ? `element uid ${JSON.stringify(args.uid)}` : wanted === 'fullPage' ? 'full page' : 'viewport'
     if (wanted === 'element' && args.fullPage === true) throw new Error(`chrome screenshot: pass either uid (one element) or fullPage (whole page), not both (got uid ${JSON.stringify(args.uid)} and fullPage: true).`)
-    const { id, pageId, conn, opened } = await chrome(exec, args.windowId)
-    const { windowId: _w, path: _p, ...rest } = args
+    return withChrome(exec, args.windowId, async ({ id, pageId, conn, opened }) => {
+    const waited = (await chromeWait(conn, pageId, args.wait)).trim()
+    const { windowId: _w, path: _p, wait: _wait, ...rest } = args
     const result = await conn.callRaw('take_screenshot', { ...rest, pageId })
     const reply = textOf(result)
     if (result.isError) throw new Error(`chrome screenshot of ${target} in ${id} failed. chrome-devtools-mcp said: ${reply || '(no message)'}`)
@@ -657,7 +768,7 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
       void removeServerTempFile(saved)
     }
     if (bytes.byteLength === 0) throw new Error(`chrome screenshot of ${target} in ${id}: the server returned a 0-byte image (source: ${source}). Reply: ${reply || '(empty)'}`)
-    const notes = []
+    const notes = waited ? [waited] : []
     // The server states what it captured; a mismatch with the request is the one thing worth flagging loudly.
     const captured = /screenshot of node with uid/i.test(reply) ? 'element' : /full current page/i.test(reply) ? 'fullPage' : /viewport/i.test(reply) ? 'viewport' : undefined
     if (captured !== undefined && captured !== wanted) notes.push(`requested ${target} but chrome-devtools-mcp reports it captured the ${captured === 'fullPage' ? 'full page' : captured}: "${reply.split('\n')[0]}"`)
@@ -665,6 +776,7 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
       windowId: id, opened, bytes, mediaType, ...(args.uid !== undefined ? { uid: args.uid } : {}), fullPage: args.fullPage === true,
       byteLength: bytes.byteLength, format: mediaType.replace('image/', ''), source, ...(notes.length > 0 ? { notes } : {}),
     }
+    })
   }
 
   /** Media type of a saved screenshot from its extension (falling back to the requested format). */
@@ -726,32 +838,47 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
 
   tools.push(defineTool({
     name: 'chrome_evaluate_expression',
-    description: 'Run JavaScript statements in this chat\'s Chrome page. `expression` is a FUNCTION BODY: use an explicit `return` for a value (await is allowed). Returns the JSON-encoded result. (chrome_evaluate_function takes a function + uid args instead.)',
+    description: 'Run JavaScript statements in this chat\'s Chrome page. `expression` is a FUNCTION BODY: use an explicit `return` for a value (await is allowed). Returns the JSON-encoded result. Use `wait` to wait for text / a selector / a condition (or settle N ms) BEFORE evaluating instead of `await new Promise(r => setTimeout(r, N))` inside the expression (in-page sleeps over ~10 s time out). (chrome_evaluate_function takes a function + uid args instead.)',
     parameters: {
       expression: { type: 'string', required: true, description: 'JavaScript function body; `return` the value you want.' },
+      wait: WAIT_PARAM,
       windowId: WINDOW_ID('chrome'),
     },
     output: textOutput,
     async execute(args, exec) {
-      const { id, opened, text } = await chromeCall(exec, { windowId: args.windowId }, 'evaluate_script', () => ({ function: `async () => { ${args.expression}\n }` }))
-      return tagged(id, opened, text)
+      return withChrome(exec, args.windowId, async ({ id, pageId, conn, opened }) => {
+        const waited = await chromeWait(conn, pageId, args.wait)
+        return tagged(id, opened, waited + await conn.callText('evaluate_script', { function: `async () => { ${args.expression}\n }`, pageId }))
+      })
     },
   }))
 
   tools.push(defineTool({
     name: 'chrome_click',
-    description: 'Click an element (uid from chrome_snapshot) in this chat\'s Chrome page.',
-    parameters: { uid: { type: 'string', required: true, description: 'Element uid.' }, dblClick: { type: 'boolean', description: 'Double-click.' }, includeSnapshot: { type: 'boolean', description: 'Return a fresh snapshot afterwards.' }, windowId: WINDOW_ID('chrome') },
+    description: 'Click an element in this chat\'s Chrome page: by uid (from chrome_snapshot; a real input event via the devtools protocol), or without a snapshot by CSS `selector` or visible `text` (scrolled into view, then element.click() in the page).',
+    parameters: { ...CHROME_TARGET, dblClick: { type: 'boolean', description: 'Double-click (uid targets only).' }, includeSnapshot: { type: 'boolean', description: 'Return a fresh snapshot afterwards.' }, windowId: WINDOW_ID('chrome') },
     output: textOutput,
-    execute: forwardChrome('click'),
+    async execute(args, exec) {
+      if (args.uid) return forwardChrome('click')(args, exec)
+      return chromeDomAction(exec, args, 'click', 'el.scrollIntoView({ block: "center", inline: "center" }); el.click(); return { clicked: describe(el) };')
+    },
   }))
 
   tools.push(defineTool({
     name: 'chrome_fill',
-    description: 'Type into an input / textarea / contenteditable or choose a select option (uid from chrome_snapshot).',
-    parameters: { uid: { type: 'string', required: true, description: 'Element uid.' }, value: { type: 'string', required: true, description: 'Value to fill.' }, includeSnapshot: { type: 'boolean' }, windowId: WINDOW_ID('chrome') },
+    description: 'Type into an input / textarea / contenteditable or choose a select option: by uid (from chrome_snapshot), or without a snapshot by CSS `selector` or visible `text` (value set in the page with input/change events).',
+    parameters: { ...CHROME_TARGET, value: { type: 'string', required: true, description: 'Value to fill.' }, includeSnapshot: { type: 'boolean' }, windowId: WINDOW_ID('chrome') },
     output: textOutput,
-    execute: forwardChrome('fill'),
+    async execute(args, exec) {
+      if (args.uid) return forwardChrome('fill')(args, exec)
+      const value = JSON.stringify(args.value)
+      return chromeDomAction(exec, args, 'fill', `el.scrollIntoView({ block: "center", inline: "center" }); el.focus && el.focus();
+        if (el.tagName === 'SELECT') { const opt = [...el.options].find(o => o.value === ${value} || o.textContent.trim() === ${value}); if (!opt) throw new Error('no option ' + ${value}); el.value = opt.value; }
+        else if (el.isContentEditable) { el.textContent = ${value}; }
+        else { const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set; if (setter) setter.call(el, ${value}); else el.value = ${value}; }
+        el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }));
+        return { filled: describe(el), value: el.tagName === 'SELECT' ? el.value : (el.isContentEditable ? el.textContent : el.value) };`)
+    },
   }))
 
   tools.push(defineTool({
@@ -768,10 +895,13 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
 
   tools.push(defineTool({
     name: 'chrome_hover',
-    description: 'Hover an element (uid from chrome_snapshot).',
-    parameters: { uid: { type: 'string', required: true }, includeSnapshot: { type: 'boolean' }, windowId: WINDOW_ID('chrome') },
+    description: 'Hover an element: by uid (from chrome_snapshot; a real pointer move), or without a snapshot by CSS `selector` or visible `text` (synthetic mouseover/mouseenter events in the page — CSS :hover styles do not react to those).',
+    parameters: { ...CHROME_TARGET, includeSnapshot: { type: 'boolean' }, windowId: WINDOW_ID('chrome') },
     output: textOutput,
-    execute: forwardChrome('hover'),
+    async execute(args, exec) {
+      if (args.uid) return forwardChrome('hover')(args, exec)
+      return chromeDomAction(exec, args, 'hover', 'el.scrollIntoView({ block: "center", inline: "center" }); el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })); el.dispatchEvent(new MouseEvent("mouseenter")); return { hovered: describe(el) };')
+    },
   }))
 
   tools.push(defineTool({
@@ -792,14 +922,45 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
 
   tools.push(defineTool({
     name: 'chrome_wait_for',
-    description: 'Wait until any of the given texts appears on this chat\'s Chrome page.',
-    parameters: { text: { type: 'array', required: true, description: 'Texts; resolves when any appears.', items: { type: 'string' } }, timeout: { type: 'number', description: 'Milliseconds (0 = no timeout).' }, windowId: WINDOW_ID('chrome') },
+    description: 'Wait until a condition holds in this chat\'s Chrome page: any of `text` appears, `selector` matches, or `expression` (JS function body) returns truthy — whichever comes first — then optionally settle. Polled from the host, so long waits are safe. Returns what matched (and an expression\'s value) or a timeout notice.',
+    parameters: {
+      ...WAIT_PARAM.properties,
+      windowId: WINDOW_ID('chrome'),
+    },
     output: textOutput,
-    execute: forwardChrome('wait_for'),
+    async execute(args, exec) {
+      const wait = parseWait({ text: args.text, selector: args.selector, expression: args.expression, settleMs: args.settleMs, timeout: args.timeout })
+      if (wait === undefined) throw new Error('chrome_wait_for: give text, selector, expression, or settleMs')
+      return withChrome(exec, args.windowId, async ({ id, pageId, conn, opened }) => {
+        const outcome = await runWait(body => chromeEval(conn, pageId, body), wait, { maxSliceMs: sliceMs() })
+        return tagged(id, opened, `${outcome.summary}.${outcome.found?.kind === 'expression' ? `\n${JSON.stringify(outcome.found.value)}` : ''}`)
+      })
+    },
   }))
 
   /** JS (inlined text) that returns the deepest visible element whose text contains `needle`. */
   const FIND_BY_TEXT = (needle) => `(() => { const needle = ${JSON.stringify(needle)}; let best = null; const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT); while (walk.nextNode()) { const el = walk.currentNode; if (!(el.innerText || '').includes(needle)) continue; const r = el.getBoundingClientRect(); if (r.width === 0 || r.height === 0) continue; best = el; } return best; })()`
+
+  /**
+   * Perform a DOM action on an element found by CSS selector or visible text (no snapshot needed).
+   * `action` is JS that sees `el` and `describe(el)` and returns a JSON-serialisable summary.
+   */
+  async function chromeDomAction(exec, args, verb, action) {
+    if (!args.selector && !args.text) throw new Error(`chrome_${verb}: give uid (from chrome_snapshot), selector (CSS), or text (visible text)`)
+    return withChrome(exec, args.windowId, async ({ id, pageId, conn, opened }) => {
+      const finder = args.selector
+        ? `const els = document.querySelectorAll(${JSON.stringify(args.selector)}); if (els.length === 0) throw new Error('no element matches selector ' + JSON.stringify(${JSON.stringify(args.selector)})); const el = els[0]; const ambiguous = els.length > 1 ? els.length : 0;`
+        : `const el = ${FIND_BY_TEXT(args.text)}; if (!el) throw new Error('no visible element with text ' + JSON.stringify(${JSON.stringify(args.text)})); const ambiguous = 0;`
+      const body = `${finder}
+        const describe = (e) => e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') + (e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\\s+/).slice(0, 3).join('.') : '') + (e.innerText ? ' "' + e.innerText.trim().slice(0, 60) + '"' : '');
+        const out = (() => { ${action} })();
+        return ambiguous ? { ...out, note: 'selector matched ' + ambiguous + ' elements; acted on the first' } : out;`
+      const value = await chromeEval(conn, pageId, body)
+      let text = typeof value === 'string' ? value : JSON.stringify(value)
+      if (args.includeSnapshot) text += `\n\n${await conn.callText('take_snapshot', { pageId })}`
+      return tagged(id, opened, text)
+    })
+  }
 
   tools.push(defineTool({
     name: 'chrome_interact',
@@ -1006,7 +1167,7 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
 
 /** Text summary of a capture. */
 function describeShot(value) {
-  const parts = [`[${value.windowId}]${value.opened ? ' (opened)' : ''}`]
+  const parts = [`${takeNote(value.windowId)}[${value.windowId}]${value.opened ? ' (opened)' : ''}`]
   if (value.width !== undefined) parts.push(`${value.width}×${value.height} px`)
   if (value.querySelector !== undefined) {
     parts.push(`element ${JSON.stringify(value.querySelector)} at CSS rect x=${value.rect.x} y=${value.rect.y} ${value.rect.width}×${value.rect.height} (viewport ${value.viewport.width}×${value.viewport.height}, scale ${value.scale})`)

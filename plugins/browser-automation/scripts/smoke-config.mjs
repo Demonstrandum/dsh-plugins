@@ -52,7 +52,7 @@ For more details, visit: https://github.com/ChromeDevTools/chrome-devtools-mcp#u
 
 // ---- preflight
 const missing = plugin.preflightFor(plugin.Config({ safari: { driver: '/nonexistent/safaridriver' }, chrome: { command: '/nonexistent/cdm' } }))
-for (const [browser, needle] of [['safari', 'classic Safari cannot be used'], ['chrome', 'npm i -g chrome-devtools-mcp']]) {
+for (const [browser, needle] of [['safari', 'Classic Safari cannot be used'], ['chrome', 'npm i -g chrome-devtools-mcp']]) {
   let message = ''
   try { missing(browser) } catch (error) { message = String(error) }
   if (!message.includes('unavailable') || !message.includes(needle)) fail(`preflight ${browser}: ${message}`)
@@ -101,10 +101,18 @@ console.log('smoke ok: config + preflight')
   // simulate two safari windows in A without spawning
   sA.safari.set(0, { id: 's:0:0', conn: fakeConn() }); sA.safari.set(1, { id: 's:0:1', conn: fakeConn() }); sA.nextWindow.safari = 2
   const r0 = await sessions.resolveSafari(agentA, 's:0:1'); if (r0.id !== 's:0:1' || r0.opened) fail('resolve by id')
+  // two windows, no id → the most recently used one (s:0:1 was just used), with the others named
+  const mru = await sessions.resolveSafari(agentA)
+  if (mru.id !== 's:0:1' || mru.defaulted?.count !== 2 || mru.defaulted.others.join() !== 's:0:0') fail(`mru default: ${JSON.stringify({ id: mru.id, defaulted: mru.defaulted })}`)
+  await sessions.resolveSafari(agentA, 's:0:0')
+  if ((await sessions.resolveSafari(agentA)).id !== 's:0:0') fail('mru follows the last explicit use')
+  // a lost Chrome window is remembered with its URL and forgotten on close
+  sA.chrome.lost.set(0, { id: 'c:0:0', lastUrl: 'http://x/' })
+  sessions.noteChromeUrl(agentA, 'c:0:0', 'http://ignored/') // not open → no-op
+  if (sA.chrome.lost.get(0).lastUrl !== 'http://x/') fail('lost bookkeeping')
+  await sessions.closeChrome(agentA, 'c:0:0')
+  if (sA.chrome.lost.size !== 0) fail('closing a lost window forgets it')
   let message = ''
-  try { await sessions.resolveSafari(agentA) } catch (e) { message = String(e) }
-  if (!message.includes('2 Safari windows open') || !message.includes('s:0:0, s:0:1')) fail(`ambiguous: ${message}`)
-  message = ''
   try { await sessions.resolveSafari(agentB, 's:0:0') } catch (e) { message = String(e) }
   if (!message.includes('does not belong to this session')) fail(`cross-session: ${message}`)
   message = ''

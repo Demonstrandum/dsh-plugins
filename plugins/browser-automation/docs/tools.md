@@ -33,7 +33,7 @@ Close one Safari window of this chat (windowId) or all of them (omit). Frees the
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text: which ids were closed
 
@@ -55,7 +55,7 @@ Close one Chrome window of this chat (windowId) or all of them (omit). Chrome it
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text: which ids were closed
 
@@ -63,12 +63,19 @@ Close one Chrome window of this chat (windowId) or all of them (omit). Chrome it
 
 ### `safari_navigate`
 
-Load a URL in this chat's Safari window and wait for the navigation to finish. Returns the loaded page's title and URL; read the page with safari_get_page_content.
+Load a URL in this chat's Safari window and wait for the navigation to finish. Returns the loaded page's title and URL; read the page with safari_get_page_content. Optionally `wait` for the page to be ready and run `then` (a JS function body) in the loaded page, all in this one call.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `url` | string | yes | URL to load. |
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `wait` | object |  | Wait BEFORE acting: for text / a selector / a truthy expression (any of them), and/or a settle pause. Replaces `await new Promise(r => setTimeout(r, N))` inside expressions and repeated polling calls. |
+| `wait.text` | array of string |  | Wait until any of these texts appears on the page. |
+| `wait.selector` | string |  | Wait until this CSS selector matches at least one element. |
+| `wait.expression` | string |  | Wait until this JS function body (await allowed) returns a truthy value; the value is reported. |
+| `wait.settleMs` | number |  | Extra pause in ms after the condition holds (or alone, when no condition is given). |
+| `wait.timeout` | number |  | Overall budget in ms (default 30000). A timeout is reported, not thrown; the main action still runs. |
+| `then` | string |  | JS function body to run after the navigation (and wait); `return` a value to get it back. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** `{ windowId, url, title? }`
 
@@ -114,13 +121,16 @@ Outline of a web page without its text: title, text size, main-content landmark,
 
 ### `safari_wait_for`
 
-Wait until any of the given texts appears in this chat's Safari page (polls the page text). Returns which text matched, or a timeout notice.
+Wait until a condition holds in this chat's Safari page: any of `text` appears, `selector` matches, or `expression` (JS function body) returns truthy — whichever comes first — then optionally settle. Polled from the host, so long waits are safe. Returns what matched (and an expression's value) or a timeout notice.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `text` | array of string | yes | Texts; resolves when any appears. |
-| `timeout` | number |  | Milliseconds to wait (default 10000). |
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `text` | array of string |  | Wait until any of these texts appears on the page. |
+| `selector` | string |  | Wait until this CSS selector matches at least one element. |
+| `expression` | string |  | Wait until this JS function body (await allowed) returns a truthy value; the value is reported. |
+| `settleMs` | number |  | Extra pause in ms after the condition holds (or alone, when no condition is given). |
+| `timeout` | number |  | Overall budget in ms (default 30000). A timeout is reported, not thrown; the main action still runs. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text: `Found "…"` or a timeout notice
 
@@ -140,7 +150,7 @@ Show notes of a YouTube video: title, channel, duration, views, publish date, ch
 
 ### `chrome_navigate`
 
-Navigate this chat's Chrome window: load a url, or go back / forward / reload. Waits for the navigation to complete.
+Navigate this chat's Chrome window: load a url, or go back / forward / reload. Waits for the navigation to complete. Optionally `wait` for the page to be ready (text / selector / condition / settle) and run `then` (a JS function body) in the loaded page — the rebuild → reload → probe loop in one call.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -148,7 +158,14 @@ Navigate this chat's Chrome window: load a url, or go back / forward / reload. W
 | `type` | `url` \| `back` \| `forward` \| `reload` |  | Navigation kind (default url). |
 | `ignoreCache` | boolean |  | For reload: bypass the cache. |
 | `timeout` | number |  | Milliseconds to wait for the navigation (0 = no timeout). |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `wait` | object |  | Wait BEFORE acting: for text / a selector / a truthy expression (any of them), and/or a settle pause. Replaces `await new Promise(r => setTimeout(r, N))` inside expressions and repeated polling calls. |
+| `wait.text` | array of string |  | Wait until any of these texts appears on the page. |
+| `wait.selector` | string |  | Wait until this CSS selector matches at least one element. |
+| `wait.expression` | string |  | Wait until this JS function body (await allowed) returns a truthy value; the value is reported. |
+| `wait.settleMs` | number |  | Extra pause in ms after the condition holds (or alone, when no condition is given). |
+| `wait.timeout` | number |  | Overall budget in ms (default 30000). A timeout is reported, not thrown; the main action still runs. |
+| `then` | string |  | JS function body to run after the navigation (and wait); `return` a value to get it back. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]`
 
@@ -159,7 +176,7 @@ Text snapshot of this chat's Chrome page from the accessibility tree, listing el
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `verbose` | boolean |  | Include all accessibility properties (default false). |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -203,13 +220,16 @@ Outline of a web page in Chrome without its text: title, text size, main-content
 
 ### `chrome_wait_for`
 
-Wait until any of the given texts appears on this chat's Chrome page.
+Wait until a condition holds in this chat's Chrome page: any of `text` appears, `selector` matches, or `expression` (JS function body) returns truthy — whichever comes first — then optionally settle. Polled from the host, so long waits are safe. Returns what matched (and an expression's value) or a timeout notice.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `text` | array of string | yes | Texts; resolves when any appears. |
-| `timeout` | number |  | Milliseconds (0 = no timeout). |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `text` | array of string |  | Wait until any of these texts appears on the page. |
+| `selector` | string |  | Wait until this CSS selector matches at least one element. |
+| `expression` | string |  | Wait until this JS function body (await allowed) returns a truthy value; the value is reported. |
+| `settleMs` | number |  | Extra pause in ms after the condition holds (or alone, when no condition is given). |
+| `timeout` | number |  | Overall budget in ms (default 30000). A timeout is reported, not thrown; the main action still runs. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -217,12 +237,18 @@ Wait until any of the given texts appears on this chat's Chrome page.
 
 ### `safari_evaluate_expression`
 
-Run JavaScript statements in this chat's Safari window. `expression` is a FUNCTION BODY: use an explicit `return` for a value (await is allowed). `$uid(N)` references a node UID from safari_get_page_content. Returns the JSON-encoded result. (safari_evaluate_function takes a function + args instead.)
+Run JavaScript statements in this chat's Safari window. `expression` is a FUNCTION BODY: use an explicit `return` for a value (await is allowed). `$uid(N)` references a node UID from safari_get_page_content. Returns the JSON-encoded result. Use `wait` to wait for text / a selector / a condition (or settle N ms) BEFORE evaluating instead of sleeping inside the expression. (safari_evaluate_function takes a function + args instead.)
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `expression` | string | yes | JavaScript function body; `return` the value you want. |
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `wait` | object |  | Wait BEFORE acting: for text / a selector / a truthy expression (any of them), and/or a settle pause. Replaces `await new Promise(r => setTimeout(r, N))` inside expressions and repeated polling calls. |
+| `wait.text` | array of string |  | Wait until any of these texts appears on the page. |
+| `wait.selector` | string |  | Wait until this CSS selector matches at least one element. |
+| `wait.expression` | string |  | Wait until this JS function body (await allowed) returns a truthy value; the value is reported. |
+| `wait.settleMs` | number |  | Extra pause in ms after the condition holds (or alone, when no condition is given). |
+| `wait.timeout` | number |  | Overall budget in ms (default 30000). A timeout is reported, not thrown; the main action still runs. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 | `frameId` | string |  | Node UID of an iframe (or a node inside one) to run in that subframe. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
@@ -235,7 +261,7 @@ Call a JavaScript FUNCTION in this chat's Safari window, e.g. `() => document.ti
 |---|---|---|---|
 | `function` | string | yes | A function expression (arrow or function), called with args. |
 | `args` | array of string |  | Node UIDs (strings) passed as element arguments, in order. |
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 | `frameId` | string |  | Node UID of an iframe to run in that subframe. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
@@ -250,7 +276,7 @@ Call a JavaScript FUNCTION in this chat's Chrome page, e.g. `() => document.titl
 |---|---|---|---|
 | `function` | string | yes | A function expression (arrow or function), called with args. |
 | `args` | array of string |  | Snapshot uids (strings) passed as element arguments, in order. |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -258,12 +284,18 @@ Call a JavaScript FUNCTION in this chat's Chrome page, e.g. `() => document.titl
 
 ### `chrome_evaluate_expression`
 
-Run JavaScript statements in this chat's Chrome page. `expression` is a FUNCTION BODY: use an explicit `return` for a value (await is allowed). Returns the JSON-encoded result. (chrome_evaluate_function takes a function + uid args instead.)
+Run JavaScript statements in this chat's Chrome page. `expression` is a FUNCTION BODY: use an explicit `return` for a value (await is allowed). Returns the JSON-encoded result. Use `wait` to wait for text / a selector / a condition (or settle N ms) BEFORE evaluating instead of `await new Promise(r => setTimeout(r, N))` inside the expression (in-page sleeps over ~10 s time out). (chrome_evaluate_function takes a function + uid args instead.)
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `expression` | string | yes | JavaScript function body; `return` the value you want. |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `wait` | object |  | Wait BEFORE acting: for text / a selector / a truthy expression (any of them), and/or a settle pause. Replaces `await new Promise(r => setTimeout(r, N))` inside expressions and repeated polling calls. |
+| `wait.text` | array of string |  | Wait until any of these texts appears on the page. |
+| `wait.selector` | string |  | Wait until this CSS selector matches at least one element. |
+| `wait.expression` | string |  | Wait until this JS function body (await allowed) returns a truthy value; the value is reported. |
+| `wait.settleMs` | number |  | Extra pause in ms after the condition holds (or alone, when no condition is given). |
+| `wait.timeout` | number |  | Overall budget in ms (default 30000). A timeout is reported, not thrown; the main action still runs. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -293,7 +325,7 @@ Perform DOM interactions in this chat's Safari window, in sequence (400 ms settl
 | `interactions[].scrollDelta.x` | number |  |  |
 | `interactions[].scrollDelta.y` | number |  |  |
 | `fullText` | boolean |  | Return the full page text instead of a diff (default false). |
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -301,17 +333,18 @@ Perform DOM interactions in this chat's Safari window, in sequence (400 ms settl
 
 ### `safari_click`
 
-Click an element in this chat's Safari window (by node UID, find-in-page text, or point). Waits for a triggered navigation. Returns the page diff. For several steps use safari_interact.
+Click an element in this chat's Safari window (by node UID, CSS selector, find-in-page text, or point). Waits for a triggered navigation. Returns the page diff. For several steps use safari_interact.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `node` | string |  | Node UID from safari_get_page_content (preferred). |
+| `selector` | string |  | CSS selector of the element (document.querySelector); resolved to its centre point after scrolling it into view. |
 | `text` | string |  | Find-in-page text identifying the element when no node is known. |
 | `point` | object |  | Viewport coordinates, last resort. |
 | `point.x` | number | yes |  |
 | `point.y` | number | yes |  |
 | `scrollToVisible` | boolean |  | Scroll the target into view first (default true). |
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -319,17 +352,18 @@ Click an element in this chat's Safari window (by node UID, find-in-page text, o
 
 ### `safari_hover`
 
-Hover an element in this chat's Safari window (by node UID, text, or point). Returns the page diff.
+Hover an element in this chat's Safari window (by node UID, CSS selector, text, or point). Returns the page diff.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `node` | string |  | Node UID from safari_get_page_content (preferred). |
+| `selector` | string |  | CSS selector of the element (document.querySelector); resolved to its centre point after scrolling it into view. |
 | `text` | string |  | Find-in-page text identifying the element when no node is known. |
 | `point` | object |  | Viewport coordinates, last resort. |
 | `point.x` | number | yes |  |
 | `point.y` | number | yes |  |
 | `scrollToVisible` | boolean |  | Scroll the target into view first (default true). |
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -343,12 +377,13 @@ Press a key in this chat's Safari window (e.g. "Enter", "Escape", "Tab", "ArrowD
 |---|---|---|---|
 | `key` | string | yes | Key name. |
 | `node` | string |  | Node UID from safari_get_page_content (preferred). |
+| `selector` | string |  | CSS selector of the element (document.querySelector); resolved to its centre point after scrolling it into view. |
 | `text` | string |  | Find-in-page text identifying the element when no node is known. |
 | `point` | object |  | Viewport coordinates, last resort. |
 | `point.x` | number | yes |  |
 | `point.y` | number | yes |  |
 | `scrollToVisible` | boolean |  | Scroll the target into view first (default true). |
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -356,16 +391,17 @@ Press a key in this chat's Safari window (e.g. "Enter", "Escape", "Tab", "ArrowD
 
 ### `safari_type_text`
 
-Type text into a field in this chat's Safari window (target by node UID or find-in-page text), optionally replacing existing text and/or pressing Return to submit. Returns the page diff.
+Type text into a field in this chat's Safari window (target by node UID, CSS selector or find-in-page text), optionally replacing existing text and/or pressing Return to submit. Returns the page diff.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `text` | string | yes | Text to type. |
 | `node` | string |  | Node UID from safari_get_page_content (preferred). |
+| `selector` | string |  | CSS selector of the element (document.querySelector); resolved to its centre point after scrolling it into view. |
 | `target` | string |  | Find-in-page text identifying the field when no node is known. |
 | `replaceAll` | boolean |  | Replace existing field text (default false). |
 | `pressReturn` | boolean |  | Press Return after typing (default false). |
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -373,27 +409,31 @@ Type text into a field in this chat's Safari window (target by node UID or find-
 
 ### `chrome_click`
 
-Click an element (uid from chrome_snapshot) in this chat's Chrome page.
+Click an element in this chat's Chrome page: by uid (from chrome_snapshot; a real input event via the devtools protocol), or without a snapshot by CSS `selector` or visible `text` (scrolled into view, then element.click() in the page).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `uid` | string | yes | Element uid. |
-| `dblClick` | boolean |  | Double-click. |
+| `uid` | string |  | Element uid from chrome_snapshot (preferred when you have a snapshot). |
+| `selector` | string |  | CSS selector (document.querySelector; the first match is used) — no snapshot needed. |
+| `text` | string |  | Visible text of the element (deepest visible element containing it) — no snapshot needed. |
+| `dblClick` | boolean |  | Double-click (uid targets only). |
 | `includeSnapshot` | boolean |  | Return a fresh snapshot afterwards. |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
 ### `chrome_fill`
 
-Type into an input / textarea / contenteditable or choose a select option (uid from chrome_snapshot).
+Type into an input / textarea / contenteditable or choose a select option: by uid (from chrome_snapshot), or without a snapshot by CSS `selector` or visible `text` (value set in the page with input/change events).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `uid` | string | yes | Element uid. |
+| `uid` | string |  | Element uid from chrome_snapshot (preferred when you have a snapshot). |
+| `selector` | string |  | CSS selector (document.querySelector; the first match is used) — no snapshot needed. |
+| `text` | string |  | Visible text of the element (deepest visible element containing it) — no snapshot needed. |
 | `value` | string | yes | Value to fill. |
 | `includeSnapshot` | boolean |  |  |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -407,19 +447,21 @@ Fill several form fields at once (uids from chrome_snapshot).
 | `elements[].uid` | string | yes |  |
 | `elements[].value` | string | yes | "true"/"false" for checkboxes and toggles. |
 | `includeSnapshot` | boolean |  |  |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
 ### `chrome_hover`
 
-Hover an element (uid from chrome_snapshot).
+Hover an element: by uid (from chrome_snapshot; a real pointer move), or without a snapshot by CSS `selector` or visible `text` (synthetic mouseover/mouseenter events in the page — CSS :hover styles do not react to those).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `uid` | string | yes |  |
+| `uid` | string |  | Element uid from chrome_snapshot (preferred when you have a snapshot). |
+| `selector` | string |  | CSS selector (document.querySelector; the first match is used) — no snapshot needed. |
+| `text` | string |  | Visible text of the element (deepest visible element containing it) — no snapshot needed. |
 | `includeSnapshot` | boolean |  |  |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -431,7 +473,7 @@ Press a key or combination in this chat's Chrome page, e.g. "Enter", "Escape", "
 |---|---|---|---|
 | `key` | string | yes | Key or combination. |
 | `includeSnapshot` | boolean |  |  |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -443,7 +485,7 @@ Type text at the current focus in this chat's Chrome page (focus an element firs
 |---|---|---|---|
 | `text` | string | yes |  |
 | `submitKey` | string |  | Key to press after typing, e.g. Enter. |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -466,7 +508,7 @@ Perform DOM interactions in this chat's Chrome page in sequence, mirroring safar
 | `interactions[].scrollDelta.x` | number |  |  |
 | `interactions[].scrollDelta.y` | number |  |  |
 | `includeSnapshot` | boolean |  | Append a fresh snapshot after the batch (default false). |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text: one line per step (`ok` / `FAILED: reason`), optional snapshot
 
@@ -480,7 +522,13 @@ Screenshot of this chat's Safari window, returned INLINE as an image. With query
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
+| `wait` | object |  | Wait BEFORE acting: for text / a selector / a truthy expression (any of them), and/or a settle pause. Replaces `await new Promise(r => setTimeout(r, N))` inside expressions and repeated polling calls. |
+| `wait.text` | array of string |  | Wait until any of these texts appears on the page. |
+| `wait.selector` | string |  | Wait until this CSS selector matches at least one element. |
+| `wait.expression` | string |  | Wait until this JS function body (await allowed) returns a truthy value; the value is reported. |
+| `wait.settleMs` | number |  | Extra pause in ms after the condition holds (or alone, when no condition is given). |
+| `wait.timeout` | number |  | Overall budget in ms (default 30000). A timeout is reported, not thrown; the main action still runs. |
 | `querySelector` | string |  | CSS selector of one element to capture (document.querySelector). Omit for the whole viewport. |
 | `scrollTo` | boolean |  | With querySelector: scroll the element into view (centered) and wait for scrolling to settle first (default true). |
 | `fullPage` | boolean |  | Without querySelector: capture the entire scrollable page instead of the viewport (default false). |
@@ -496,7 +544,13 @@ Screenshot of this chat's Safari window written to a PNG file (same element capt
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `path` | string | yes | Destination .png path (absolute, or relative to the session workspace). |
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
+| `wait` | object |  | Wait BEFORE acting: for text / a selector / a truthy expression (any of them), and/or a settle pause. Replaces `await new Promise(r => setTimeout(r, N))` inside expressions and repeated polling calls. |
+| `wait.text` | array of string |  | Wait until any of these texts appears on the page. |
+| `wait.selector` | string |  | Wait until this CSS selector matches at least one element. |
+| `wait.expression` | string |  | Wait until this JS function body (await allowed) returns a truthy value; the value is reported. |
+| `wait.settleMs` | number |  | Extra pause in ms after the condition holds (or alone, when no condition is given). |
+| `wait.timeout` | number |  | Overall budget in ms (default 30000). A timeout is reported, not thrown; the main action still runs. |
 | `querySelector` | string |  | CSS selector of one element to capture (document.querySelector). Omit for the whole viewport. |
 | `scrollTo` | boolean |  | With querySelector: scroll the element into view (centered) and wait for scrolling to settle first (default true). |
 | `fullPage` | boolean |  | Without querySelector: capture the entire scrollable page instead of the viewport (default false). |
@@ -511,7 +565,13 @@ Screenshot of this chat's Chrome page, returned INLINE as an image: the viewport
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
+| `wait` | object |  | Wait BEFORE acting: for text / a selector / a truthy expression (any of them), and/or a settle pause. Replaces `await new Promise(r => setTimeout(r, N))` inside expressions and repeated polling calls. |
+| `wait.text` | array of string |  | Wait until any of these texts appears on the page. |
+| `wait.selector` | string |  | Wait until this CSS selector matches at least one element. |
+| `wait.expression` | string |  | Wait until this JS function body (await allowed) returns a truthy value; the value is reported. |
+| `wait.settleMs` | number |  | Extra pause in ms after the condition holds (or alone, when no condition is given). |
+| `wait.timeout` | number |  | Overall budget in ms (default 30000). A timeout is reported, not thrown; the main action still runs. |
 | `uid` | string |  | Element uid from chrome_snapshot to capture just that element. |
 | `fullPage` | boolean |  | Capture the whole scrollable page (default false). |
 | `format` | `png` \| `jpeg` \| `webp` |  | Image format (default png). |
@@ -528,7 +588,13 @@ Screenshot of this chat's Chrome page written to a file (viewport, fullPage, or 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `path` | string | yes | Destination path (absolute, or relative to the session workspace); extension should match format. |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
+| `wait` | object |  | Wait BEFORE acting: for text / a selector / a truthy expression (any of them), and/or a settle pause. Replaces `await new Promise(r => setTimeout(r, N))` inside expressions and repeated polling calls. |
+| `wait.text` | array of string |  | Wait until any of these texts appears on the page. |
+| `wait.selector` | string |  | Wait until this CSS selector matches at least one element. |
+| `wait.expression` | string |  | Wait until this JS function body (await allowed) returns a truthy value; the value is reported. |
+| `wait.settleMs` | number |  | Extra pause in ms after the condition holds (or alone, when no condition is given). |
+| `wait.timeout` | number |  | Overall budget in ms (default 30000). A timeout is reported, not thrown; the main action still runs. |
 | `uid` | string |  | Element uid from chrome_snapshot to capture just that element. |
 | `fullPage` | boolean |  | Capture the whole scrollable page (default false). |
 | `format` | `png` \| `jpeg` \| `webp` |  | Image format (default png). |
@@ -546,7 +612,7 @@ Console messages (log/info/warn/error) buffered for this chat's Safari window (n
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 | `limit` | number |  | Maximum number of messages (default 100, max 500). |
 | `clear` | boolean |  | Clear the buffer after reading (default false). |
 | `level_filter` | array of `log` \| `info` \| `warn` \| `error` \| `debug` |  | Only these levels. |
@@ -561,7 +627,7 @@ Network requests recorded in this chat's Safari window (method, URL, status, tim
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 | `clear` | boolean |  | Clear the recorded list after reading. |
 | `since` | string |  | Only requests after this ISO timestamp. |
 
@@ -576,7 +642,7 @@ Full detail of one network request recorded in this chat's Safari window (header
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `request_id` | string | yes | Request id from safari_network_requests. |
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -588,7 +654,7 @@ List or answer a JavaScript dialog (alert/confirm/prompt) in this chat's Safari 
 |---|---|---|---|
 | `action` | `list` \| `accept` \| `dismiss` | yes | list = report open dialogs; accept = OK (with text for prompts); dismiss = Cancel. |
 | `text` | string |  | Text to enter for a prompt dialog when accepting. |
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -602,7 +668,7 @@ Resize this chat's Safari window viewport (CSS pixels).
 |---|---|---|---|
 | `width` | number | yes | Viewport width in CSS px. |
 | `height` | number | yes | Viewport height in CSS px. |
-| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit when this session has at most one safari window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (s:<session>:<window>) from safari_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -616,7 +682,7 @@ Console messages of this chat's Chrome page (paginated).
 | `pageSize` | number |  |  |
 | `pageIdx` | number |  |  |
 | `includeStackTraces` | boolean |  |  |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -629,7 +695,7 @@ Network requests of this chat's Chrome page (paginated; filter by resource type)
 | `resourceTypes` | array of string |  | Only these resource types (e.g. document, xhr, fetch, script, image). |
 | `pageSize` | number |  |  |
 | `pageIdx` | number |  |  |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -640,7 +706,7 @@ Full detail of one network request of this chat's Chrome page (headers, body, ti
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `reqid` | number | yes | Request id from chrome_network_requests. |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -652,7 +718,7 @@ Answer a JavaScript dialog (alert/confirm/prompt) open in this chat's Chrome pag
 |---|---|---|---|
 | `action` | `accept` \| `dismiss` | yes | accept = OK (with text for prompts); dismiss = Cancel. |
 | `text` | string |  | Text to enter for a prompt dialog when accepting. |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 
@@ -666,7 +732,7 @@ Resize this chat's Chrome page to the given CSS pixel size.
 |---|---|---|---|
 | `width` | number | yes | Page width in CSS px. |
 | `height` | number | yes | Page height in CSS px. |
-| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit when this session has at most one chrome window: it is used, or one is opened. |
+| `windowId` | string |  | Window id (c:<session>:<window>) from chrome_open. Omit to use this session's only window (one is opened if none), or its most recently used window when several are open. |
 
 **Returns:** text from the server, prefixed `[windowId]` (and `Opened …` when a window was auto-opened)
 

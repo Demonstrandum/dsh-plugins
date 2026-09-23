@@ -13,10 +13,16 @@
  *                          by pageId (windows share the session's cookies like
  *                          tabs of one browser).
  *
- * Tools take an optional `windowId`. When omitted, the browser must have zero
- * or one window open in the calling session: zero opens one, one is used, more
- * is an error naming the open ids. Ids are validated against the caller's
- * session, so no agent can reach another agent's window.
+ * Tools take an optional `windowId`. When omitted: zero windows opens one, one
+ * is used, several use the MOST RECENTLY USED one (the result says so and names
+ * the others). Ids are validated against the caller's session, so no agent can
+ * reach another agent's window.
+ *
+ * Chrome pages remember their last navigated URL. When the Chrome instance dies
+ * (crash, idle close of the process, `chrome-devtools-mcp` restart) a tool that
+ * names a lost window gets it REOPENED at that URL under the same id instead of
+ * an error (`resolved.reopened`), and a stale-pageId failure mid-call is retried
+ * once the same way (`recoverChrome`).
  *
  * An idle timer per session (reset by every tool call) closes everything after
  * `idleMs`; agent disposal and plugin unload close everything immediately.
@@ -49,7 +55,7 @@ export class BrowserSessions {
   session(agent, create = true) {
     let session = this.sessions.get(agent)
     if (session === undefined && create) {
-      session = { index: this.nextSession++, agent, safari: new Map(), chrome: { conn: undefined, pages: new Map() }, nextWindow: { safari: 0, chrome: 0 }, timer: undefined }
+      session = { index: this.nextSession++, agent, safari: new Map(), chrome: { conn: undefined, pages: new Map(), lost: new Map(), lastUsed: undefined }, safariLastUsed: undefined, nextWindow: { safari: 0, chrome: 0 }, timer: undefined }
       this.sessions.set(agent, session)
       this.options.trace({ event: 'session', id: agent.id, session: session.index })
     }
@@ -117,16 +123,27 @@ export class BrowserSessions {
       const { session, windowIndex } = this.parse(agent, 'safari', windowId)
       const window = session.safari.get(windowIndex)
       if (window === undefined) throw new Error(`Safari window "${windowId}" is not open. Open ids: ${this.listIds(agent, 'safari').join(', ') || '(none)'}; call safari_open for a new one.`)
+      session.safariLastUsed = windowIndex
       this.touch(agent)
       return { ...window, opened: false }
     }
     const session = this.session(agent)
-    if (session.safari.size === 0) return { ...(await this.openSafari(agent)), opened: true }
+    if (session.safari.size === 0) {
+      const window = await this.openSafari(agent)
+      session.safariLastUsed = [...session.safari.keys()].at(-1)
+      return { ...window, opened: true }
+    }
     if (session.safari.size === 1) {
       this.touch(agent)
+      session.safariLastUsed = session.safari.keys().next().value
       return { ...session.safari.values().next().value, opened: false }
     }
-    throw new Error(`This session has ${session.safari.size} Safari windows open (${this.listIds(agent, 'safari').join(', ')}); pass windowId.`)
+    // Several windows and no id: the most recently used one, and say so.
+    const index = session.safari.has(session.safariLastUsed) ? session.safariLastUsed : [...session.safari.keys()].at(-1)
+    session.safariLastUsed = index
+    this.touch(agent)
+    const window = session.safari.get(index)
+    return { ...window, opened: false, defaulted: { count: session.safari.size, others: this.listIds(agent, 'safari').filter(x => x !== window.id) } }
   }
 
   /** Close one Safari window, or all of the session's when windowId is omitted. */
@@ -165,8 +182,10 @@ export class BrowserSessions {
         void dispose?.() // per-instance scratch (Node localStorage file); runs for our close() and for crashes alike
         if (session.chrome.conn === conn) {
           session.chrome.conn = undefined
+          // Remember what was open so a tool naming one of these ids can reopen it in place.
+          for (const [index, page] of session.chrome.pages) session.chrome.lost.set(index, { id: page.id, lastUrl: page.lastUrl })
           session.chrome.pages.clear()
-          this.options.trace({ event: 'chrome-instance-lost', id: session.agent.id, session: session.index })
+          this.options.trace({ event: 'chrome-instance-lost', id: session.agent.id, session: session.index, lost: [...session.chrome.lost.keys()] })
         }
       },
       onError: (error) => this.options.logger.warn(`browser-automation: chrome (session ${session.index}) transport error: ${String(error)}`),
@@ -197,17 +216,50 @@ export class BrowserSessions {
     return { pageId, listing }
   }
 
-  /** Open a new Chrome page (window) in the caller's session. */
-  async openChrome(agent, url) {
+  /** Open a new Chrome page (window) in the caller's session; `reuseIndex` reopens a lost window under its old id. */
+  async openChrome(agent, url, reuseIndex) {
     const session = this.session(agent)
     const conn = await this.chromeInstance(session)
-    const { pageId, listing } = await this.newChromePage(conn, url ?? 'about:blank')
-    const windowIndex = session.nextWindow.chrome++
+    const target = url ?? 'about:blank'
+    const { pageId, listing } = await this.newChromePage(conn, target)
+    const windowIndex = reuseIndex ?? session.nextWindow.chrome++
     const id = this.id(session, 'chrome', windowIndex)
-    session.chrome.pages.set(windowIndex, { id, pageId })
+    session.chrome.pages.set(windowIndex, { id, pageId, lastUrl: target })
+    session.chrome.lost.delete(windowIndex)
+    session.chrome.lastUsed = windowIndex
     this.touch(agent)
-    this.options.trace({ event: 'chrome-open', id: agent.id, windowId: id, pageId })
+    this.options.trace({ event: reuseIndex === undefined ? 'chrome-open' : 'chrome-reopen', id: agent.id, windowId: id, pageId, url: target })
     return { id, pageId, conn, listing }
+  }
+
+  /** Record the URL a window navigated to (so a lost window can be reopened there). */
+  noteChromeUrl(agent, windowId, url) {
+    if (typeof url !== 'string' || url === '') return
+    const session = this.session(agent, false)
+    if (session === undefined) return
+    for (const page of session.chrome.pages.values()) if (page.id === windowId) page.lastUrl = url
+  }
+
+  /**
+   * A Chrome call failed with a stale page (the server reconnected or the page vanished): drop the
+   * bookkeeping for that window and reopen it at its last URL under the same id, once.
+   * @returns the reopened page, or undefined when the window was unknown
+   */
+  async recoverChrome(agent, windowId) {
+    const session = this.session(agent, false)
+    if (session === undefined) return undefined
+    const { windowIndex } = this.parse(agent, 'chrome', windowId)
+    const page = session.chrome.pages.get(windowIndex) ?? session.chrome.lost.get(windowIndex)
+    if (page === undefined) return undefined
+    session.chrome.pages.delete(windowIndex)
+    session.chrome.lost.set(windowIndex, { id: page.id, lastUrl: page.lastUrl })
+    if (session.chrome.conn !== undefined && session.chrome.pages.size === 0) {
+      const conn = session.chrome.conn
+      session.chrome.conn = undefined
+      try { await conn.close() } catch { /* the instance is already in trouble */ }
+    }
+    const reopened = await this.openChrome(agent, page.lastUrl, windowIndex)
+    return { ...reopened, opened: false, reopened: { url: page.lastUrl ?? 'about:blank' } }
   }
 
   /**
@@ -245,17 +297,41 @@ export class BrowserSessions {
     if (windowId !== undefined && windowId !== '') {
       const { session, windowIndex } = this.parse(agent, 'chrome', windowId)
       const page = session.chrome.pages.get(windowIndex)
-      if (page === undefined || session.chrome.conn === undefined) throw new Error(`Chrome window "${windowId}" is not open. Open ids: ${this.listIds(agent, 'chrome').join(', ') || '(none)'}; call chrome_open for a new one.`)
+      if (page === undefined || session.chrome.conn === undefined || session.chrome.conn.closed) {
+        // The instance died since the model last saw this id: reopen the window where it was.
+        const lost = session.chrome.lost.get(windowIndex) ?? (page !== undefined ? { id: page.id, lastUrl: page.lastUrl } : undefined)
+        if (lost !== undefined) {
+          const reopened = await this.openChrome(agent, lost.lastUrl, windowIndex)
+          return { ...reopened, opened: false, reopened: { url: lost.lastUrl ?? 'about:blank' } }
+        }
+        throw new Error(`Chrome window "${windowId}" is not open. Open ids: ${this.listIds(agent, 'chrome').join(', ') || '(none)'}; call chrome_open for a new one.`)
+      }
+      session.chrome.lastUsed = windowIndex
       this.touch(agent)
       return { ...page, conn: session.chrome.conn, opened: false }
     }
     const session = this.session(agent)
-    if (session.chrome.pages.size === 0) return { ...(await this.openChrome(agent)), opened: true }
+    if (session.chrome.pages.size === 0) {
+      // Nothing open. If the instance died with windows open, bring back the most recently used one.
+      const lostIndex = session.chrome.lost.has(session.chrome.lastUsed) ? session.chrome.lastUsed : [...session.chrome.lost.keys()].at(-1)
+      if (lostIndex !== undefined) {
+        const lost = session.chrome.lost.get(lostIndex)
+        const reopened = await this.openChrome(agent, lost.lastUrl, lostIndex)
+        return { ...reopened, opened: false, reopened: { url: lost.lastUrl ?? 'about:blank' } }
+      }
+      return { ...(await this.openChrome(agent)), opened: true }
+    }
     if (session.chrome.pages.size === 1) {
       this.touch(agent)
+      session.chrome.lastUsed = session.chrome.pages.keys().next().value
       return { ...session.chrome.pages.values().next().value, conn: session.chrome.conn, opened: false }
     }
-    throw new Error(`This session has ${session.chrome.pages.size} Chrome windows open (${this.listIds(agent, 'chrome').join(', ')}); pass windowId.`)
+    // Several windows and no id: the most recently used one, and say so.
+    const index = session.chrome.pages.has(session.chrome.lastUsed) ? session.chrome.lastUsed : [...session.chrome.pages.keys()].at(-1)
+    session.chrome.lastUsed = index
+    this.touch(agent)
+    const page = session.chrome.pages.get(index)
+    return { ...page, conn: session.chrome.conn, opened: false, defaulted: { count: session.chrome.pages.size, others: this.listIds(agent, 'chrome').filter(x => x !== page.id) } }
   }
 
   /** Close one Chrome window, or all of the session's; the instance quits with its last page. */
@@ -266,14 +342,17 @@ export class BrowserSessions {
     if (windowId !== undefined && windowId !== '') {
       const { windowIndex } = this.parse(agent, 'chrome', windowId)
       targets = session.chrome.pages.has(windowIndex) ? [windowIndex] : []
+      session.chrome.lost.delete(windowIndex) // closing a lost window forgets it
     } else {
       targets = [...session.chrome.pages.keys()]
     }
     const closed = []
     const conn = session.chrome.conn
+    if (windowId === undefined || windowId === '') session.chrome.lost.clear() // an explicit close-all forgets lost windows too
     for (const windowIndex of targets) {
       const page = session.chrome.pages.get(windowIndex)
       session.chrome.pages.delete(windowIndex)
+      session.chrome.lost.delete(windowIndex)
       if (conn !== undefined && !conn.closed && session.chrome.pages.size > 0) {
         try { await conn.callText('close_page', { pageId: page.pageId }) } catch (error) { this.options.logger.warn(`browser-automation: closing ${page.id} failed: ${String(error)}`) }
       }
@@ -354,7 +433,8 @@ export function selectedPageId(listing) {
  * @property {number} index
  * @property {object} agent
  * @property {Map<number, { id: string, conn: import('./servers.mjs').ServerConnection }>} safari
- * @property {{ conn: import('./servers.mjs').ServerConnection | undefined, pages: Map<number, { id: string, pageId: number }> }} chrome
+ * @property {{ conn: import('./servers.mjs').ServerConnection | undefined, pages: Map<number, { id: string, pageId: number, lastUrl?: string }>, lost: Map<number, { id: string, lastUrl?: string }>, lastUsed: number | undefined }} chrome
+ * @property {number | undefined} safariLastUsed
  * @property {{ safari: number, chrome: number }} nextWindow
  * @property {ReturnType<typeof setTimeout> | undefined} timer
  */

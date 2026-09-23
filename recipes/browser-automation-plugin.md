@@ -168,3 +168,40 @@ Every `safari_*`/`chrome_*` failure passes through `explainFailure` in
 | Leftover `/tmp/chrome-devtools-mcp-*/screenshot.png` (2–4 MB each) | Spilled captures from before the fix; the plugin now removes the per-call dir after reading. Safe to delete. |
 | `pnpm dsh web` terminal spammed per Chrome launch: `Update available`, `exposes content of the browser instance…`, `Performance tools may send trace URLs…`, `did not negotiate the MCP roots capability…`, `ExperimentalWarning: localStorage…` | Plugin build older than 2026-09-15. Since then: `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1`, `--no-performance-crux`, `roots` capability (session cwd) instead of `--allow-unrestricted-paths`, `NODE_OPTIONS=--localstorage-file=<tmp>/dsh-chrome-…-localstorage.json`, and piped+filtered stderr for the disclaimer (no flag exists). Table in the plugin README, "A quiet dsh web terminal". `chrome.quietStderr: false` shows everything again. Unfiltered lines appear as `browser-automation: chrome-devtools-mcp c:<n>: …` warnings and `chrome-stderr` trace events. |
 | `Update available: 1.8.0 -> 1.9.0` — what to update? | Since 2026-09-15 the server is a **pinned exact dependency** of the plugin (`plugins/browser-automation/package.json`, `chrome-devtools-mcp: "1.9.0"`), run by the host's `node` (`chromeServer()` in `index.js`; `chrome.command: ''`). Upgrade: edit the version, `pnpm install` in the plugin dir, `pnpm run check` (asserts exact pin + bin present, greps nothing else), skim the upstream CHANGELOG for `screenshot.js` (the ≥ 2 MB spill) and `McpPage.js` uid messages (our `FAILURE_HINTS` match them), restart `dsh web`. The global `/opt/homebrew/bin/chrome-devtools-mcp` (1.8.0) is no longer used; `npm rm -g chrome-devtools-mcp` is safe, or point `chrome.command` at it to compare versions. The banner itself is suppressed by `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS`. |
+
+## Round three (2026-09-23): waits, selector targets, window recovery
+
+`rsi/tool-analysis-03.md` made `chrome_evaluate_expression` the #2 tool of the
+whole corpus (621 calls in a week): **68 % of them carried an in-page
+`await new Promise(r => setTimeout(r, N))`** (median 3 s, p90 9.4 s; the 12–15 s
+ones hit `MCP error -32001: Request timed out`), 292 of 776 were repeats of the
+same normalised expression (hand-rolled polling), 45 % clicked via
+`el.click()` because `chrome_click` needs a snapshot uid first, and two error
+classes cost two extra calls each: `windowId … does not belong / is not open`
+after a Chrome restart (15×, always followed by `chrome_open` + re-evaluate) and
+`This session has N Chrome windows open; pass windowId` (8×, followed by
+`chrome_close`). What changed:
+
+| Finding | Change |
+|---|---|
+| in-page sleeps and repeated polls | `waiting.mjs`: one host-side engine — `{ text?, selector?, expression?, settleMs?, timeout? }` polled in ≤ 5 s in-page slices under a host deadline (default 30 s). Behind `chrome_wait_for` / `safari_wait_for` (now selector / expression / settle too, not just text) and a `wait` parameter on `*_evaluate_expression`, `*_get_screenshot`, `*_navigate`. Timeout is a **notice**, never an error; the main action still runs |
+| `bash → chrome_navigate → chrome_evaluate_expression [→ screenshot]` ritual (111 / 63) | `*_navigate` gains `wait` and `then` (JS body run in the loaded page); `*_get_screenshot` gains `wait` (summary in the NOTE) |
+| clicks via JS because uids need a snapshot | `chrome_click` / `chrome_fill` / `chrome_hover` accept `selector` (CSS) or `text` (visible) beside `uid` — found and acted on in the page (`el.click()`, value setter + input/change events, synthetic mouseover); `safari_click` / `safari_hover` / `safari_type_text` accept `selector`, resolved to the element's centre point for a real click |
+| lost windows after a Chrome restart | pages remember `lastUrl`; `resolveChrome` reopens a lost id at that URL **under the same id** (also with no `windowId` when the session had windows); stale-page failures mid-call (`No page found`, `Page ids have changed`, `Target closed`) are retried once after a reopen (`withChrome`); result prefix `Chrome had restarted; reopened c:0:4 at <url> (page state was lost).` |
+| several windows, no `windowId` → error | the most recently used window is used and the result names the others: `(2 windows open; used c:0:1, the most recently used — pass windowId for c:0:0)` |
+
+Verification: `tests/waiting.test.mjs` (7 unit tests, now part of `pnpm check`),
+the smoke's window-registry section (MRU default, lost bookkeeping), and
+`pnpm run live:wait` — headless Chrome against a local page whose `#ready`
+appears after 1.2 s: 24 checks incl. two SIGKILLs of the chrome-devtools-mcp
+child followed by a successful `chrome_evaluate_expression` on the old id
+(reopened in ~0.9 s). Restart `dsh web` to load it (host modules are not
+hot-reloaded). Pre-existing drift fixed on the way: the smoke's preflight
+needle (`Classic Safari…`).
+
+Measure next week with `transcript_tool_stats sessions:["*"] split_at:<today>
+sections:["all","args"] tools:["chrome_*","safari_*"]`: does the
+`setTimeout` share in `chrome_evaluate_expression` args drop, do `wait` /
+`then` / `selector` show up in the args section, do the `pass windowId` and
+`does not belong` error groups vanish, and does `navigate → evaluate →
+screenshot` shorten.
