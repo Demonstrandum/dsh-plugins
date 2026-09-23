@@ -325,7 +325,8 @@ can reproduce or maintain it:
   published pi-ai tarball, the compat-key drift between pi-ai versions vs the
   installed `ANTHROPIC_COMPAT_GATE`, validating a candidate file through
   `assertServiceable` before copying it live, and the picker-writes-the-default
-  trap.
+  trap. Same day: OpenAI GPT-6 Luna/Sol on the `openai` route (`"off": none`
+  wire value, Responses compat gate).
 - `apple-foundation-model-provider.md` — local models as DSH providers
   (LM Studio + Apple Foundation via AFM), the pi-ai token-budget trap,
   minimal presets, and the `enforce-model-preset` plugin.

@@ -269,6 +269,28 @@ What was different the second time, in the order it mattered:
    path; revisit the bump when the fork is next rebased/upgraded, and delete
    the whole `models` list at that point.
 
-7. Also new that day, not done: OpenAI `gpt-6-luna` / `gpt-6-sol`
-   (2026-09-22). The same recipe applies, but the openai route has ~40 shipped
-   ids to restate as bare ids and its own `RESPONSES_COMPAT_GATE`.
+7. **Same day, OpenAI: `gpt-6-luna` / `gpt-6-sol`** (2026-09-22; also only in
+   pi-ai ≥ 0.87.1). Done the same way under `providers.openai.models`, with
+   these differences:
+   - All 39 installed openai models speak `openai-responses`, so the new ids
+     inherit the protocol; `baseUrl` `https://api.openai.com/v1` comes from
+     the catalog provider. Generate the bare-id tail rather than typing it:
+     `getBuiltinModels('openai').map(m=>m.id)`.
+   - 0.87.1's entries: context **272000**, output 128000, `thinkingLevelMap`
+     `off: "none"` (reasoning *can* be turned off and sends `none`),
+     `minimal: null`, `low..max`. In `reasoningEfforts` that is
+     `"off": none` — a **string** wire value, not the valueless `off:` form.
+     Quote the key: `off` is a boolean in YAML 1.1. (DSH's settings-file
+     plugin parses with the `yaml` package, YAML 1.2, where it is a string
+     anyway — quoting costs nothing and survives a parser swap.)
+   - `RESPONSES_COMPAT_GATE` (0.85.1) offers only `supportsDeveloperRole`,
+     `supportsMaxOutputTokens`, `supportsStrictMode`,
+     `supportsLongCacheRetention`. 0.87.1's entry also sets
+     `supportsOpenAIGrammarTools`, `supportsAdditionalTools`,
+     `supportsToolSearch`, `supportsExplicitPromptCacheMode` (all
+     `'withhold'`) and `supportsMidConvoSystemMessages` (not in 0.85.1's
+     type). Only `supportsStrictMode: true` was written; the bare-id siblings
+     keep their full catalog compat through `...base`.
+   - Verified 41 models resolve with no errors; the picker grew from 70 to 72
+     entries. To *read* the picker without changing the default, drive it
+     from JS and never click a `menuitemradio` (see trap 5).
