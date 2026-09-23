@@ -373,7 +373,11 @@ can reproduce or maintain it:
   live profile row, the attempts that failed (incl. chrome-devtools-mcp's
   silent ≥ 2 MB screenshot spill-to-disk), and the failure-reporting layer
   (`explainFailure` / `FAILURE_HINTS`) every `safari_*`/`chrome_*` error
-  passes through.
+  passes through; "Round three" (2026-09-23, from `rsi/tool-analysis-03.md`):
+  the host-side wait engine (`waiting.mjs`; `wait` on evaluate / screenshot /
+  navigate, `then` on navigate, selector/expression `*_wait_for`),
+  `selector`/`text` targets for click/fill/hover, reopen-after-Chrome-restart
+  under the same window id, most-recently-used window default.
 - `client-bundle-rebuild-kills-pending-prompts.md` — `ask_user_question`
   fails with `NO_PROVIDER` ("no user-questions answerer accepted the
   request") seconds after a live-profile client bundle is rebuilt: the HMR
@@ -416,7 +420,13 @@ can reproduce or maintain it:
   `rsi/tool-analysis-02-validation.md` (bash mutates files 1.5× more than
   edit+write; `edit` 19 % error rate), how the read-guard integration works
   (`fs/edit-intent` waterfall + `fs/observed`), the headless e2e method, and
-  the Cordis `inject`/HarnessError/`oneOf`/glob-anchoring traps.
+  the Cordis `inject`/HarnessError/`oneOf`/glob-anchoring traps. §3a (round
+  two, 2026-09-23, from `rsi/tool-analysis-03.md`): `edit_many` `verify:
+  { command }` (edit + typecheck in one call), structural ops
+  (`insert_after` / `insert_before` / `replace_between` / `append`), unread or
+  changed files pass through when every anchor is unique else return the
+  matching regions and record the observation, freshness checked before any
+  write; `search` names missing roots with the cwd.
 - `import-claude-code-sessions.md` — migrating Supacode/Claude Code transcripts
   (and their project memory) into DSH sessions: why Supacode keeps no
   transcripts, the session-log frame contract, the converter tool in
