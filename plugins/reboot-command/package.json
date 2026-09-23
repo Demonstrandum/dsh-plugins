@@ -1,0 +1,49 @@
+{
+  "name": "tali-reboot-command",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin: /reboot \u2014 restart this dsh web server from inside a session. Host slash command (/reboot now|wait|cancel, logged like /compact) plus a confirmation dialog on the bare /reboot that lists every session a reboot would interrupt (running turn, background jobs, subagents, queued messages), says whether the always-on relay will bring DSH back, and offers Wait (reboot once every session is idle) beside Reboot now.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "reboot.mjs",
+    "lib/client.js",
+    "lib/client.js.map",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check index.js && node --check reboot.mjs && node --test tests/*.test.mjs",
+    "prepare": "node build.mjs"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:../../deepseek-harness/vendor/cordis",
+    "@deepseek-ai/dsh-api-session-controller": "link:../../deepseek-harness/packages/api/session-controller",
+    "@deepseek-ai/dsh-client-connection": "link:../../deepseek-harness/packages/client/connection",
+    "@deepseek-ai/dsh-client-ui-commands": "link:../../deepseek-harness/packages/client/ui-commands",
+    "@deepseek-ai/dsh-client-ui-layout": "link:../../deepseek-harness/packages/client/ui-layout",
+    "@deepseek-ai/dsh-client-ui-primitives": "link:../../deepseek-harness/packages/client/ui-primitives",
+    "@deepseek-ai/dsh-client-ui-renderer": "link:../../deepseek-harness/packages/client/ui-renderer",
+    "@deepseek-ai/dsh-client-ui-slots": "link:../../deepseek-harness/packages/client/ui-slots",
+    "@types/react": "~18.3.1",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.2"
+  }
+}

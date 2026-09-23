@@ -251,6 +251,28 @@ export function apply(ctx, config) {
   /** Where the Dock app goes when the tailnet is unreachable: the relay (or proxy) on loopback, token exchange included. */
   const fallbackUrl = () => `http://127.0.0.1:${String(publishedPort())}/`
 
+  // ---- sibling-plugin face ---------------------------------------------------
+  // Other HOST plugins learn whether an always-on relay fronts this DSH, i.e.
+  // whether a SIGTERM to this process is a restart (the relay starts dsh web
+  // again on the next connection) or a plain quit. Optional coupling:
+  // consumers `ctx.inject(['tailscaleRemoteRelay'], …)` so that part of them
+  // runs only while this plugin is loaded. First consumer: reboot-command
+  // (/reboot), which words its confirmation dialog on this answer.
+  ctx.provide('tailscaleRemoteRelay', {
+    instance,
+    /** publishPort 0 publishes the proxy directly: nothing restarts DSH. */
+    configured: config.publishPort !== 0,
+    /**
+     * Loopback URL of the relay. Any request to it while DSH is down makes the
+     * relay start dsh web — a page served straight from dsh's own port (not
+     * through the relay) pokes this after a self-restart, so the restart does
+     * not have to wait for the Dock app or a tailnet client to reconnect.
+     */
+    wakeUrl: config.publishPort !== 0 ? `http://127.0.0.1:${String(config.publishPort)}/` : undefined,
+    /** Live LaunchAgent facts (loaded, pid, listening on publishPort), or undefined when not configured. */
+    status: () => (config.publishPort !== 0 ? relayStatus({ listenPort: config.publishPort, instance }) : Promise.resolve(undefined)),
+  })
+
   const stopProxy = async () => {
     const current = proxy
     proxy = undefined

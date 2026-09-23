@@ -82,3 +82,12 @@
     # recipes/wait-tool-plugin.md
     - id: tali-wait-tool
       name: '/Users/USER/github/tali-dash-plugins/plugins/wait-tool/index.js'
+    # Under trial (2026-09-23): reboot-command — `/reboot` restarts this dsh web
+    # from inside a session: host command (/reboot now|wait|cancel, logged like
+    # /compact) + a dialog on the bare /reboot listing every session a reboot
+    # would interrupt, whether the relay brings DSH back (via
+    # dsh-tailscale-remote's `tailscaleRemoteRelay` service — its host half
+    # changed too, so this kickstart is what loads it), Wait (fire once every
+    # session is idle) and Reboot now. Recipe: recipes/reboot-command.md
+    - id: tali-reboot-command
+      name: '/Users/USER/github/tali-dash-plugins/plugins/reboot-command/index.js'

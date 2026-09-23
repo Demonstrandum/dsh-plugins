@@ -520,6 +520,19 @@ can reproduce or maintain it:
   throwaway-home + prefix-stripping-proxy verification of every fork feature,
   the plugin breakages it exposed (turnTail chain→list, `requestBody` on
   Fetch routes), and how to promote the trial branch.
+- `reboot-command.md` — `/reboot` restarts this `dsh web` from inside a
+  session (`reboot-command` plugin, both halves): the survey (no such
+  command in-tree or here; the restart action lived only in the
+  Tailscale-remote Server pane; the interruption logic only as move.ts's
+  private `blockersOf`), the host command `/reboot now|wait|cancel` logged
+  like `/compact` + a `commandUi.decorate` dialog on the bare form listing
+  every session with a running turn / queued messages / background jobs /
+  subagents, the host-side armed **Wait** (fires after 2 s of every session
+  idle), the relay verdict via `dsh-tailscale-remote`'s new optional
+  `tailscaleRemoteRelay` service (restart vs quit), the comeback poke to the
+  relay's loopback URL for pages served straight from dsh's port, the
+  preview verification (sleep-60 turn → Wait → clean exit → relay restart →
+  reload) and the two-step live install still pending.
 - `session-introspect-plugin.md` — model-facing `transcript_*` tools for
   reading *other* agents' transcripts and running tool-use studies (§2.7:
   `transcript_export`, `split_at`/`until` cohorts, adoption used/avail,

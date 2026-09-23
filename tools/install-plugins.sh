@@ -76,6 +76,7 @@ PLUGINS=(
   transcript-grace-margin
   phone-ui
   wait-tool
+  reboot-command
 )
 
 log() { printf '\033[1;34m▸\033[0m %s\n' "$*"; }

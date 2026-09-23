@@ -1,0 +1,6 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# No config: /reboot has no knobs. Relay awareness comes from the optional
+# sibling dsh-tailscale-remote (its `tailscaleRemoteRelay` service).
+- insert:
+    - id: tali-reboot-command
+      name: tali-reboot-command
