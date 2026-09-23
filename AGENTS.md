@@ -383,6 +383,9 @@ can reproduce or maintain it:
   upload of mark/font files, full editor), apply = reload because
   `index-inject` is emitted per request, one asset route instead of
   registration-time exact routes, and why a dev-overlay row shows no card.
+  Then the row `config` was retired: a brand is only ever a profile
+  (`cli.mjs import <dir|zip> --name X --apply` for provisioning; none active
+  = shipped look).
 - `browser-automation-plugin.md` — per-chat Safari Technology Preview /
   Chrome windows and the isolated page reader (`browser-automation` plugin):
   why a plugin and not MCP config, the STP `--mcp` facts that shape it, the

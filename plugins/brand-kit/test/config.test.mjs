@@ -9,7 +9,7 @@ const dir = mkdtempSync(join(tmpdir(), 'brand-kit-'))
 writeFileSync(join(dir, 'mark.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
 writeFileSync(join(dir, 'Face.woff2'), '')
 
-test('empty config is the shipped look', () => {
+test('empty profile is the shipped look', () => {
   const config = normalizeConfig(undefined)
   assert.equal(config.name, '')
   assert.equal(config.mark, '')
@@ -17,7 +17,7 @@ test('empty config is the shipped look', () => {
   assert.deepEqual(clientPayload(config), { name: '', headline: '', turnStatus: '', mark: null })
 })
 
-test('full config: files, faces, payload', () => {
+test('full profile (resolved form): files, faces, payload', () => {
   const config = normalizeConfig({
     name: 'Acme', mark: join(dir, 'mark.svg'), headline: 'Hello', turnStatus: 'Working...', hidePreviewBadge: true,
     accent: '#7678ed', fontsDir: dir, fonts: [{ file: 'Face.woff2', family: 'Face', weight: 300 }],

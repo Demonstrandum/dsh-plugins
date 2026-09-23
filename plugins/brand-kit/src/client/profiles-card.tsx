@@ -3,11 +3,11 @@
  * tali-brand-kit ▸ configuration). Manages brand profiles over the host
  * half's Fetch route (index.js API_PATH):
  *
- *   - which profile is active (or "plugin config" = the row's own config),
- *     with Apply reloading the page — the `<style>` and `global` rows are
+ *   - which profile is active (or none = the shipped DSH look), with Apply
+ *     reloading the page — the `<style>` and `global` rows are
  *     rendered into the boot document, so a change is a fresh page;
  *   - the profile list: duplicate, rename, export (.brand.zip), delete;
- *   - New (from what is active right now) and Import (a .brand.zip);
+ *   - New (a copy of the active profile, or the shipped look) and Import (a .brand.zip);
  *   - an editor for one profile: every config key of the plugin, with mark
  *     and font files uploaded straight into the profile directory.
  *
@@ -41,8 +41,6 @@ interface State {
   active: string
   effectiveSource: string
   error?: string
-  rowConfig: Profile
-  rowConfigured: boolean
   profilesDir: string
   profiles: { name: string, profile: Profile | null, error?: string }[]
   uploaded?: string
@@ -118,7 +116,7 @@ export function BrandProfilesCard() {
     location.reload()
   })
   const create = () => {
-    const name = prompt('Name for the new profile (copies what is active right now):')
+    const name = prompt(state?.active ? `Name for the new profile (a copy of "${state.active}"):` : 'Name for the new profile (starts from the shipped DSH look):')
     if (name === null || name.trim() === '') return
     void run(() => call('create', { name: name.trim() }))
   }
@@ -140,7 +138,7 @@ export function BrandProfilesCard() {
           disabled={busy}
           onChange={event => { void apply(event.target.value) }}
         >
-          <option value="">{state.rowConfigured ? 'Plugin config (profile patch)' : 'None (shipped DSH look)'}</option>
+          <option value="">None (shipped DSH look)</option>
           {state.profiles.map(row => <option key={row.name} value={row.name}>{row.name}</option>)}
         </select>
         <span className="bk-muted">changing reloads the page</span>
@@ -149,7 +147,7 @@ export function BrandProfilesCard() {
       {error !== null && <div className="bk-error">{error}</div>}
 
       <ul className="bk-list">
-        {state.profiles.length === 0 && <li className="bk-muted">No profiles yet — New copies the current look into an editable profile; Import takes a .brand.zip.</li>}
+        {state.profiles.length === 0 && <li className="bk-muted">No profiles yet — New starts one from the shipped look; Import takes a .brand.zip.</li>}
         {state.profiles.map(row => (
           <li key={row.name} className={`bk-item${row.name === state.active ? ' bk-active' : ''}`}>
             <span className="bk-name">{row.name}</span>
@@ -172,7 +170,7 @@ export function BrandProfilesCard() {
         ))}
       </ul>
       <div className="bk-row">
-        <button className="bk-btn bk-primary" disabled={busy} onClick={create}>New from current</button>
+        <button className="bk-btn bk-primary" disabled={busy} onClick={create}>{state.active ? 'New from current' : 'New'}</button>
         <button className="bk-btn" disabled={busy} onClick={() => { void importZip() }}>Import .brand.zip…</button>
         <span className="bk-muted">{state.profilesDir}</span>
       </div>

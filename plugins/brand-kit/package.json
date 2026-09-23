@@ -2,7 +2,7 @@
   "name": "tali-brand-kit",
   "version": "0.1.0",
   "private": true,
-  "description": "DSH client plugin: re-brand the Web GUI from config — a mark (SVG file) and a wordmark for the sidebar and the empty-session hero, custom web fonts served from a directory, typography, an accent colour that re-points the shipped blue ramp, and the two locale-owned strings (hero headline, running-turn status). No brand is built in.",
+  "description": "DSH client plugin: re-brand the Web GUI from brand profiles — directories of profile.json + assets managed from the Plugins panel (apply / new / edit / duplicate / export-import) or cli.mjs: mark, wordmark, web fonts, typography, an accent colour, the hero headline and turn-status texts. No brand is built in.",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -13,6 +13,7 @@
   "files": [
     "index.js",
     "profiles.mjs",
+    "cli.mjs",
     "lib/client.js",
     "lib/client.js.map",
     "cordis.patch.yml"
@@ -29,9 +30,10 @@
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "check": "node --check index.js && node --check profiles.mjs",
+    "check": "node --check index.js && node --check profiles.mjs && node --check cli.mjs",
     "test": "node --test test/*.test.mjs",
-    "prepare": "node build.mjs"
+    "prepare": "node build.mjs",
+    "profiles": "node cli.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "link:../../deepseek-harness/vendor/cordis",

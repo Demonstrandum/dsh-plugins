@@ -2,7 +2,7 @@
  * tali-brand-kit — browser half.
  *
  * Reads `globalThis.__DSH_BRAND_KIT__` (published by the host half from the
- * validated config) and occupies the shell's brand cells for the parts that
+ * active profile) and occupies the shell's brand cells for the parts that
  * are configured — all `single` slots, so registering replaces the shipped
  * fallback (whale / "DSH Local Build" + version chip) outright:
  *   - `sidebar.brand.mark`            the configured mark at the size the shell asks for

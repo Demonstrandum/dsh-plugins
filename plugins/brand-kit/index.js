@@ -1,16 +1,24 @@
 /**
  * tali-brand-kit — host half.
  *
- * Re-brand the DSH Web GUI from configuration. Nothing brand-specific is
- * built in: every asset is a file path, every string a config value, and
- * every part is optional ('' / absent = the shipped DSH look for that part).
+ * Re-brand the DSH Web GUI. Nothing brand-specific is built in, and the
+ * plugin row carries no brand either: a brand is a PROFILE — a directory
+ * `$DSH_HOME/brand-profiles/<name>/` holding `profile.json` plus the files it
+ * names (mark, fonts) — managed from the bundle's card in the Plugins panel
+ * (src/client/profiles-card.tsx), from `cli.mjs` for unattended provisioning,
+ * or by dropping the directory in place. Exactly one profile is active
+ * (`state.json`); none active = the shipped DSH look. The choice is read at
+ * every page render, so applying is a page reload, not a restart. An active
+ * profile that no longer validates is reported on the card and the shipped
+ * look stands in.
  *
+ * profile.json keys (every part optional; '' / absent = the shipped part):
  *   name              wordmark beside the sidebar mark. Occupying that cell
  *                     also removes the shipped product title AND the
  *                     build-version chip (they are one slot fallback).
- *   mark              absolute path to an SVG (or PNG) file shown in place of
- *                     the whale — sidebar brand row, collapsed rail, and the
- *                     empty-session hero. Served at /brand-kit/mark.<ext>.
+ *   mark              file name (in the profile) of an SVG or PNG shown in
+ *                     place of the whale — sidebar brand row, collapsed rail,
+ *                     and the empty-session hero.
  *   markMode          'mask' (default): the file is a CSS mask filled with the
  *                     text colour, so a monochrome mark follows the theme like
  *                     the shipped whale; 'image': drawn as-is (full-colour logos).
@@ -24,31 +32,25 @@
  *                     sidebar row, tabs and the send button take the colour.
  *                     Lighter/darker steps are `color-mix()`ed from it.
  *   accentDark        optional hex for the 600 step (hover/pressed); derived otherwise.
- *   fontsDir          directory served at /brand-kit/fonts/ (files listed in `fonts`).
- *   fonts             `@font-face` rows: [{ file, family, weight = 400, style = 'normal' }].
+ *   fonts             `@font-face` rows: [{ file, family, weight = 400, style = 'normal' }],
+ *                     files in the profile directory.
  *   brandFont         wordmark typography: { family, weight, size, lineHeight, letterSpacing, offsetY }
  *                     (the shell's brand-name box is 24px tall, 18px/600).
  *   headlineFont      headline typography: { family, weight, size, lineHeight }
  *                     (shipped: 26px/32 weight 500 in the system stack).
  *
- * PROFILES. Besides the row config, brands live as *profiles* under
- * `$DSH_HOME/brand-profiles/<name>/` (profiles.mjs: profile.json + assets,
- * portable, zip export/import) managed from the bundle's card in the Plugins
- * panel (src/client/profiles-card.tsx) over the Fetch route `API_PATH`. The
- * active profile (state.json) wins over the row config; '' = row config. The
- * choice is read at every page render, so applying is a page reload, not a
- * restart. An active profile that no longer validates is reported on the
- * card and the row config stands in.
+ * Plugin row config: `profilesDir` (absolute; '' = $DSH_HOME/brand-profiles).
  *
  * HOW. The browser half (src/client) occupies the shell's brand slots
  * (`sidebar.brand.mark`, `sidebar.brand.name`, `conversation.hero.brand.mark`
  * — all `single`, so registering replaces the fallback) and substitutes the
  * two locale-owned strings in place (they have no slot and their namespace
- * has one occupant). This half validates the config, serves the effective
- * brand's files on `API_PATH/asset` (only files the effective config names),
- * and contributes one `<style>` row (font faces, the classes the components
- * wear, the card chrome, the accent override) plus a `global` row the browser
- * half reads at apply time. URLs in the style row are document-relative
+ * has one occupant). This half validates profiles (`normalizeConfig` over the
+ * resolved, absolute-path form), serves the active profile's files on
+ * `API_PATH/asset` (only files the profile names), and contributes one
+ * `<style>` row (font faces, the classes the components wear, the card
+ * chrome, the accent override) plus a `global` row the browser half reads at
+ * apply time. URLs in the style row are document-relative
  * (`./api/brand-kit/…`), so they resolve under a path-stripping proxy mount
  * (`/dsh/`) as at the root. The accent block is `html>body[…]` so it outranks
  * the theme sheet, which the client loads AFTER index-inject rows (a
@@ -58,7 +60,7 @@
 import { existsSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join } from 'node:path'
-import { ProfileStore, defaultProfilesDir, portableProfile } from './profiles.mjs'
+import { ProfileStore, defaultProfilesDir } from './profiles.mjs'
 
 export const name = 'brand-kit'
 
@@ -328,23 +330,26 @@ export function assetPath(config, kind, file) {
  * @param {unknown} rawConfig - the row's config (see {@link normalizeConfig}).
  */
 export function apply(ctx, rawConfig) {
-  const rowConfig = normalizeConfig(rawConfig)
-  const store = new ProfileStore(defaultProfilesDir(), normalizeConfig)
+  const input = rawConfig !== null && typeof rawConfig === 'object' ? /** @type {Record<string, unknown>} */ (rawConfig) : {}
+  const profilesDir = input.profilesDir === undefined || input.profilesDir === '' ? defaultProfilesDir() : String(input.profilesDir)
+  if (!isAbsolute(profilesDir)) fail(`profilesDir must be an absolute path, got ${JSON.stringify(profilesDir)}`)
+  const store = new ProfileStore(profilesDir, normalizeConfig)
+  /** The shipped DSH look: what an empty profile resolves to. */
+  const SHIPPED_LOOK = normalizeConfig({})
 
   /**
    * What the page gets right now: the active profile when one is set and
-   * valid, else the plugin row's config. A profile that fails validation
-   * (edited by hand, file removed) is reported, not fatal — the row config
-   * stands in and the card shows the error.
+   * valid, else the shipped look. A profile that fails validation (edited by
+   * hand, file removed) is reported, not fatal.
    * @returns {{ source: string, config: BrandConfig, error?: string }}
    */
   function effective() {
     const active = store.active()
-    if (active === '') return { source: '', config: rowConfig }
+    if (active === '') return { source: '', config: SHIPPED_LOOK }
     try {
       return { source: active, config: store.read(active).config }
     } catch (error) {
-      return { source: '', config: rowConfig, error: `${active}: ${error instanceof Error ? error.message : String(error)}` }
+      return { source: '', config: SHIPPED_LOOK, error: `${active}: ${error instanceof Error ? error.message : String(error)}` }
     }
   }
 
@@ -368,8 +373,6 @@ export function apply(ctx, rawConfig) {
       active: store.active(),
       effectiveSource: current.source,
       error: current.error,
-      rowConfig: portableProfile(rowConfig),
-      rowConfigured: brandStyle(rowConfig) !== '' || rowConfig.name !== '' || rowConfig.turnStatus !== '',
       profilesDir: store.root,
       profiles: store.list().map(name => {
         try {
@@ -393,7 +396,8 @@ export function apply(ctx, rawConfig) {
       const file = params.get('f') ?? ''
       let config
       try {
-        config = source === '' ? rowConfig : store.read(source).config
+        if (source === '') return new Response('no such profile', { status: 404 })
+        config = store.read(source).config
       } catch {
         return new Response('no such profile', { status: 404 })
       }
@@ -430,9 +434,11 @@ export function apply(ctx, rawConfig) {
           case 'apply': store.setActive(name); break
           case 'save': store.write(name, await request.json()); break
           case 'create': {
+            // Empty body: copy the active profile when there is one, else start from the shipped look.
             const body = await request.text()
-            if (body === '') store.createFromConfig(name, effective().config)
-            else store.write(name, JSON.parse(body))
+            if (body !== '') store.write(name, JSON.parse(body))
+            else if (store.active() !== '') store.duplicate(store.active(), name)
+            else store.write(name, {})
             break
           }
           case 'duplicate': store.duplicate(name, params.get('to') ?? ''); break
@@ -465,7 +471,7 @@ export function apply(ctx, rawConfig) {
 
   const current = effective()
   const parts = [
-    current.source === '' ? 'row config' : `profile ${JSON.stringify(current.source)}`,
+    current.source === '' ? 'no active profile (shipped look)' : `profile ${JSON.stringify(current.source)}`,
     current.config.name === '' ? null : `name ${JSON.stringify(current.config.name)}`,
     current.config.mark === '' ? null : `mark ${basename(current.config.mark)} (${current.config.markMode})`,
     current.config.accent === '' ? null : `accent ${current.config.accent}`,
