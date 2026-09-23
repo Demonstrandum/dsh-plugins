@@ -397,15 +397,19 @@ can reproduce or maintain it:
   navigate, `then` on navigate, selector/expression `*_wait_for`),
   `selector`/`text` targets for click/fill/hover, reopen-after-Chrome-restart
   under the same window id, most-recently-used window default.
-- `chat-title-plugin.md` — the agent names the chat, early (`chat-title`
-  plugin, host-only): a `rename_chat` tool over `ctx.sessionTitle.rename`
-  (slug/natural styling, refuses in subagents), a MUST-worded system-prompt
-  section and a constant runtime-context nudge while the title is still
-  fallback/provider; why `rename` can only write `source.kind: 'user'` and
-  how `tool/result.meta.chatTitle` tells the agent's own titles from the
-  human's (never overridden); the headless throwaway-home verification
-  (rename in step 1 with the first `read`; a bare "hi" leaves it armed), the
-  live bundle install taking effect without a restart, and the pnpm-12
+- `chat-title-plugin.md` — the agent as reviewer of the automatic chat title
+  (`chat-title` plugin, host-only): a `rename_chat` tool over
+  `ctx.sessionTitle.rename` in the titler's style (read from the
+  `session-title-llm` loader row; refuses in subagents), an 80-word
+  system-prompt rule and a runtime-context line carrying the current
+  automatic title (placeholder vs provider wording), both gated on the
+  agent's scope seeing the tool so no-tools presets get nothing; why `rename`
+  can only write `source.kind: 'user'` and how `tool/result.meta.chatTitle`
+  tells the agent's own titles from the human's (never overridden); how the
+  design moved from "agent names every chat first" to reviewer after the
+  comparison with `session-title-llm`; the headless throwaway-home
+  verification (titler on: no rename; titler disabled: placeholder replaced),
+  the live bundle install taking effect without a restart, and the pnpm-12
   `packageManager` temp-dir trap (`node --import tsx/esm apps/cli/src/bin.ts`
   from the checkout root).
 - `client-bundle-rebuild-kills-pending-prompts.md` — `ask_user_question`

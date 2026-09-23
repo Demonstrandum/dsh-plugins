@@ -1,6 +1,14 @@
 /**
- * tali-chat-title: lets the agent name the chat, and has it do so at the
- * start, as soon as the conversation says what it is about.
+ * tali-chat-title: lets the agent rename the chat, as a reviewer of the
+ * automatic title rather than a second titler.
+ *
+ * Division of labour with the in-tree session-title service and its LLM
+ * titler (`session-title-llm`, mounted in `base`): the titler names every
+ * chat from the first message with a cheap side request; this plugin shows
+ * the agent that title and lets it rename only when the title is wrong or
+ * generic (a greeting-only first message) or when the subject moves. The
+ * two never race: `sessionTitle.rename` aborts in-flight automatic
+ * generation and, being `user`-sourced, stops later automatic retitles.
  *
  * Three pieces, all host-side (no client bundle):
  *
@@ -9,13 +17,15 @@
  *                          applying the configured style (slug / natural).
  *                          Refuses in subagent sessions and never overrides a
  *                          title the human chose (sidebar Rename, `slug:` prefix).
- *   system-prompt section  the rule: call rename_chat as the first tool call
- *                          once the user's message states the task.
- *   runtime-context nudge  while the title is still automatic (none, fallback,
- *                          provider), every request carries one reminder line;
- *                          it disappears once the agent or the user names the
- *                          chat. Constant text, so it costs one snapshot change
- *                          to appear and one to go, not one per turn.
+ *   system-prompt section  the rule: review the automatic title, rename only
+ *                          when it is wrong, generic, or stale.
+ *   runtime-context line   while the title is automatic (fallback / provider),
+ *                          the runtime context carries the current title so
+ *                          the agent can judge it. Empty before the titler has
+ *                          written anything and once the agent or the user has
+ *                          named the chat. Changes at most three times per
+ *                          chat (fallback, provider, gone); each change is one
+ *                          appended snapshot message.
  *
  * Config (all optional):
  *
@@ -23,7 +33,7 @@
  *   style: slug             # slug (foo-bar-baz) | natural (a short phrase)
  *   maxWords: 5             # word cap for slugs / guidance for phrases
  *   promptHint: true        # the system-prompt section
- *   nudge: true             # the runtime-context reminder while untitled
+ *   nudge: true             # the runtime-context line while the title is automatic
  */
 
 import Schema from '@deepseek-ai/schemastery'
@@ -36,28 +46,83 @@ export const inject = ['tools', 'sessionTitle', 'systemPrompt']
 
 export const Config = Schema.object({
   toolName: Schema.string().default('rename_chat'),
-  style: Schema.union(['slug', 'natural']).default('slug'),
-  maxWords: Schema.number().min(1).max(12).default(5),
+  /** `inherit` reads `style` from the session-title-llm row so agent titles match automatic ones. */
+  style: Schema.union(['inherit', 'slug', 'natural']).default('inherit'),
+  /** Word cap for slugs / phrase length guidance; unset = the titler row's `targetWords`, else 5. */
+  maxWords: Schema.number().min(1).max(12),
   promptHint: Schema.boolean().default(true),
   nudge: Schema.boolean().default(true),
 })
 
+/** Loader row names of the in-tree LLM titlers (`base` mounts the first-prompt one as id `session-title-llm`). */
+const TITLER_ROW = /(^|\/)dsh-session-title(-first-prompt|-all-prompts)?-llm$/
+
 /**
- * The system-prompt section: the standing rule the model works under.
- * @param {{ toolName: string, style: 'slug' | 'natural', maxWords: number }} config
+ * Read the automatic titler's `style` and `targetWords` from its loader row,
+ * so the agent's titles come out in the same form as the automatic ones.
+ * @param {any} ctx
+ * @returns {{ style?: 'slug' | 'natural', targetWords?: number, found: boolean }}
  */
-export function promptSection(config) {
-  return `Chat title: every chat starts under a placeholder title. Call ${config.toolName} as your first tool call once the user's message says what the chat is about. `
-    + `If the first message is only a greeting, call it the moment the goal is clear. Title: ${styleGuidance(config)} `
-    + 'Rename again only if the subject of the chat changes. Never override a title the user set themselves.'
+export function titlerSettings(ctx) {
+  const loader = ctx.get?.('loader')
+  if (loader === undefined || typeof loader.entries !== 'function') return { found: false }
+  for (const entry of loader.entries()) {
+    const options = entry?.options
+    if (typeof options?.name !== 'string' || !TITLER_ROW.test(options.name)) continue
+    const raw = options.config
+    const config = raw !== null && typeof raw === 'object' ? raw : {}
+    return {
+      found: true,
+      ...(config.style === 'slug' || config.style === 'natural' ? { style: config.style } : {}),
+      ...(Number.isInteger(config.targetWords) && config.targetWords > 0 ? { targetWords: config.targetWords } : {}),
+    }
+  }
+  return { found: false }
 }
 
 /**
- * The runtime-context reminder shown while the chat is still untitled by the agent.
- * @param {{ toolName: string }} config
+ * Resolve the effective title style: the row's own settings, else the
+ * titler's, else the in-tree default (`natural`, 5 words).
+ * @param {any} ctx
+ * @param {{ toolName: string, style: 'inherit' | 'slug' | 'natural', maxWords?: number }} config
+ * @returns {{ toolName: string, style: 'slug' | 'natural', maxWords: number, inherited: boolean }}
  */
-export function nudgeText(config) {
-  return `Chat title: not set yet. If the conversation says what this chat is about, call ${config.toolName} now, before other tools.`
+export function resolveStyle(ctx, config) {
+  const titler = titlerSettings(ctx)
+  const style = config.style === 'inherit' ? (titler.style ?? 'natural') : config.style
+  const maxWords = config.maxWords ?? titler.targetWords ?? 5
+  return { toolName: config.toolName, style, maxWords: Math.max(1, Math.min(12, maxWords)), inherited: config.style === 'inherit' && titler.found }
+}
+
+/**
+ * The system-prompt section: the standing rule the model works under.
+ * @param {{ toolName: string, style: 'slug' | 'natural', maxWords: number }} config - resolved style
+ */
+export function promptSection(config) {
+  return `Chat title: the chat is titled automatically from the first message; the current title appears in the runtime context. `
+    + `Call ${config.toolName} when that title is wrong or generic (for example after a greeting-only first message), `
+    + 'when a more accurate name suggests itself within the first few turns, or when the subject of the chat changes. '
+    + `Title: ${styleGuidance(config)} Never override a title the user set themselves.`
+}
+
+/**
+ * The runtime-context line shown while the chat carries an automatic title:
+ * the title itself, so the agent can judge it. Empty before the automatic
+ * titler has written anything (no title to review yet) and once the agent or
+ * the user has named the chat. The two automatic sources read differently:
+ * the service's `fallback` (the first words of the first message) is a
+ * placeholder to replace; a `provider` title (the LLM titler) is a real
+ * attempt to keep unless it is wrong.
+ * @param {{ toolName: string }} config
+ * @param {'none' | 'automatic' | 'agent' | 'user'} kind - from classifyTitle
+ * @param {{ title: string, source: { kind: string } } | undefined} current - the standing title snapshot
+ */
+export function nudgeText(config, kind, current) {
+  if (kind !== 'automatic' || current === undefined) return ''
+  if (current.source.kind === 'fallback') {
+    return `Chat title: "${current.title}" is a placeholder (the first words of the first message). Call ${config.toolName} with a real title once you know what this chat is about.`
+  }
+  return `Automatic chat title: "${current.title}". Keep it if it describes this chat; call ${config.toolName} if it is wrong or generic, or if the work so far suggests a more accurate name.`
 }
 
 /**
@@ -69,7 +134,7 @@ export function nudgeText(config) {
 export function createRenameTool(ctx, config, applied) {
   return defineTool({
     name: config.toolName,
-    description: `Rename this chat (the title shown in the sidebar). Title: ${styleGuidance(config)} Refuses if the user renamed the chat themselves or when called from a subagent.`,
+    description: `Rename this chat (the title shown in the sidebar). Use it when the automatic title is wrong or generic, when the work so far suggests a more accurate name, or when the subject of the chat changes. Title: ${styleGuidance(config)} Refuses if the user renamed the chat themselves or when called from a subagent.`,
     parameters: {
       title: { type: 'string', required: true, description: 'The new chat title: what this chat is about.' },
     },
@@ -120,39 +185,51 @@ function renderResult(value, config) {
   return `Chat is already named "${value.title}".`
 }
 
-export function apply(ctx, config) {
+export function apply(ctx, rawConfig) {
+  // Style is read once, when this row loads; a later change to the titler row's
+  // `style` takes effect on the next reload of this row.
+  const config = resolveStyle(ctx, rawConfig)
   /** session → the title this process last applied there (supplements the durable tool/result meta). */
   const applied = new WeakMap()
   const tool = createRenameTool(ctx, config, applied)
   ctx.tools.register(tool)
 
-  /** Only the top-level agent of a chat sees the title rule; subagents cannot rename and must not be nagged. */
-  const isTopLevel = (context) => {
+  /**
+   * Whether this assembly should carry the title text at all: a top-level
+   * agent (subagents cannot rename) whose scope can see the tool. A preset
+   * without tools (`ctx.tools.restrict({ allow: [] })`, the shape of the
+   * no-tools presets used for models without tool use) hides it, and with it
+   * the section and the nudge; an instruction to call a tool the model cannot
+   * call would only confuse it.
+   */
+  const applies = (context) => {
     const session = context?.agent?.session
-    return session !== undefined && session.header?.parentSession === undefined
+    return session !== undefined
+      && session.header?.parentSession === undefined
+      && ctx.tools.get(config.toolName, context.scope) !== undefined
   }
 
-  if (config.promptHint) {
+  if (rawConfig.promptHint) {
     ctx.systemPrompt.section({
       name: 'tool:chat-title',
       order: ctx.systemPrompt.getSectionOrder('TOOL_SESSION_QUERY') + 50,
-      text: (context) => (isTopLevel(context) && ctx.tools.get(config.toolName, context.scope) !== undefined ? promptSection(config) : ''),
+      text: (context) => (applies(context) ? promptSection(config) : ''),
     })
   }
 
-  if (config.nudge) {
-    const nudge = nudgeText(config)
+  if (rawConfig.nudge) {
     ctx.systemPrompt.context({
       name: 'chat-title:nudge',
       order: ctx.systemPrompt.getContextOrder('APPROVAL_POLICY') + 20,
       text: (context) => {
-        if (!isTopLevel(context)) return ''
+        if (!applies(context)) return ''
         const session = context.agent.session
-        const kind = classifyTitle(ctx.sessionTitle.get(session), agentTitlesOf(session.snapshotEvents()), applied.get(session))
-        return kind === 'none' || kind === 'automatic' ? nudge : ''
+        const current = ctx.sessionTitle.get(session)
+        const kind = classifyTitle(current, agentTitlesOf(session.snapshotEvents()), applied.get(session))
+        return nudgeText(config, kind, current)
       },
     })
   }
 
-  ctx.logger.info(`chat-title: registered ${config.toolName} (style ${config.style}, promptHint ${config.promptHint}, nudge ${config.nudge})`)
+  ctx.logger.info(`chat-title: registered ${config.toolName} (style ${config.style}${config.inherited ? ' from the session-title-llm row' : ''}, maxWords ${config.maxWords}, promptHint ${rawConfig.promptHint}, nudge ${rawConfig.nudge})`)
 }

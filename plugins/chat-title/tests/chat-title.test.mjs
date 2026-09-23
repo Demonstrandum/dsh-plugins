@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { agentTitlesOf, classifyTitle, slugify, styleTitle } from '../title.mjs'
-import { Config, apply, createRenameTool, nudgeText, promptSection } from '../index.js'
+import { Config, apply, createRenameTool, nudgeText, promptSection, resolveStyle, titlerSettings } from '../index.js'
 
 test('slugify mirrors the in-tree slug form', () => {
   assert.equal(slugify('Fix the Login Redirect loop!', 5), 'fix-the-login-redirect-loop')
@@ -40,11 +40,33 @@ test('classifyTitle distinguishes none / automatic / agent / user', () => {
 test('Config defaults', () => {
   const config = new Config({})
   assert.equal(config.toolName, 'rename_chat')
-  assert.equal(config.style, 'slug')
-  assert.equal(config.maxWords, 5)
+  assert.equal(config.style, 'inherit')
+  assert.equal(config.maxWords, undefined)
   assert.equal(config.promptHint, true)
   assert.equal(config.nudge, true)
   assert.throws(() => new Config({ style: 'shouty' }))
+})
+
+/** A fake loader whose entries carry the given rows (`options.name` / `options.config`). */
+const fakeLoader = (rows) => ({ entries: () => rows.map(options => ({ options })) })
+
+test('style is inherited from the session-title-llm row, else natural; own settings win', () => {
+  const noLoader = { get: () => undefined }
+  assert.deepEqual(titlerSettings(noLoader), { found: false })
+  assert.deepEqual(resolveStyle(noLoader, new Config({})), { toolName: 'rename_chat', style: 'natural', maxWords: 5, inherited: false })
+
+  const slugRow = { get: (n) => (n === 'loader' ? fakeLoader([
+    { name: '@deepseek-ai/dsh-persona', config: { style: 'slug' } },
+    { name: '@deepseek-ai/dsh-session-title-first-prompt-llm', config: { style: 'slug', targetWords: 4 } },
+  ]) : undefined) }
+  assert.deepEqual(titlerSettings(slugRow), { found: true, style: 'slug', targetWords: 4 })
+  assert.deepEqual(resolveStyle(slugRow, new Config({})), { toolName: 'rename_chat', style: 'slug', maxWords: 4, inherited: true })
+  // Own style / maxWords override the row.
+  assert.deepEqual(resolveStyle(slugRow, new Config({ style: 'natural', maxWords: 6 })), { toolName: 'rename_chat', style: 'natural', maxWords: 6, inherited: false })
+
+  // A titler row without style (the in-tree default): natural, its targetWords.
+  const plainRow = { get: () => fakeLoader([{ name: '@deepseek-ai/dsh-session-title-llm', config: { targetWords: 5 } }]) }
+  assert.deepEqual(resolveStyle(plainRow, new Config({})), { toolName: 'rename_chat', style: 'natural', maxWords: 5, inherited: true })
 })
 
 /** A fake session + sessionTitle service pair with the real rename semantics that matter here. */
@@ -69,7 +91,8 @@ function fakeWorld({ parentSession, initial } = {}) {
   return { session, sessionTitle, events, commit, ctx: { sessionTitle, logger: { info() {} } } }
 }
 
-const config = new Config({})
+/** Resolved style the tool and prompt tests run under: slug, 5 words (the live profile's shape). */
+const config = { toolName: 'rename_chat', style: 'slug', maxWords: 5, inherited: false }
 
 test('rename_chat applies the slug style and records the applied title', async () => {
   const w = fakeWorld({ initial: { title: 'please fix my', source: { kind: 'fallback' } } })
@@ -131,23 +154,39 @@ test('apply registers the tool, the section and the nudge; the nudge clears once
       getContextOrder: () => 115,
     },
   }
-  apply(ctx, config)
+  // The raw row config; with no loader in this ctx it resolves to natural/5, so pin slug/5 explicitly.
+  apply(ctx, new Config({ style: 'slug', maxWords: 5 }))
   assert.deepEqual(registered.map(t => t.name), ['rename_chat'])
   assert.equal(sections.length, 1)
   assert.equal(contexts.length, 1)
   const assemble = { agent: { session: w.session } }
   assert.equal(sections[0].text(assemble), promptSection(config))
-  assert.match(sections[0].text(assemble), /Call rename_chat as your first tool call/)
-  assert.ok(sections[0].text(assemble).split(/\s+/).length < 80, 'the section stays short')
-  assert.equal(contexts[0].text(assemble), nudgeText(config))
+  assert.match(sections[0].text(assemble), /when that title is wrong or generic/)
+  assert.match(sections[0].text(assemble), /more accurate name suggests itself/)
+  assert.ok(sections[0].text(assemble).split(/\s+/).length < 90, 'the section stays short')
+  // No title yet (the automatic titler has not written): nothing to review, no line.
+  assert.equal(contexts[0].text(assemble), '')
   // No agent (e.g. an agentless assembly) and subagents get nothing.
   assert.equal(sections[0].text({}), '')
   assert.equal(contexts[0].text({}), '')
   const sub = fakeWorld({ parentSession: 'p' })
   assert.equal(sections[0].text({ agent: { session: sub.session } }), '')
-  // Automatic title: still nudged. Agent-applied title: silent. User title: silent.
+  // Automatic title (fallback, then provider): shown for review. Agent-applied title: silent. User title: silent.
+  w.sessionTitle.get = () => ({ title: 'please fix my', source: { kind: 'fallback' } })
+  assert.equal(contexts[0].text(assemble), nudgeText(config, 'automatic', { title: 'please fix my', source: { kind: 'fallback' } }))
+  assert.match(contexts[0].text(assemble), /"please fix my" is a placeholder/)
   w.sessionTitle.get = () => ({ title: 'auto', source: { kind: 'provider' } })
-  assert.equal(contexts[0].text(assemble), nudgeText(config))
+  assert.match(contexts[0].text(assemble), /Automatic chat title: "auto"\. Keep it/)
+  const sub2 = fakeWorld({ parentSession: 'p' })
+  sub2.sessionTitle.get = () => ({ title: 'auto', source: { kind: 'provider' } })
+  assert.equal(contexts[0].text({ agent: { session: sub2.session } }), '')
+  // A scope that cannot see the tool (a no-tools preset: ctx.tools.restrict({ allow: [] })) gets neither text.
+  const hidden = ctx.tools.get
+  ctx.tools.get = () => undefined
+  assert.equal(sections[0].text(assemble), '')
+  assert.equal(contexts[0].text(assemble), '')
+  ctx.tools.get = hidden
+  assert.match(contexts[0].text(assemble), /Automatic chat title/)
   const value = await registered[0].execute({ title: 'named now' }, { agent: { session: w.session }, signal: new AbortController().signal })
   w.commit(registered[0], { title: 'named now' }, value)
   w.sessionTitle.get = () => ({ title: 'named-now', source: { kind: 'user' } })

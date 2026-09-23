@@ -1,10 +1,15 @@
 # tali-chat-title
 
-Lets the agent name the chat, and has it do so at the start, as soon as the
-conversation says what it is about. Host-only
-(no client bundle); everything goes through the in-tree session-title service
-(`ctx.sessionTitle`), so the sidebar, the `session/title` log event and the
-built-in automatic titler all see the same title.
+Lets the agent rename the chat, as a reviewer of the automatic title rather
+than a second titler. The in-tree LLM titler (`session-title-llm`, mounted in
+`base`) names every chat from the first message with a cheap side request;
+this plugin shows the agent that title in the runtime context and has it
+rename only when the title is wrong or generic (a greeting-only first
+message), when a more accurate name suggests itself in the first few turns,
+or when the subject moves. Titles come out in the titler's configured style.
+Host-only (no client bundle); everything goes through the session-title
+service (`ctx.sessionTitle`), so the sidebar, the `session/title` log event
+and the titler all see the same title.
 
 ## What the model gets
 
@@ -41,35 +46,47 @@ human's and is never overridden.
 
 ### System-prompt section (`promptHint`)
 
-A `tool:chat-title` section placed after the tool sections, about 60 words:
+A `tool:chat-title` section placed after the tool sections, 80 words:
 
-> Chat title: every chat starts under a placeholder title. Call rename_chat as
-> your first tool call once the user's message says what the chat is about.
-> If the first message is only a greeting, call it the moment the goal is
-> clear. Title: 5 or fewer lowercase words joined by hyphens, specific to the
-> task (fix-login-redirect), not generic (help-request). Rename again only if
-> the subject of the chat changes. Never override a title the user set
-> themselves.
+> Chat title: the chat is titled automatically from the first message; the
+> current title appears in the runtime context. Call rename_chat when that
+> title is wrong or generic (for example after a greeting-only first
+> message), when a more accurate name suggests itself within the first few
+> turns, or when the subject of the chat changes. Title: 5 or fewer lowercase
+> words joined by hyphens, specific to the task (fix-login-redirect), not
+> generic (help-request). Never override a title the user set themselves.
 
-The style sentence follows `style`/`maxWords`. Only top-level agents see the
-section (subagents cannot rename, so they are not told to). Kept short on
-purpose: one clear instruction is followed more reliably than a long one,
-and the nudge below carries the timing.
+The style sentence follows the resolved style (see Config). The section is
+emitted only when the assembling agent is top-level (subagents cannot
+rename) and its scope can see the tool: a preset without tools, such as the
+`minimal-no-tools` preset used for Apple Foundation and other models without
+tool use, restricts the agent's tool view (`ctx.tools.restrict({ allow: [] })`),
+so neither the section nor the line below is sent there.
 
-### Runtime-context nudge (`nudge`)
+### Runtime-context line (`nudge`)
 
-While the chat still carries only an automatic title (none / fallback /
-provider), every request's runtime-context snapshot carries one extra line:
-*"Chat title: not set yet. If the conversation says what this chat is about,
-call rename_chat now, before other tools."* The text is constant, so it
-appears once and disappears once (one snapshot change each) rather than
-changing the prompt every turn. It clears both when the agent names the chat
-and when the human does.
+While the chat carries an automatic title, the runtime-context snapshot
+carries the title itself so the agent can judge it. The two automatic
+sources read differently:
 
-Measured (headless, Claude via OpenRouter, 2026-09-24): with a first message
-that states a task the model calls `rename_chat` in its first step, alongside
-its first `read`; with a bare "hi there" it answers without renaming and the
-nudge stays for the next turn.
+- fallback (the first words of the first message, written immediately):
+  *"Chat title: "Please read notes.py and tel" is a placeholder (the first
+  words of the first message). Call rename_chat with a real title once you
+  know what this chat is about."*
+- provider (the LLM titler's result, a few seconds later): *"Automatic chat
+  title: "Summarize contents of notes.py file". Keep it if it describes this
+  chat; call rename_chat if it is wrong or generic, or if the work so far
+  suggests a more accurate name."*
+
+Before any title exists there is nothing to review and the line is empty; it
+is empty again once the agent or the human has named the chat. The text
+changes at most three times per chat (fallback, provider, gone), each an
+appended snapshot message. Same gating as the section.
+
+Measured (headless, Claude via OpenRouter, 2026-09-24), same task prompt:
+with the titler on, the agent read the file and kept "Summarize contents of
+notes.py file" (no `rename_chat` call); with the titler row disabled, it saw
+the placeholder line and renamed to "Summarize notes.py contents".
 
 ## Config
 
@@ -77,11 +94,19 @@ nudge stays for the next turn.
 - id: tali-chat-title
   config:
     toolName: rename_chat   # model-facing tool name
-    style: slug             # slug (foo-bar-baz, matches the fork's session-title-llm `style: slug`) | natural
-    maxWords: 5             # slug word cap / phrase-length guidance (1 to 12)
+    style: inherit          # inherit (default) | slug | natural
+    # maxWords: 5           # slug word cap / phrase length; unset = the titler row's targetWords, else 5
     promptHint: true        # the system-prompt section
-    nudge: true             # the runtime-context reminder while untitled
+    nudge: true             # the runtime-context line while the title is automatic
 ```
+
+`style: inherit` reads `style` (and, when `maxWords` is unset, `targetWords`)
+from the loader row of the in-tree titler (`@deepseek-ai/dsh-session-title-llm`,
+`-first-prompt-llm` or `-all-prompts-llm`, whatever the profile mounts), so
+agent titles and automatic titles come out in one form: `slug` on a profile
+that sets the fork's `style: slug`, `natural` (the in-tree default) otherwise.
+The values are read when this row loads; after changing the titler row's
+style, reload this row (or restart) for the agent's titles to follow.
 
 ## Install / try
 
@@ -97,9 +122,14 @@ method (throwaway home + forwarded credentials) and the traps hit on the way.
 
 ## Interaction with the other title plugins
 
-- `session-title-llm` / `session-title-first-prompt-llm` (in-tree): still
-  runs on the first prompt; the agent's `rename_chat` usually lands within
-  seconds after it and supersedes it. Both write `session/title`; latest wins.
+- `session-title-llm` / `session-title-first-prompt-llm` (in-tree): does the
+  naming; this plugin reviews. The sequence in a chat: fallback title at the
+  first prompt, provider title a few seconds later, and the agent sees each
+  in its next request's runtime context. If the agent renames while the
+  titler is still running, `sessionTitle.rename` aborts that generation, and
+  the `user`-sourced result stops later automatic retitles, so the two never
+  overwrite each other. With the `all-prompts` variant the same holds: once
+  the agent has renamed, the titler no longer schedules.
 - `session-title-slug` (this repo): a `some-slug: ` prompt prefix renames at
   send time with `source.kind: 'user'` and no `meta.chatTitle`, so this
   plugin treats it as a human title and the model is told to leave it alone,

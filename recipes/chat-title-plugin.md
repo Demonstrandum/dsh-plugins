@@ -28,24 +28,39 @@ Checked against the source checkout (`deepseek-harness/`, fork branch
 
 Three pieces, one plugin, all host-side:
 
-1. **`rename_chat` tool**: styles the title (`slug` default, matching the
-   live profile's slug convention; `natural` optional), calls
+1. **`rename_chat` tool**: styles the title in the titler's style (read from
+   the `session-title-llm` loader row via `ctx.loader.entries()`; `natural`
+   when the row sets none, which is the in-tree default), calls
    `ctx.sessionTitle.rename` on the agent's own top-level session, and
    records the applied title in `tool/result.meta.chatTitle`.
-2. **System-prompt section**: one paragraph of about 75 words ("Call
-   rename_chat as your first tool call once the user's message says what the
-   chat is about"), with the greeting exception ("call it the moment the goal
-   is clear"), the style sentence and the never-override-the-user rule.
-   Static text; only top-level agents see it. A first draft was twice as
-   long, restated the timing five ways and used capitalised MUST/FIRST;
-   the maintainer asked why, and it was cut. One clear instruction is followed more
-   reliably than a long one, and the nudge carries the timing anyway.
-3. **Runtime-context nudge**: while the title source is `fallback` /
-   `provider` (or none), one constant line in the runtime-context snapshot.
-   Constant on purpose: including the current placeholder title would make
-   the snapshot change when the LLM titler lands (fallback → provider) and
-   cost a cache break per change; the constant text costs exactly two
-   (appear / disappear) per chat.
+2. **System-prompt section**: one paragraph of 80 words. The agent is a
+   reviewer: rename when the automatic title is wrong or generic, when a
+   more accurate name suggests itself within the first few turns, or when
+   the subject changes. Only emitted when the agent's scope can see the
+   tool (no-tools presets hide it).
+3. **Runtime-context line**: the current automatic title, worded as a
+   placeholder to replace (service `fallback`) or as a result to keep unless
+   wrong (`provider`). Empty before any title and after a `user`-sourced one.
+
+### How the design got here
+
+- First draft: the agent names every chat as its first tool call, under a
+  135-word MUST-worded section and a constant "not named yet" nudge. It
+  worked (rename in step 1 beside the first `read`), but duplicated the
+  in-tree titler, which names every chat anyway with a cheap side request:
+  for a task-stating first message the two produced near-identical titles
+  (`summarize-notes-py` vs "Summarize contents of notes.py file"), and the
+  agent's copy cost main-loop tokens.
+- The maintainer asked why the paragraph was so long; it was cut to one paragraph
+  (behaviour unchanged, re-measured).
+- The maintainer asked how this differs from `session-title-llm`, then to make the two
+  integrate. Result: the reviewer design above. A coworker added: respect
+  the titler's `style` flag, tell the agent to rename of its own accord when
+  a better name appears in the first few turns, and turn the prompt off for
+  providers without tool use (Apple Foundation). All three are in.
+- The nudge text was first kept constant to avoid snapshot changes; showing
+  the title costs at most three snapshot messages per chat and is what makes
+  review possible, so the title is shown.
 
 ### Why "user"-sourced titles need a plugin-side distinction
 
@@ -106,19 +121,21 @@ zstd -dc $H/sessions/*/session-*/session.v3.jsonl.zstd \
   | grep -o '"type":"\(session/title\|tool/call\)".\{0,160\}'
 ```
 
-Observed (Claude via OpenRouter): `session/title` fallback (seq 14) →
-provider title from `session-title-first-prompt-llm` (seq 16) → **`tool/call
-rename_chat {"title":"summarize-notes-py"}` in turn 1 step 1, issued together
-with the first `read`** → `session/title` `{"source":{"kind":"user"}}` →
-`tool/result` with `meta: {"chatTitle":"summarize-notes-py"}`. The first
-runtime-context snapshot (seq 10) listed sections
-`sandbox:policy, approval:policy, chat-title:nudge`; the second (seq 25,
-after the rename) had only the first two. A second run with the prompt
-`hi there` produced no `rename_chat` call and a plain greeting reply: the
-greeting exception works and the nudge stays for the next turn.
-Both runs were repeated after the prompt text was cut to one paragraph
-(same result: `rename_chat` in turn 1 step 1 beside the first `read`; no
-tool call on the greeting).
+Observed with the reviewer design (Claude via OpenRouter, 2026-09-24):
+
+- Titler on: fallback title (seq 14), provider title "Summarize contents of
+  notes.py file" (seq 16), then the agent's `read` and answer with **no
+  `rename_chat` call**. The step-1 runtime context had no title line (the
+  titler had not written yet); step 2's carried the provider title for review.
+- Titler disabled (`- id: session-title-llm` / `disabled: true` in the
+  overlay): only the fallback "Please read /tmp/…/notes.py and tel" existed;
+  the agent saw the placeholder line and called `rename_chat` with
+  "Summarize notes.py contents" (natural style: the throwaway home has no
+  `style: slug` patch, so `inherit` resolved to the in-tree default).
+
+The first-draft design (agent names every chat first) was measured the same
+way: `rename_chat` in turn 1 step 1 beside the first `read`; a bare
+`hi there` produced no tool call.
 
 ## Troubleshooting
 
