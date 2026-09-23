@@ -1,9 +1,15 @@
 # Recipe: adding a just-released Anthropic model before the pi-ai catalog ships it
 
-Reproducible steps to make a newly released Anthropic model (here: **Claude
-Fable 5.1**, released 2026-09-01) selectable in the DSH model picker while the
-installed `@earendil-works/pi-ai` catalog still lags it. Verified 2026-09-03
-against DSH with pi-ai 0.84.2 and the Web GUI.
+Reproducible steps to make a newly released Anthropic model selectable in the
+DSH model picker while the installed `@earendil-works/pi-ai` catalog still
+lags it. Done twice so far:
+
+- **Claude Fable 5.1** (released 2026-09-01) — verified 2026-09-03 against
+  pi-ai 0.84.2. The worked example below.
+- **Claude Opus 5.5** (released 2026-09-22) — done 2026-09-23 against pi-ai
+  0.85.1 (the checkout's pin), which by then shipped `claude-fable-5-1` itself
+  but not `claude-opus-5-5`; pi-ai ships that from **0.87.1**. See
+  "Second round" at the end for what differed.
 
 ## How it works (and why the model was missing)
 
@@ -168,3 +174,101 @@ pinned `thinkingLevelMap`, and the fable-5 compat block; the bare-id
   switch it to `claude-fable-5-1` to make new sessions default to it.
 - Same recipe applies to any catalog provider (OpenAI, etc.) — only the
   restated id list and the compat gate fields differ per protocol.
+
+## Second round (2026-09-23): Claude Opus 5.5 on pi-ai 0.85.1
+
+What was different the second time, in the order it mattered:
+
+1. **Check what the installed catalog already has before touching anything.**
+   The checkout had moved to pi-ai `^0.85.1`, whose catalog *does* ship
+   `claude-fable-5-1` (with `supportsMidConvoEffort: true` on top of what the
+   hand-written block declared). So the Fable 5.1 override was demoted to a
+   bare id and only the genuinely missing model got a full entry. List ids
+   with:
+
+   ```bash
+   cd <dsh-checkout>/packages/llm/llm-pi-ai && node -e "
+   import('@earendil-works/pi-ai/providers/all').then(({getBuiltinModels}) =>
+     console.log(getBuiltinModels('anthropic').map(m=>m.id).join('\n')))"
+   grep '"version"' node_modules/@earendil-works/pi-ai/package.json   # the pin (0.85.1)
+   ```
+
+2. **Get the spec from the newest published pi-ai, not only models.dev.**
+   `npm view @earendil-works/pi-ai time --json | tail` showed 0.87.1
+   (2026-09-22); `npm pack @earendil-works/pi-ai@0.87.1` and read
+   `package/dist/providers/data/anthropic.json` (shape:
+   `{ "anthropic-messages": { "<id>": Model } }`). It carries the exact
+   `thinkingLevelMap` and `compat` the maintainers chose, which models.dev
+   does not (models.dev showed `reasoning_options` low..max and a `fast`
+   mode — DSH has no notion of the latter). "Opus 5.5 max" is the `max`
+   effort of `claude-opus-5-5`, not a separate model id; 0.87.1 lists no
+   `-max` variant anywhere.
+
+3. **Compat keys drift between pi-ai versions — mirror only what the
+   installed gate offers.** 0.87.1's entry has
+   `supportsMidConvoEffort`, `supportsMidConvoSystemMessages`,
+   `supportsMidConvoToolChanges`, `forceAdaptiveThinking`,
+   `supportsTemperature: false`, `supportsStrictTools`. In 0.85.1's
+   `AnthropicMessagesCompat` the two `supportsMidConvo*Messages/ToolChanges`
+   keys do not exist and `supportsMidConvoEffort` is `'withhold'` in
+   `ANTHROPIC_COMPAT_GATE` (`catalog.ts`), so any of them fails route
+   resolution loudly. Offered keys as of 0.85.1: `supportsEagerToolInputStreaming`,
+   `supportsLongCacheRetention`, `supportsCacheControlOnTools`,
+   `supportsTemperature`, `forceAdaptiveThinking`, `allowEmptySignature`,
+   `supportsStrictTools`. The block written:
+
+   ```yaml
+   - id: claude-opus-5-5
+     name: Claude Opus 5.5
+     contextWindow: 1000000
+     maxTokens: 128000
+     input: [ text, image ]
+     reasoningEfforts: { low: low, medium: medium, high: high, xhigh: xhigh, max: max }
+     compat:
+       forceAdaptiveThinking: true
+       supportsStrictTools: true
+       supportsTemperature: false
+   - id: claude-fable-5-1     # now a bare id: inherits the 0.85.1 catalog entry
+   ```
+
+   The resulting `thinkingLevelMap` (`off: null, minimal: null, low..max`) is
+   byte-identical to 0.87.1's shipped entry.
+
+4. **Validate the candidate on a copy, then copy it over the live file.**
+   Besides the `resolveRouteModels` check in step 3 above, run the whole
+   section through the plugin's own schema and the strict check the settings
+   writer applies (`Config` is a schemastery validator — construct it, there
+   is no `.parse`):
+
+   ```bash
+   cd <dsh-checkout>/packages/llm/llm-pi-ai && node --experimental-strip-types -e "
+   const { Config, assertServiceable } = await import('./src/config.ts')
+   const { load } = await import('js-yaml'); const { readFileSync } = await import('node:fs')
+   const s = load(readFileSync('/tmp/settings.candidate.yaml','utf8'))
+   assertServiceable(new Config(s['llm-pi-ai'])); console.log('ok')"
+   ```
+
+   Then `cp /tmp/settings.candidate.yaml ~/.dsh/settings.yaml` (keep a
+   backup). The route re-registered live; the new model was in the picker of
+   a freshly opened GUI tab with no restart and no page reload.
+
+5. **Verification trap: the composer's model picker writes
+   `agent-default-model`.** Selecting the new model in a *New Session*
+   composer to inspect its effort menu persisted `model: claude-opus-5-5` to
+   `settings.yaml` server-side — it is not a per-tab preference. Switch it
+   back through the same picker (or edit the file) if you only meant to look.
+   The effort menu for Opus 5.5 showed Default / Low / Medium / High / Xhigh /
+   Max and no Off, as intended.
+
+6. **Alternative not taken: bumping the checkout's pi-ai to `^0.87.1`.** That
+   would serve the catalog natively (with real cost data) but is a fork
+   dependency change (package.json + lockfile), needs a typecheck against a
+   two-minor-version jump (new compat keys mean the drift gates in
+   `catalog.ts` must be reclassified — that is exactly what they are for),
+   and a live `dsh web` restart. The settings escape hatch is the zero-restart
+   path; revisit the bump when the fork is next rebased/upgraded, and delete
+   the whole `models` list at that point.
+
+7. Also new that day, not done: OpenAI `gpt-6-luna` / `gpt-6-sol`
+   (2026-09-22). The same recipe applies, but the openai route has ~40 shipped
+   ids to restate as bare ids and its own `RESPONSES_COMPAT_GATE`.

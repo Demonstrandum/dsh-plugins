@@ -320,7 +320,12 @@ can reproduce or maintain it:
   in `$DSH_HOME/settings.yaml`, and why downscaling beats offloading for the
   prompt cache.
 - `anthropic-new-model-before-catalog.md` — using a model newer than the
-  installed catalog.
+  installed pi-ai catalog via the `settings.yaml` `models` list (Fable 5.1 on
+  0.84.2; Opus 5.5 on 0.85.1, 2026-09-23): reading the spec out of the newest
+  published pi-ai tarball, the compat-key drift between pi-ai versions vs the
+  installed `ANTHROPIC_COMPAT_GATE`, validating a candidate file through
+  `assertServiceable` before copying it live, and the picker-writes-the-default
+  trap.
 - `apple-foundation-model-provider.md` — local models as DSH providers
   (LM Studio + Apple Foundation via AFM), the pi-ai token-budget trap,
   minimal presets, and the `enforce-model-preset` plugin.
