@@ -8,7 +8,9 @@
 #   # or, from a clone:  tools/bootstrap-mac.sh [flags]
 #
 # Flags
-#   --dir DIR             where the tali-dash-plugins clone goes (asked otherwise; default ~/github/tali-dash-plugins)
+#   --checkout-parent DIR the directory your git checkouts live in; the clone goes to DIR/tali-dash-plugins
+#                         (asked otherwise; default ~/github)
+#   --dir DIR             the clone's full path instead (default ~/github/tali-dash-plugins); overrides --checkout-parent
 #   --yes                 take every default without asking (headless / VM runs)
 #   --dry-run             print what each step would do, change nothing
 #   --skip STEP[,STEP]    leave steps out;  --only STEP[,STEP]  run just these
@@ -81,6 +83,7 @@ set -euo pipefail
 
 REPO="https://github.com/taliesinb/dsh-plugins"
 DIR=""
+PARENT=""
 YES=0
 DRY=0
 APPS=1
@@ -106,6 +109,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --dir) DIR="$2"; shift 2 ;;
     --dir=*) DIR="${1#--dir=}"; shift ;;
+    --checkout-parent) PARENT="$2"; shift 2 ;;
+    --checkout-parent=*) PARENT="${1#--checkout-parent=}"; shift ;;
     --yes|-y) YES=1; shift ;;
     --dry-run) DRY=1; shift ;;
     --skip) SKIP="$SKIP,$2"; shift 2 ;;
@@ -138,7 +143,7 @@ while [ $# -gt 0 ]; do
     --repo) REPO="$2"; shift 2 ;;
     --repo=*) REPO="${1#--repo=}"; shift ;;
     --list) printf '%s\n' "${STEPS[@]}"; exit 0 ;;
-    -h|--help) sed -n "2,73p" "$0"; exit 0 ;;
+    -h|--help) sed -n "2,75p" "$0"; exit 0 ;;
     *) echo "unknown argument: $1 (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -317,7 +322,7 @@ if wants preflight; then
   [ -d /Applications/DSH.app ] && FOUND+=("/Applications/DSH.app exists (stock Desktop app)")
   [ -f "$HOME/dsh/checkout/apps/cli/lib/bin.js" ] && FOUND+=("a deploy-remote.sh tree exists at ~/dsh")
   command -v dsh >/dev/null 2>&1 && FOUND+=("a 'dsh' command is on PATH ($(command -v dsh))")
-  CAND="${DIR:-$HOME/github/tali-dash-plugins}"
+  CAND="${DIR:-${PARENT:-$HOME/github}/tali-dash-plugins}"; CAND="${CAND/#\~/$HOME}"
   [ -f "$CAND/deepseek-harness/apps/cli/lib/bin.js" ] && FOUND+=("a built DSH checkout exists at $CAND")
   for f in "${FOUND[@]-}"; do [ -n "$f" ] && warn "$f"; done
 
@@ -645,7 +650,12 @@ fi
 # ===========================================================================
 if wants clone; then
   banner "Clone tali-dash-plugins (fork inside as the submodule deepseek-harness/)"
-  [ -n "$DIR" ] || ask DIR "Directory for the checkout" "$HOME/github/tali-dash-plugins"
+  # The repo name is fixed; only WHERE the checkouts live is a choice (~/github, ~/code, ~/src…). --dir names the
+  # full path for the rare other layout.
+  if [ -z "$DIR" ]; then
+    [ -n "$PARENT" ] || ask PARENT "Directory your git checkouts live in (the clone goes to <it>/tali-dash-plugins)" "$HOME/github"
+    DIR="${PARENT/#\~/$HOME}/tali-dash-plugins"
+  fi
   DIR="${DIR/#\~/$HOME}"
   if [ -d "$DIR/.git" ] || [ -f "$DIR/.git" ]; then
     ok "existing clone at $DIR — adopting it"
@@ -743,7 +753,7 @@ if wants clone; then
     done
   fi
 else
-  [ -n "$DIR" ] || DIR="$HOME/github/tali-dash-plugins"; DIR="${DIR/#\~/$HOME}"
+  [ -n "$DIR" ] || DIR="${PARENT:-$HOME/github}/tali-dash-plugins"; DIR="${DIR/#\~/$HOME}"
 fi
 CK="$DIR/deepseek-harness"
 [ "$DRY" = 1 ] || [ -f "$CK/package.json" ] || die "fork submodule not present at $CK (run the clone step)"

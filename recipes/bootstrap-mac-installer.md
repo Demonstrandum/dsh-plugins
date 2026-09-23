@@ -7,7 +7,7 @@ single interactive, idempotent Terminal script:
 ```sh
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/taliesinb/dsh-plugins/main/tools/bootstrap-mac.sh)"
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/taliesinb/dsh-plugins/main/tools/bootstrap-mac.sh)" bootstrap --thin-client <host>
-# from a clone: pnpm bootstrap  /  tools/bootstrap-mac.sh [--dir DIR] [--yes] [--dry-run] [--skip STEP,…] [--only STEP,…]
+# from a clone: pnpm bootstrap  /  tools/bootstrap-mac.sh [--checkout-parent DIR | --dir DIR] [--yes] [--dry-run] [--skip STEP,…] [--only STEP,…]
 #               [--no-apps] [--no-tailnet] [--no-apple] [--rebuild] [--no-replace] [--force]
 #               [--thin-client HOST] [--thin-client-user U] [--tailscale-timeout S] [--repo URL] [--list]
 # on another Mac over ssh (copies the script, runs it with a tty when you have one, --yes otherwise):
