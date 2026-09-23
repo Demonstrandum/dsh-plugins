@@ -1,0 +1,45 @@
+{
+  "name": "tali-brand-kit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH client plugin: re-brand the Web GUI from config — a mark (SVG file) and a wordmark for the sidebar and the empty-session hero, custom web fonts served from a directory, typography, an accent colour that re-points the shipped blue ramp, and the two locale-owned strings (hero headline, running-turn status). No brand is built in.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lib/client.js",
+    "lib/client.js.map",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "check": "node --check index.js",
+    "test": "node --test test/*.test.mjs",
+    "prepare": "node build.mjs"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:../../deepseek-harness/vendor/cordis",
+    "@deepseek-ai/dsh-client-ui-conversation": "link:../../deepseek-harness/packages/client/ui-conversation",
+    "@deepseek-ai/dsh-client-ui-renderer": "link:../../deepseek-harness/packages/client/ui-renderer",
+    "@deepseek-ai/dsh-client-ui-sidebar": "link:../../deepseek-harness/packages/client/ui-sidebar",
+    "@deepseek-ai/dsh-client-ui-slots": "link:../../deepseek-harness/packages/client/ui-slots",
+    "@types/react": "~18.3.1",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.2"
+  }
+}
