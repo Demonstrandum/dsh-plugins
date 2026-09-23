@@ -313,6 +313,11 @@ can reproduce or maintain it:
 
 ### Recipe index
 
+- `nixos-thin-client.md` — the root Nix flake and Linux Electron wrapper:
+  packaged runtime, saved server and desktop launcher, automatic TCP over
+  WebSocket forwarding, Chromium's loopback proxy rule, occupied-port HMR,
+  and Node/Electron integration checks without a live DSH.
+
 - `anthropic-many-image-2000px-limit.md` — "many-image requests: 2000 pixels"
   400 after the 21st image of a session: Anthropic's >20-image per-dimension
   cap vs DSH's pixel-count-only `requestImagePixelBudget`, diagnosing from

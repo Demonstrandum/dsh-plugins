@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'">
+<title>Connect to DSH</title>
+<style>
+  :root { color-scheme: light dark; font: 16px system-ui, sans-serif; }
+  body { max-width: 34rem; margin: 3rem auto; padding: 0 2rem; }
+  h1 { font-size: 1.6rem; }
+  label, input { display: block; }
+  input { box-sizing: border-box; width: 100%; margin: .6rem 0 1rem; padding: .7rem; font: inherit; }
+  button { padding: .6rem 1.3rem; font: inherit; cursor: pointer; }
+  #error { color: light-dark(#b00020, #ffb4ab); }
+</style>
+<h1>Connect to DSH</h1>
+<p>Connect Tailscale, then enter your remote instance’s URL.</p>
+<form>
+  <label for="url">Server URL</label>
+  <input id="url" type="url" placeholder="https://host.example.ts.net/dsh/user/" required autofocus>
+  <button>Connect</button>
+  <p id="error" role="alert"></p>
+</form>
+<script src="setup.js"></script>
+</html>
