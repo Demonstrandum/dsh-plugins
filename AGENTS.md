@@ -402,6 +402,18 @@ can reproduce or maintain it:
   manifest cannot fix it (web-app scope is host-only, `window.open` never
   leaves the app) and the `foreign-link-opener` plugin that hands such links
   to real Safari via `open -a`.
+- `dock-app-integrated-titlebar.md` — the Dock app's title bar folded into
+  the page (2026-09-22): the shipped client already carries the whole
+  macOS-desktop layout behind `<html data-platform="darwin">` (Electron's
+  hiddenInset strip, header controls for the closed sidebar, drag regions),
+  so the wrapper sets the mark and supplies what WKWebView lacks — a
+  JS→`performDrag` bridge (no `-webkit-app-region`), traffic lights moved to
+  (16, 18) by resizing the title-bar container, the private `_mouseInGroup:`
+  override for their rollover, `drawsBackground = false` over an
+  `NSVisualEffectView` (View ▸ Window Material: Frosted / Liquid Glass), a
+  thinner sidebar tint; how to test with neither Accessibility nor Screen
+  Recording (own-window snapshot via `kill -USR1`, a test-copy bundle, a
+  hit-test probe) and why snapshots cannot show the material.
 - `dock-app-via-tailnet.md` — the DSH Dock app as a native WKWebView wrapper
   (`dsh-tailscale-remote/dock-app`) admitted by this Mac's own Tailscale
   identity, plus the always-on relay LaunchAgent that starts `dsh web` on a
