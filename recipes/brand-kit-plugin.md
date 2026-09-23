@@ -60,6 +60,39 @@ private directory of assets and one YAML block in the profile patch.
    staleness; the browser half hot-loaded. Editing an already-loaded
    `index.js` still needs a `dsh web` restart.
 
+## Profiles in the GUI (same day, second cut)
+
+"Every knob configurable" invited the next question — a UI to add, duplicate,
+export and modify brands. Built as the bundle's configuration card in the
+Plugins panel (`plugins.bundle.config`, the seam `<private-plugin>`
+uses) over a Fetch route, with profiles as directories under
+`$DSH_HOME/brand-profiles/`. Findings:
+
+- **Apply = reload, not restart.** `webserver/index-inject` is emitted fresh
+  for every index render (`collectIndexInjections`), so the host reads
+  `state.json` per request and the card just calls `location.reload()`.
+- **Serve assets through one Fetch route, not exact routes per file** — the
+  active brand changes at runtime and `ctx.webServer.register` rows are
+  registration-time. `/api/brand-kit/asset?s=&k=&f=` serves only files the
+  effective config names, so it is not a directory listing.
+- **Portable JSON**: profile.json keeps file *names*; `resolveProfile()` makes
+  them absolute and runs the same `normalizeConfig`, so profile validation and
+  row-config validation cannot drift.
+- **Import validates in a staging directory** (`<name>.importing-<pid>`) and
+  renames into place; a bad archive leaves nothing behind (tested).
+- **fflate** for zip (pure JS, tiny; Node has no archive API). Ordinary
+  dependency, not a link.
+- **The Plugins panel lists bundles only**: a plugin loaded as a dev-overlay
+  row has no page and hence no card. Trial it with `dsh plugin --profile web
+  add` into the throwaway home (row config then goes in the home's profile
+  patch as an id-targeted override).
+- **Card chrome without CSS modules**: the classes (`bk-*`) ride the plugin's
+  own host style row — theme tokens, no inline styles, no cross-plugin import.
+- Verified end to end on a throwaway home: create → upload mark + font →
+  save → apply (page shows the profile) → export zip (3 entries) → import as
+  a second profile → invalid save rejected with a message → card edit +
+  Save-and-reload → Active switched back to the row config.
+
 ## Sequence on a Mac
 
 ```sh
@@ -88,6 +121,7 @@ look pixel-for-pixel from config (verified in the live GUI: name, mask mark
 |---|---|
 | Load fails with `brand-kit: mark file not found` / `fontsDir not found` | paths must be absolute and exist on the *server's* machine; fix the profile patch (it reloads live) |
 | Wordmark shows but in the wrong font | `fonts[].family` must equal the family used in `brandFont.family`; check `document.fonts` status in the console — `unloaded` means the URL 404s (file name typo) |
+| Card missing on the bundle's page | the plugin is loaded as a dev-overlay row, not a bundle — the Plugins panel lists bundles only |
 | Accent unchanged | the config block is a later layer and REPLACES the whole `config` — a partial block drops `accent`; or the theme sheet won: check that the row's `html>body` rule is present in `<head>` |
 | Headline/turn status not swapped | the shipped string changed upstream (the observer matches it verbatim: see `SHIPPED` in index.js) |
 | Mark invisible in `mask` mode | the SVG has no filled geometry (strokes only) or a `viewBox` that crops it; try `markMode: image` to see the file as-is |

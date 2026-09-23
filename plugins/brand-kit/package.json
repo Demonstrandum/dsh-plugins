@@ -12,6 +12,7 @@
   },
   "files": [
     "index.js",
+    "profiles.mjs",
     "lib/client.js",
     "lib/client.js.map",
     "cordis.patch.yml"
@@ -28,18 +29,22 @@
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "check": "node --check index.js",
+    "check": "node --check index.js && node --check profiles.mjs",
     "test": "node --test test/*.test.mjs",
     "prepare": "node build.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "link:../../deepseek-harness/vendor/cordis",
     "@deepseek-ai/dsh-client-ui-conversation": "link:../../deepseek-harness/packages/client/ui-conversation",
+    "@deepseek-ai/dsh-client-ui-plugin-manager": "link:../../deepseek-harness/packages/client/ui-plugin-manager",
     "@deepseek-ai/dsh-client-ui-renderer": "link:../../deepseek-harness/packages/client/ui-renderer",
     "@deepseek-ai/dsh-client-ui-sidebar": "link:../../deepseek-harness/packages/client/ui-sidebar",
     "@deepseek-ai/dsh-client-ui-slots": "link:../../deepseek-harness/packages/client/ui-slots",
     "@types/react": "~18.3.1",
     "esbuild": "^0.24.0",
     "typescript": "^5.6.2"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3"
   }
 }

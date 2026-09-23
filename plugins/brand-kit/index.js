@@ -31,29 +31,41 @@
  *   headlineFont      headline typography: { family, weight, size, lineHeight }
  *                     (shipped: 26px/32 weight 500 in the system stack).
  *
+ * PROFILES. Besides the row config, brands live as *profiles* under
+ * `$DSH_HOME/brand-profiles/<name>/` (profiles.mjs: profile.json + assets,
+ * portable, zip export/import) managed from the bundle's card in the Plugins
+ * panel (src/client/profiles-card.tsx) over the Fetch route `API_PATH`. The
+ * active profile (state.json) wins over the row config; '' = row config. The
+ * choice is read at every page render, so applying is a page reload, not a
+ * restart. An active profile that no longer validates is reported on the
+ * card and the row config stands in.
+ *
  * HOW. The browser half (src/client) occupies the shell's brand slots
  * (`sidebar.brand.mark`, `sidebar.brand.name`, `conversation.hero.brand.mark`
  * — all `single`, so registering replaces the fallback) and substitutes the
  * two locale-owned strings in place (they have no slot and their namespace
- * has one occupant). This half validates the config, serves the files, and
- * contributes one `<style>` row (font faces, the classes the components wear,
- * the accent override) plus a `global` row the browser half reads at apply
- * time. URLs in the style row are document-relative (`./brand-kit/…`), so
- * they resolve under a path-stripping proxy mount (`/dsh/`) as at the root.
- * The accent block is `html>body[…]` so it outranks the theme sheet, which the
- * client loads AFTER index-inject rows (a specificity tie would lose).
+ * has one occupant). This half validates the config, serves the effective
+ * brand's files on `API_PATH/asset` (only files the effective config names),
+ * and contributes one `<style>` row (font faces, the classes the components
+ * wear, the card chrome, the accent override) plus a `global` row the browser
+ * half reads at apply time. URLs in the style row are document-relative
+ * (`./api/brand-kit/…`), so they resolve under a path-stripping proxy mount
+ * (`/dsh/`) as at the root. The accent block is `html>body[…]` so it outranks
+ * the theme sheet, which the client loads AFTER index-inject rows (a
+ * specificity tie would lose).
  */
 
-import { createReadStream, existsSync, statSync } from 'node:fs'
-import { stat } from 'node:fs/promises'
-import { extname, isAbsolute, join } from 'node:path'
+import { existsSync, statSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+import { basename, extname, isAbsolute, join } from 'node:path'
+import { ProfileStore, defaultProfilesDir, portableProfile } from './profiles.mjs'
 
 export const name = 'brand-kit'
 
-export const inject = ['webServer']
+export const inject = ['connection']
 
-/** URL prefix of everything this plugin serves (host root). */
-export const ROUTE = '/brand-kit/'
+/** The plugin's Fetch route (below /api): JSON API, `/asset` for files. Mirrored in src/client. */
+export const API_PATH = '/api/brand-kit'
 
 const FILE_TYPES = { '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.otf': 'font/otf', '.svg': 'image/svg+xml', '.png': 'image/png' }
 const MARK_TYPES = ['.svg', '.png']
@@ -209,20 +221,35 @@ function fontRule(selector, font, extra = []) {
 }
 
 /**
+ * Asset URLs the page fetches: everything goes through the plugin's Fetch
+ * route (`/api/brand-kit/asset`), written document-relative so a
+ * path-stripping proxy mount (`/dsh/`) resolves them like the site root.
+ * `source` is the profile name or '' for the plugin row's config.
+ * @param {string} source - profile name or ''.
+ * @param {'mark' | 'font'} kind - asset kind.
+ * @param {string} file - file name.
+ */
+export function assetUrl(source, kind, file) {
+  const query = new URLSearchParams({ s: source, k: kind, f: file })
+  return `.${API_PATH}/asset?${query.toString()}`
+}
+
+/**
  * The `<style>` row for a configuration.
  * @param {BrandConfig} config - validated config.
+ * @param {string} source - profile name the assets are served from ('' = row config).
  * @returns {string} CSS, '' when nothing is to be injected.
  */
-export function brandStyle(config) {
+export function brandStyle(config, source = '') {
   const rules = []
   for (const font of config.fonts) {
     const ext = extname(font.file).toLowerCase()
     const format = ext === '.woff2' ? 'woff2' : ext === '.woff' ? 'woff' : ext === '.ttf' ? 'truetype' : 'opentype'
-    rules.push(`@font-face{font-family:"${font.family}";font-weight:${String(font.weight)};font-style:${font.style};font-display:swap;src:url(.${ROUTE}fonts/${font.file}) format("${format}")}`)
+    rules.push(`@font-face{font-family:"${font.family}";font-weight:${String(font.weight)};font-style:${font.style};font-display:swap;src:url(${assetUrl(source, 'font', font.file)}) format("${format}")}`)
   }
   if (config.name !== '') rules.push(fontRule('.brand-kit-name', config.brandFont, ['white-space:nowrap']))
   if (config.mark !== '') {
-    const url = `.${ROUTE}mark${extname(config.mark).toLowerCase()}`
+    const url = assetUrl(source, 'mark', basename(config.mark))
     rules.push(config.markMode === 'mask'
       ? `.brand-kit-mark{display:block;flex:none;background:currentColor;-webkit-mask:url(${url}) center/contain no-repeat;mask:url(${url}) center/contain no-repeat}`
       : '.brand-kit-mark{display:block;flex:none;object-fit:contain}')
@@ -239,41 +266,61 @@ export function brandStyle(config) {
 /**
  * What the browser half reads (`globalThis.__DSH_BRAND_KIT__`).
  * @param {BrandConfig} config - validated config.
+ * @param {string} source - profile name the assets are served from ('' = row config).
  * @returns {{ name: string, headline: string, turnStatus: string, mark: { url: string, mode: 'mask' | 'image' } | null }} payload.
  */
-export function clientPayload(config) {
+export function clientPayload(config, source = '') {
   return {
     name: config.name,
     headline: config.headline,
     turnStatus: config.turnStatus,
-    mark: config.mark === '' ? null : { url: `.${ROUTE}mark${extname(config.mark).toLowerCase()}`, mode: config.markMode },
+    mark: config.mark === '' ? null : { url: assetUrl(source, 'mark', basename(config.mark)), mode: config.markMode },
   }
 }
 
-function serveFile(ctx, path, routePath, label) {
-  const type = FILE_TYPES[extname(path).toLowerCase()]
-  ctx.effect(() => ctx.webServer.register({
-    kind: 'exact',
-    path: routePath,
-    handler: async (req, res) => {
-      if (req.method !== 'GET' && req.method !== 'HEAD') {
-        res.writeHead(405)
-        res.end()
-        return
-      }
-      let size
-      try {
-        size = (await stat(path)).size
-      } catch {
-        res.writeHead(404)
-        res.end()
-        return
-      }
-      res.writeHead(200, { 'content-type': type, 'content-length': String(size), 'cache-control': 'public, max-age=86400' })
-      if (req.method === 'HEAD') { res.end(); return }
-      createReadStream(path).pipe(res)
-    },
-  }), `brand-kit: ${label}`)
+/** Card chrome for the Plugins-panel page (classes the browser half's components wear). */
+export const CARD_STYLE = [
+  '.bk-card{font-size:13px;line-height:1.5;color:var(--dsw-alias-label-primary);display:flex;flex-direction:column;gap:14px}',
+  '.bk-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
+  '.bk-muted{color:var(--dsw-alias-label-tertiary)}',
+  '.bk-error{color:var(--dsw-alias-state-error-primary)}',
+  '.bk-list{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none}',
+  '.bk-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border:0.5px solid var(--dsw-alias-border-l3);border-radius:10px;background:var(--dsw-alias-bg-layer-3)}',
+  '.bk-item.bk-active{border-color:var(--dsw-alias-state-business-primary)}',
+  '.bk-item .bk-name{flex:1;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+  '.bk-tag{font-size:11px;padding:1px 7px;border-radius:12px;background:var(--dsw-alias-state-business-tertiary);color:var(--dsw-alias-label-primary-bluish)}',
+  '.bk-btn{font:inherit;font-size:12px;padding:4px 10px;border-radius:8px;border:0.5px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-bg-layer-2);color:inherit;cursor:pointer}',
+  '.bk-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+  '.bk-btn.bk-primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);border-color:transparent}',
+  '.bk-btn:disabled{opacity:.5;cursor:default}',
+  '.bk-form{display:grid;grid-template-columns:max-content 1fr;gap:8px 12px;align-items:center}',
+  '.bk-form label{color:var(--dsw-alias-label-secondary);white-space:nowrap}',
+  '.bk-form input[type=text],.bk-form input[type=number],.bk-form select{font:inherit;padding:4px 8px;border-radius:8px;border:0.5px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-bg-layer-1);color:inherit;min-width:0;width:100%;box-sizing:border-box}',
+  '.bk-form input[type=number]{width:6em}',
+  '.bk-form input[type=color]{width:34px;height:26px;padding:0;border:0.5px solid var(--dsw-alias-border-l4);border-radius:6px;background:none}',
+  '.bk-inline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
+  '.bk-form .bk-inline input[type=text]{width:auto;flex:1;min-width:140px}',
+  '.bk-form .bk-inline input[type=number]{width:5.5em;flex:none}',
+  '.bk-form .bk-inline select{width:auto}',
+  '.bk-sub{grid-column:1/-1;margin-top:6px;font-weight:600;color:var(--dsw-alias-label-secondary)}',
+  '.bk-preview-mark{width:24px;height:24px;display:inline-block;background:currentColor;vertical-align:middle}',
+].join('\n')
+
+/** Per-file MIME types the asset route serves. */
+export const ASSET_TYPES = FILE_TYPES
+
+/**
+ * Stream one asset file. Only files the given config names are served — the
+ * route is not a directory listing.
+ * @param {BrandConfig} config - the config whose files may be served.
+ * @param {'mark' | 'font'} kind - asset kind.
+ * @param {string} file - file name.
+ * @returns {string | undefined} the absolute path, or undefined when the config does not name it.
+ */
+export function assetPath(config, kind, file) {
+  if (kind === 'mark') return config.mark !== '' && basename(config.mark) === file ? config.mark : undefined
+  if (kind === 'font') return config.fonts.some(font => font.file === file) ? join(config.fontsDir, file) : undefined
+  return undefined
 }
 
 /**
@@ -281,26 +328,149 @@ function serveFile(ctx, path, routePath, label) {
  * @param {unknown} rawConfig - the row's config (see {@link normalizeConfig}).
  */
 export function apply(ctx, rawConfig) {
-  const config = normalizeConfig(rawConfig)
-  const style = brandStyle(config)
-  const payload = clientPayload(config)
+  const rowConfig = normalizeConfig(rawConfig)
+  const store = new ProfileStore(defaultProfilesDir(), normalizeConfig)
+
+  /**
+   * What the page gets right now: the active profile when one is set and
+   * valid, else the plugin row's config. A profile that fails validation
+   * (edited by hand, file removed) is reported, not fatal — the row config
+   * stands in and the card shows the error.
+   * @returns {{ source: string, config: BrandConfig, error?: string }}
+   */
+  function effective() {
+    const active = store.active()
+    if (active === '') return { source: '', config: rowConfig }
+    try {
+      return { source: active, config: store.read(active).config }
+    } catch (error) {
+      return { source: '', config: rowConfig, error: `${active}: ${error instanceof Error ? error.message : String(error)}` }
+    }
+  }
 
   ctx.on('webserver/index-inject', table => {
-    if (style !== '') table.push({ kind: 'style', text: `/* tali-brand-kit */\n${style}` })
-    table.push({ kind: 'global', name: '__DSH_BRAND_KIT__', value: payload })
+    const { source, config } = effective()
+    const style = brandStyle(config, source)
+    table.push({ kind: 'style', text: `/* tali-brand-kit */\n${CARD_STYLE}${style === '' ? '' : `\n${style}`}` })
+    table.push({ kind: 'global', name: '__DSH_BRAND_KIT__', value: clientPayload(config, source) })
   })
 
-  if (config.mark !== '') serveFile(ctx, config.mark, `${ROUTE}mark${extname(config.mark).toLowerCase()}`, 'mark')
-  for (const font of config.fonts) serveFile(ctx, join(config.fontsDir, font.file), `${ROUTE}fonts/${font.file}`, `font ${font.file}`)
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
+  const route = (definition, label) => ctx.effect(() => {
+    const dispose = ctx.connection.fetch.register(definition)
+    return () => { void dispose() }
+  }, label)
 
+  /** The card's view of the world. */
+  function state() {
+    const current = effective()
+    return {
+      active: store.active(),
+      effectiveSource: current.source,
+      error: current.error,
+      rowConfig: portableProfile(rowConfig),
+      rowConfigured: brandStyle(rowConfig) !== '' || rowConfig.name !== '' || rowConfig.turnStatus !== '',
+      profilesDir: store.root,
+      profiles: store.list().map(name => {
+        try {
+          const { json: profile } = store.read(name)
+          return { name, profile }
+        } catch (error) {
+          return { name, profile: null, error: error instanceof Error ? error.message : String(error) }
+        }
+      }),
+    }
+  }
+
+  route({
+    path: `${API_PATH}/asset`,
+    methods: ['GET', 'HEAD'],
+    requestBody: 'buffered', // the node:http bridge treats a route without it as streaming; a streaming GET Request throws
+    fetch: async (request) => {
+      const params = new URL(request.url).searchParams
+      const source = params.get('s') ?? ''
+      const kind = params.get('k') ?? ''
+      const file = params.get('f') ?? ''
+      let config
+      try {
+        config = source === '' ? rowConfig : store.read(source).config
+      } catch {
+        return new Response('no such profile', { status: 404 })
+      }
+      const path = (kind === 'mark' || kind === 'font') ? assetPath(config, kind, file) : undefined
+      if (path === undefined) return new Response('not an asset of this brand', { status: 404 })
+      let bytes
+      try {
+        bytes = await readFile(path)
+      } catch {
+        return new Response('file missing', { status: 404 })
+      }
+      const headers = { 'content-type': ASSET_TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream', 'content-length': String(bytes.byteLength), 'cache-control': 'private, max-age=3600' }
+      return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers })
+    },
+  }, 'brand-kit: asset route')
+
+  route({
+    path: API_PATH,
+    methods: ['GET', 'POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      const params = new URL(request.url).searchParams
+      const action = params.get('action') ?? ''
+      const name = params.get('name') ?? ''
+      try {
+        if (request.method === 'GET') {
+          if (action === 'export') {
+            const zip = store.exportZip(name)
+            return new Response(zip, { status: 200, headers: { 'content-type': 'application/zip', 'content-disposition': `attachment; filename="${name.replace(/[^A-Za-z0-9._-]/g, '_')}.brand.zip"`, 'cache-control': 'no-store' } })
+          }
+          return json(state())
+        }
+        switch (action) {
+          case 'apply': store.setActive(name); break
+          case 'save': store.write(name, await request.json()); break
+          case 'create': {
+            const body = await request.text()
+            if (body === '') store.createFromConfig(name, effective().config)
+            else store.write(name, JSON.parse(body))
+            break
+          }
+          case 'duplicate': store.duplicate(name, params.get('to') ?? ''); break
+          case 'rename': {
+            const to = params.get('to') ?? ''
+            const wasActive = store.active() === name
+            store.rename(name, to)
+            if (wasActive) store.setActive(to)
+            break
+          }
+          case 'delete': {
+            if (store.active() === name) store.setActive('')
+            store.delete(name)
+            break
+          }
+          case 'upload': {
+            const kind = params.get('kind') === 'mark' ? 'mark' : 'font'
+            const file = store.putAsset(name, kind, params.get('file') ?? '', new Uint8Array(await request.arrayBuffer()))
+            return json({ ...state(), uploaded: file })
+          }
+          case 'import': store.importZip(name, new Uint8Array(await request.arrayBuffer())); break
+          default: return json({ error: `unknown action "${action}"` }, 400)
+        }
+        return json(state())
+      } catch (error) {
+        return json({ ...state(), error: error instanceof Error ? error.message.replace(/^brand-kit: /, '') : String(error) }, 400)
+      }
+    },
+  }, 'brand-kit: profiles route')
+
+  const current = effective()
   const parts = [
-    config.name === '' ? null : `name ${JSON.stringify(config.name)}`,
-    config.mark === '' ? null : `mark ${config.mark} (${config.markMode})`,
-    config.headline === '' ? null : `headline ${JSON.stringify(config.headline)}`,
-    config.turnStatus === '' ? null : `turn status ${JSON.stringify(config.turnStatus)}`,
-    config.accent === '' ? null : `accent ${config.accent}`,
-    config.fonts.length === 0 ? null : `${String(config.fonts.length)} font file(s)`,
-    config.hidePreviewBadge ? 'no preview badge' : null,
+    current.source === '' ? 'row config' : `profile ${JSON.stringify(current.source)}`,
+    current.config.name === '' ? null : `name ${JSON.stringify(current.config.name)}`,
+    current.config.mark === '' ? null : `mark ${basename(current.config.mark)} (${current.config.markMode})`,
+    current.config.accent === '' ? null : `accent ${current.config.accent}`,
+    current.config.fonts.length === 0 ? null : `${String(current.config.fonts.length)} font file(s)`,
+    current.error === undefined ? null : `active profile invalid: ${current.error}`,
   ].filter(Boolean)
-  ctx.logger.info(`brand-kit: ${parts.length === 0 ? 'nothing configured (shipped look)' : parts.join(', ')}`)
+  ctx.logger.info(`brand-kit: ${parts.join(', ')}; ${String(store.list().length)} profile(s) in ${store.root}`)
 }
