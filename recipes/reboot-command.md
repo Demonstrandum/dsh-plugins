@@ -111,6 +111,16 @@ Then in Chrome at `http://127.0.0.1:3088/?token=…` (token: last line of
 5. `/reboot status` typed → a command card in the chat: *No session has work
    in flight. No reboot is armed. The relay is in front… Usage: …*.
 
+6. **Second pass on the copy** (the maintainer's screenshots of the first cut): dropped
+   the pid/port/`DSH_HOME` paragraph, the always-present relay line and the
+   "also: /reboot now…" footer (the `/` autocomplete lists those anyway);
+   idle state is one info callout *Safe to reboot — no session has work in
+   flight*; busy header *Rebooting now would interrupt:*; **Reboot when
+   idle** hidden while nothing is busy; **Interrupt N and reboot now** →
+   **Reboot now** (still red when busy); armed footer *Close · Cancel ·
+   Reboot now*. Re-verified all three states in the preview; the armed reboot
+   fired again on the turn's end (relay log: `started dsh web (pid 94564)`).
+
 The model-facing `logger.info` lines of host plugins do not appear in
 `dsh-web-preview.log` (only the CLI's own two lines land there); behaviour and
 the relay log were the evidence.

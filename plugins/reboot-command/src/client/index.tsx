@@ -205,7 +205,6 @@ function RebootDialog({ store, rpc, sessions }: { store: DialogStore, rpc: Clien
   const busy = status?.busy ?? []
   const verdict = status === undefined ? undefined : relayVerdict(status.relay)
   const armed = status?.armed
-  const where = status === undefined ? '' : ` — pid ${String(status.process.pid)} on :${String(status.process.port)}${status.process.dshHome === '' ? '' : `, ${status.process.dshHome.replace(/^\/Users\/[^/]+/, '~')}`}`
 
   if (fired) {
     return (
@@ -228,32 +227,34 @@ function RebootDialog({ store, rpc, sessions }: { store: DialogStore, rpc: Clien
       onClose={close}
       width={560}
       footer={<>
-        <Button variant="outline" disabled={pending} onClick={close}>{armed === undefined ? 'Cancel' : 'Close'}</Button>
-        {armed !== undefined && (
-          <Button variant="outline" disabled={pending} onClick={() => { void act('cancel') }}>Cancel armed reboot</Button>
-        )}
-        {armed === undefined && (
-          <Button variant="outline" disabled={pending || status === undefined} title="Arm a reboot that fires once no session has work in flight (2 s of quiet). Survives closing this dialog." onClick={() => { void act('wait') }}>
-            {busy.length === 0 ? 'Reboot when idle' : `Wait for ${String(busy.length)}, then reboot`}
+        {/* Armed: "Cancel" drops the armed reboot (the dialog closes via X / Escape / Close). */}
+        {armed !== undefined
+          ? <>
+            <Button variant="outline" disabled={pending} onClick={close}>Close</Button>
+            <Button variant="outline" disabled={pending} onClick={() => { void act('cancel') }}>Cancel</Button>
+          </>
+          : <Button variant="outline" disabled={pending} onClick={close}>Cancel</Button>}
+        {/* "When idle" only means something while somebody is busy. */}
+        {armed === undefined && busy.length > 0 && (
+          <Button variant="outline" disabled={pending} title="Reboot once no session has work in flight (2 s of quiet). Survives closing this dialog." onClick={() => { void act('wait') }}>
+            Reboot when idle
           </Button>
         )}
         <Button variant="primary" disabled={pending || status === undefined} style={busy.length > 0 ? { background: 'var(--dsh-color-danger, #c0392b)', borderColor: 'var(--dsh-color-danger, #c0392b)' } : undefined} onClick={() => { void act('now') }}>
-          {busy.length === 0 ? 'Reboot now' : `Interrupt ${String(busy.length)} and reboot now`}
+          Reboot now
         </Button>
       </>}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13, lineHeight: 1.45 }}>
-        <div>
-          Restart this DSH server{where}. Sessions with work in flight are interrupted and resume cold when it is back; a pending question or approval in them has to be asked again.
-        </div>
-        {verdict !== undefined && <Banner tone={verdict.kind === 'restart' ? 'info' : verdict.kind === 'quit' ? 'danger' : 'warn'}>{verdict.text}</Banner>}
+        {/* The relay verdict is only worth a line when it is bad news. */}
+        {verdict !== undefined && verdict.kind !== 'restart' && <Banner tone={verdict.kind === 'quit' ? 'danger' : 'warn'}>{verdict.text}</Banner>}
         {status === undefined && error === undefined && <div style={small}>Checking what is running…</div>}
         {status !== undefined && (
           busy.length === 0
-            ? <div>No session has work in flight — a reboot interrupts nothing.</div>
+            ? <Banner tone="info">Safe to reboot — no session has work in flight.</Banner>
             : (
               <div>
-                <div style={{ marginBottom: 4 }}>{busy.length === 1 ? 'One session has' : `${String(busy.length)} sessions have`} work in flight that a reboot would interrupt:</div>
+                <div style={{ marginBottom: 4 }}>Rebooting now would interrupt:</div>
                 <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {busy.map(row => (
                     <li key={row.sessionId}>
@@ -270,11 +271,10 @@ function RebootDialog({ store, rpc, sessions }: { store: DialogStore, rpc: Clien
         )}
         {armed !== undefined && (
           <Banner tone="warn">
-            A when-idle reboot is armed (since {new Date(armed.since).toLocaleTimeString()}{armed.by !== undefined ? `, from ${titleOf(armed.by)}` : ''}). It fires once the list above has been empty for 2 seconds — closing this dialog does not cancel it.
+            Reboot armed{armed.by !== undefined ? ` from ${titleOf(armed.by)}` : ''} at {new Date(armed.since).toLocaleTimeString()}: fires once nothing is running for 2 seconds. Closing this dialog does not cancel it.
           </Banner>
         )}
         {error !== undefined && <div role="alert" style={{ color: 'var(--dsh-color-danger, #d9534f)' }}>{error}</div>}
-        <div style={small}>Also: <span style={mono}>/reboot now</span>, <span style={mono}>/reboot wait</span>, <span style={mono}>/reboot cancel</span>; bare <span style={mono}>/reboot</span> opens this dialog.</div>
       </div>
     </Modal>
   )

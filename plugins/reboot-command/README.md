@@ -21,11 +21,16 @@ DSH…*; without it DSH just stops. The dialog and the command reply say which.
 
 ## What the dialog shows
 
-- **Relay verdict** — restart (relay LaunchAgent loaded, pid) · quit (no
-  relay configured, or its LaunchAgent not loaded) · unknown (the
-  `dsh-tailscale-remote` plugin is not loaded on this server).
-- **Sessions with work in flight**, polled once a second: each with its
-  sidebar title, workspace, and the blockers a reboot would interrupt —
+Deliberately terse (the maintainer, 2026-09-23: the first cut's pid/port paragraph,
+the always-present relay line and the "also: /reboot now…" footer were noise
+that made it hard to scan). Only what changes the decision:
+
+- **Relay verdict, only when it is bad news** — quit (no relay configured,
+  or its LaunchAgent not loaded; red) · unknown (the `dsh-tailscale-remote`
+  plugin is not loaded on this server; amber). A healthy relay says nothing.
+- **"Safe to reboot"** in an info callout when nothing is running; otherwise
+  **"Rebooting now would interrupt:"** and the sessions with work in flight,
+  polled once a second: each with its sidebar title, workspace, and the blockers —
   *a turn is running*, *N queued messages*, *N background jobs: labels*,
   *N subagents loaded, k running* (the Host's own `session/move-live`
   vocabulary from `session-controller/src/move.ts blockersOf`, plus the
@@ -35,9 +40,10 @@ DSH…*; without it DSH just stops. The dialog and the command reply say which.
   the dialog or the tab and is visible from every client; the banner names
   when and from which session it was armed.
 
-Buttons: **Cancel** · **Wait for N, then reboot** / **Reboot when idle** ·
-**Interrupt N and reboot now** / **Reboot now** (red when it interrupts). While
-armed: **Close** · **Cancel armed reboot** · **Interrupt N and reboot now**.
+Buttons: **Cancel** · **Reboot when idle** (only while something is busy —
+with nothing running it would mean nothing) · **Reboot now** (red when it
+interrupts). While armed: **Close** · **Cancel** (drops the armed reboot) ·
+**Reboot now**.
 
 After firing, the dialog stays up ("Rebooting DSH…") and brings the page back
 itself: it waits until a status poll fails (the process is gone), then every
