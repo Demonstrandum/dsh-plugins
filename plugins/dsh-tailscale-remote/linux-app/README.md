@@ -14,6 +14,10 @@ nix run . -- remote user
 ```
 
 Without arguments, the app opens a connection form or the last saved server.
+The DSH sidebar shows **DSH Remote** and a blue whale, using the same
+`../desktop-branding.js` asset as the Mac wrapper. This identifies the app,
+not connection health. Branding is reapplied on navigation/reload and is
+restricted to DSH pages; preview pages keep their own appearance.
 **File → Change server…** opens the form again. Use the server's full HTTPS
 mount URL with a trailing slash. The account in `/dsh/user/` is the account
 on the remote host, not necessarily your local Linux account.
@@ -80,7 +84,8 @@ npm ci
 npm test
 ```
 
-The Electron test opens the real connection form, rejects an insecure remote
+The Electron test checks the shared whale colour and label after reload,
+keeps the embedded preview unbranded, opens the real connection form, rejects an insecure remote
 URL, connects to an isolated fixture, and checks an embedded preview and
 hard-coded HMR with an occupied local port. Nix runs it under Xvfb with
 `--no-sandbox` because nested Chromium namespaces are unavailable in the

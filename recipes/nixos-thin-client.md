@@ -51,6 +51,29 @@ The original HTTP Host and WebSocket URL survive even when a local port
 collision forces a different listener port. No URL rewrite or HTTP content
 rewrite is needed.
 
+### Shared desktop branding
+
+`plugins/dsh-tailscale-remote/desktop-branding.js` is the single browser-side
+branding function for both desktop wrappers. It sanitizes the supplied label
+and hex colour, sets `__DSH_DOCK__`, and installs the existing sidebar CSS.
+The Mac builder copies it into `Contents/Resources/desktop-branding.js`;
+Swift reads it and supplies the app's configured name/colour at document
+start. Existing installed Mac apps need a deliberate rebuild to pick this
+up; none were rebuilt as part of this change.
+
+The Nix package copies the same file beside `dock-app.mjs`. Electron runs it
+on `dom-ready` for the configured DSH mount, with `DSH Remote` and `#0090FF`.
+It runs again after reload without adding a privileged preload to remote
+pages, and skips preview pages. The colour denotes remote app identity,
+not live network health. `nix flake check` checks computed sidebar colours,
+labels, reload persistence and an unbranded preview. macOS compilation and
+resource loading still require a Mac for verification.
+
+When rebasing onto the integrated Mac title bar, preserve its 18% sidebar
+wash in the shared branding script under `html[data-platform="darwin"]`.
+The Electron smoke test checks that this rule stays inactive on Linux and
+applies when the macOS platform attribute is present.
+
 Two traps found while implementing:
 
 - PAC scripts cannot disable Chromium's implicit localhost bypass. Use the

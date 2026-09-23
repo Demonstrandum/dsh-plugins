@@ -28,7 +28,11 @@ app.whenReady().then(async () => {
   const previewPort = await listen(preview)
   const bridge = createServer((_req, res) => {
     res.setHeader('Content-Type', 'text/html')
-    res.end(`<p id="result">waiting</p><iframe src="http://localhost:${previewPort}/"></iframe>
+    res.end(`<span class="test_brandMark">whale</span><span class="test_railMark">whale</span>
+      <span class="test_localBuildTitle">DSH Local Build</span><span class="test_fallbackBrandName">DSH</span>
+      <span class="test_buildVersion">version</span>
+      <div class="test_sidebarCol" style="--dsw-specific-sidebar-fill: rgb(100, 100, 100)"></div>
+      <p id="result">waiting</p><iframe src="http://localhost:${previewPort}/"></iframe>
       <script>onmessage = e => document.querySelector('#result').textContent = e.data;</script>`)
   })
   bridge.on('upgrade', (req, socket, head) => void handleForwardUpgrade(req, socket, head, {
@@ -64,12 +68,39 @@ app.whenReady().then(async () => {
       }, 25);
     })`)
     assert.equal(result, 'ok')
+    const checkBranding = async () => {
+      assert.deepEqual(await window.webContents.executeJavaScript(`({
+        identity: globalThis.__DSH_DOCK__,
+        whale: getComputedStyle(document.querySelector('.test_brandMark')).color,
+        rail: getComputedStyle(document.querySelector('.test_railMark')).color,
+        label: getComputedStyle(document.querySelector('.test_localBuildTitle'), '::before').content,
+        fallback: getComputedStyle(document.querySelector('.test_fallbackBrandName'), '::before').content,
+        styles: document.querySelectorAll('#dsh-dock-identity').length,
+      })`), {
+        identity: { name: 'DSH Remote', glyphColor: '#0090FF' },
+        whale: 'rgb(0, 144, 255)', rail: 'rgb(0, 144, 255)',
+        label: '"DSH Remote"', fallback: '"DSH Remote"', styles: 1,
+      })
+    }
+    await checkBranding()
+    assert.equal(await window.webContents.executeJavaScript(`getComputedStyle(document.querySelector('.test_sidebarCol')).backgroundColor`), 'rgba(0, 0, 0, 0)')
+    assert.match(await window.webContents.executeJavaScript(`
+      document.documentElement.dataset.platform = 'darwin';
+      getComputedStyle(document.querySelector('.test_sidebarCol')).backgroundColor
+    `), /\/ 0\.18\)$/)
+    await window.webContents.executeJavaScript(`delete document.documentElement.dataset.platform`)
+    const previewFrame = window.webContents.mainFrame.frames.find(frame => frame.url.includes(`localhost:${previewPort}`))
+    assert.equal(await previewFrame.executeJavaScript('typeof globalThis.__DSH_DOCK__'), 'undefined')
+    const reloaded = once(window.webContents, 'did-finish-load')
+    window.webContents.reload()
+    await reloaded
+    await checkBranding()
     const ports = Menu.getApplicationMenu().items.find(item => item.label === 'Forwarded Ports').submenu.items
     assert.equal(ports.length, 1)
     assert.ok(ports[0].label.endsWith(`→ remote ${previewPort}`))
     assert.ok(!ports[0].label.startsWith(`Local ${previewPort} `), 'occupied port must be remapped')
     assert.equal(await window.webContents.executeJavaScript('typeof require + ":" + typeof window.dsh'), 'undefined:undefined')
-    console.log('PASS: real app setup → iframe + hard-coded HMR through a remapped port; no Node or IPC in remote page')
+    console.log('PASS: setup, forwarding/HMR, shared branding after reload, unbranded preview, isolated remote renderer')
   } catch (error) { console.error(error); process.exitCode = 1 }
   finally {
     clearTimeout(timeout)

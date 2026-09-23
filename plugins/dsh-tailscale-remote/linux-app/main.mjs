@@ -5,13 +5,15 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { parseRemoteTarget, resolveTailnetHost } from '../dock-app.mjs'
+import { parseRemoteTarget, resolveTailnetHost, REMOTE_GLYPH_COLOR } from '../dock-app.mjs'
 import { Forwarder, loopbackPort, startProxy } from './forward.mjs'
 
 app.setName('DSH Remote')
 app.setPath('userData', join(app.getPath('appData'), 'dsh-remote'))
 const configFile = join(app.getPath('userData'), 'server.json')
 const setupURL = new URL('./setup.html', import.meta.url).href
+const branding = await readFile(new URL('../desktop-branding.js', import.meta.url), 'utf8')
+const identityScript = `${branding}(${JSON.stringify({ name: 'DSH Remote', glyphColor: REMOTE_GLYPH_COLOR })});`
 const args = process.argv.slice(2)
 let mainWindow, forwarder, proxy, base, remoteSession
 let lastError = ''
@@ -69,6 +71,11 @@ function makeWindow(url, setup = false) {
     }
   })
   window.webContents.on('will-attach-webview', event => event.preventDefault())
+  window.webContents.on('dom-ready', () => {
+    if (!setup && inScope(window.webContents.getURL())) {
+      void window.webContents.executeJavaScript(identityScript).catch(report)
+    }
+  })
   window.webContents.on('did-fail-load', (_event, code, description, _url, isMainFrame) => {
     if (isMainFrame && code !== -3) report(new Error(`Could not load DSH: ${description}. Check Tailscale and the server URL; use View → Reload to retry.`))
   })

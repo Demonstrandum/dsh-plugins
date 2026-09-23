@@ -17,6 +17,7 @@
     "state.mjs",
     "tailscale.mjs",
     "dock-app.mjs",
+    "desktop-branding.js",
     "server.mjs",
     "relay/relay.mjs",
     "relay/launch-agent.mjs",

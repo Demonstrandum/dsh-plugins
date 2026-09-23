@@ -26,6 +26,7 @@
               runHook preCheck
               cp ${./plugins/dsh-tailscale-remote/forward.mjs} ../forward.mjs
               cp ${./plugins/dsh-tailscale-remote/dock-app.mjs} ../dock-app.mjs
+              cp ${./plugins/dsh-tailscale-remote/desktop-branding.js} ../desktop-branding.js
               npm test
               xvfb-run -a electron --no-sandbox --disable-gpu tests/electron-smoke.mjs
               runHook postCheck
@@ -35,6 +36,7 @@
               mkdir -p $out/share/dsh-remote/linux-app $out/bin
               cp -r *.mjs *.cjs *.html *.js package.json node_modules $out/share/dsh-remote/linux-app/
               cp ${./plugins/dsh-tailscale-remote/dock-app.mjs} $out/share/dsh-remote/dock-app.mjs
+              cp ${./plugins/dsh-tailscale-remote/desktop-branding.js} $out/share/dsh-remote/desktop-branding.js
               makeWrapper ${pkgs.electron}/bin/electron $out/bin/dsh-remote \
                 --add-flags $out/share/dsh-remote/linux-app \
                 --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.tailscale pkgs.xdg-utils ]}

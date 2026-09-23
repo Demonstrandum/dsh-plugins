@@ -83,35 +83,16 @@ struct DockConfig: Decodable {
     /// Product title the shipped client uses for the wordmark and `document.title`.
     static let genericProductTitle = "DSH Local Build"
 
-    /// Document-start script: publish the app's identity and restyle the
-    /// sidebar brand row to match it. Mirrors tali-instance-identity's CSS
-    /// (the client's CSS modules compile to `<hash>_<local>` class names; the
-    /// whale is `fill="currentColor"`). Only a hex colour is ever spliced in.
+    /// Both desktop wrappers run this bundled script with their own identity.
     func identityScript() -> String {
-        let safeName = name.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || " ._-".unicodeScalars.contains($0) }
-        let label = String(String.UnicodeScalarView(safeName)).trimmingCharacters(in: .whitespaces)
-        let colour = (glyphColor ?? "").uppercased()
-        let hex = colour.range(of: "^#[0-9A-F]{6}$", options: .regularExpression) != nil && colour != "#000000" ? colour : ""
-        var css = "span[class*=\"_localBuildTitle\"],span[class*=\"_fallbackBrandName\"]{display:flex!important;font-size:0!important}"
-        css += "span[class*=\"_localBuildTitle\"]::before{content:\"\(label)\"!important;font-size:12px!important;line-height:13px!important}"
-        css += "span[class*=\"_fallbackBrandName\"]::before{content:\"\(label)\"!important;font-size:17px!important;line-height:24px!important}"
-        // The build-version chip: no inverted box, dim text (tali-instance-identity's `versionBadge: subtle`).
-        css += "span[class*=\"_buildVersion\"]{color:inherit!important;background:none!important;opacity:.4!important;padding:0!important;border-radius:0!important}"
-        // The client's darwin layout tints its sidebar column 60% over the window
-        // material (tuned for Electron's flatter vibrancy); here the material is
-        // the point, so the column keeps only a light wash and the frosted glass
-        // behind the window shows through. Specificity (0,2,1) beats the
-        // module's (0,2,0) without `!important`.
-        css += "html[data-platform=\"darwin\"] [class*=\"_sidebarCol\"]{background:color-mix(in srgb,var(--dsw-specific-sidebar-fill) 18%,transparent)}"
-        if !hex.isEmpty {
-            css += "span[class*=\"_brandMark\"],span[class*=\"_railMark\"]{color:\(hex)!important}"
+        guard let url = Bundle.main.url(forResource: "desktop-branding", withExtension: "js"),
+              let script = try? String(contentsOf: url, encoding: .utf8) else {
+            NSLog("DSH: missing desktop-branding.js resource")
+            return ""
         }
-        let payload = (try? JSONSerialization.data(withJSONObject: ["name": label, "glyphColor": hex]))
+        let payload = (try? JSONSerialization.data(withJSONObject: ["name": name, "glyphColor": glyphColor ?? ""]))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        let cssLiteral = (try? JSONSerialization.data(withJSONObject: [css])).flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
-        return """
-        (function(){globalThis.__DSH_DOCK__=\(payload);var s=document.createElement('style');s.id='dsh-dock-identity';s.textContent=\(cssLiteral)[0];(document.head||document.documentElement).appendChild(s);})();
-        """
+        return "\(script)(\(payload));"
     }
 
     static func load() -> DockConfig {
