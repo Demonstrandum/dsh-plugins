@@ -12,12 +12,7 @@
   },
   "files": [
     "index.js",
-    "curated-tools.mjs",
-    "windows.mjs",
-    "servers.mjs",
-    "reader-pool.mjs",
-    "youtube-notes.mjs",
-    "safari-screenshot.mjs",
+    "*.mjs",
     "lib/client.js",
     "lib/client.js.map",
     "cordis.patch.yml"

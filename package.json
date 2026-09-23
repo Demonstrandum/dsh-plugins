@@ -15,7 +15,8 @@
     "remote-logs": "tools/remote-ctl.sh logs",
     "remote-status": "tools/remote-ctl.sh status",
     "remote-restart": "tools/remote-ctl.sh restart",
-    "remote-stop": "tools/remote-ctl.sh stop"
+    "remote-stop": "tools/remote-ctl.sh stop",
+    "build-app": "tools/build-app.sh"
   },
   "pnpm": {
     "verifyDepsBeforeRun": false
