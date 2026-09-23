@@ -1,0 +1,24 @@
+# Plugins shipped inside the bundled macOS app (one directory name under plugins/ per line).
+# Same set as tools/install-plugins.sh PLUGINS plus the app-only lifeline.
+dsh-tailscale-remote
+instance-identity
+enforce-model-preset
+browser-automation
+dash-docsets
+local-model-supervisor
+wolfram-kernel-supervisor
+foreign-link-opener
+session-introspect
+fs-tools
+settings-shortcut
+session-title-slug
+dsh-remote-workspaces
+numbered-switching
+import-api-keys
+reload-on-restart
+transcript-grace-margin
+phone-ui
+wait-tool
+reboot-command
+brand-kit
+app-lifeline

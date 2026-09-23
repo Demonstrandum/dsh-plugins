@@ -410,6 +410,20 @@ can reproduce or maintain it:
   Then the row `config` was retired: a brand is only ever a profile
   (`cli.mjs import <dir|zip> --name X --apply` for provisioning; none active
   = shipped look).
+- `bundled-app-dmg.md` — the self-hosting `DSH.app` in a DMG (2026-09-23,
+  milestone 1): why not `bootstrap-mac.sh`'s global installs and why the
+  Swift wrapper rather than upstream's Electron shell; `pnpm build-app`
+  (`tools/bundle/`: sha256-verified Node 24 LTS, `stage-dsh.mjs` packing all
+  304 fork packages + the plugins of `plugins.txt` and installing with
+  pnpm-workspace.yaml overrides, `build-app.mjs` signing 219 Mach-O files
+  ad-hoc and running hdiutil); `EmbeddedServer.swift` (profile `app` created/
+  merged from the bundled template, `zsh -lc` spawn, token URL from stdout,
+  SIGTERM → quit) and the `app-lifeline` plugin against orphaned servers; the
+  traps — `pnpm deploy` drops `workspace:^` peers, pnpm 12 ignores
+  `pnpm.overrides` and silently pulls UPSTREAM's npm packages, `allowBuilds`
+  keys in `@file:` form, symlinked `/tmp`, app-boot's dependency-graph BFS from
+  `@deepseek-ai/dsh/package.json` (plugins anchored there), two plugins'
+  incomplete `files`, hdiutil under the sandbox; sizes; milestones 2/3 design.
 - `browser-automation-plugin.md` — per-chat Safari Technology Preview /
   Chrome windows and the isolated page reader (`browser-automation` plugin):
   why a plugin and not MCP config, the STP `--mcp` facts that shape it, the
