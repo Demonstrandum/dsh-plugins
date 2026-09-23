@@ -287,7 +287,7 @@ cd ~/github/deepseek-harness && git worktree remove ../deepseek-harness-tailscal
 
 ## Session attribution: the `sessionOwners` service (added 2026-09-21)
 
-**Why.** A shared DSH host (e.g. `alpha`) serves several tailnet users, but
+**Why.** A shared DSH host (the shared remote machine) serves several tailnet users, but
 DSH itself is single-user: a session header has no person in it, and anything
 the host does on a chat's behalf (the private `symba-dsh` plugin runs `symba`
 as the *host's* tailnet identity) is indistinguishable between users. The
@@ -317,7 +317,7 @@ session column for every real client all along. Fix: also look one level down
 (`Object.values(args)`); fixture added.
 
 **Verified** on the preview through the tailnet URL: a prompt from Chrome →
-`session-owners-preview.json` holds `owner.login: tali@symbolica.ai`,
+`session-owners-preview.json` holds `owner.login: <user>@example.com`,
 `method: session/prompt`; the `symba-dsh` agent's `symba_status` then reports
 `user tali`. Tests: `tests/owners.test.mjs` (identity precedence, owner/actor,
 persistence, tracker → owners over a live `http.Server`).
