@@ -2,9 +2,12 @@
 
 Status: **built and verified end-to-end 2026-09-23** (11 host unit tests; a
 real Claude agent turn on a throwaway home exercised all four settlements:
-elapsed, Skip, Abort, Stop-generating). Under trial in `cordis.dev.yml` (row
-`tali-wait-tool`, preview server); **not** in the live profile — the maintainer decides
-that. Plugin README: [`plugins/wait-tool/README.md`](../plugins/wait-tool/README.md).
+elapsed, Skip, Abort, Stop-generating). **Promoted to the live web profile
+the same day** on the maintainer's request (bundle install via `pnpm install-plugins`,
+i.e. `dsh plugin --profile web add ./plugins/wait-tool`; it is in the
+`PLUGINS` list of `tools/install-plugins.sh`) and left in `cordis.dev.yml` for
+the preview server — the two homes never share a row. Plugin README:
+[`plugins/wait-tool/README.md`](../plugins/wait-tool/README.md).
 
 ## 0. Why
 

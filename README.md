@@ -91,6 +91,12 @@ Everything else — tools, remote access, apps, UI — is a plugin.
   with context, files/count modes, include/exclude globs, several roots and
   patterns). Motivated by transcript analysis showing `bash` mutating files
   more often than `edit`+`write`. Host-only.
+- `wait-tool` — a `wait` tool replacing bash `sleep N`. Because the model
+  states the duration, the chat renders the call as a live progress bar with
+  **Skip** (return early, worded as the timeout having elapsed) and **Abort**
+  (fails the call with "user aborted sleep", so the model stops and asks)
+  buttons; a system-prompt line steers the model away from `sleep`. Host +
+  browser halves.
 - `session-introspect` — `transcript_*` tools that let an agent read *other*
   agents' transcripts over the harness's own session query, never the zstd logs:
   `transcript_find` (by `workspace/title`, age), `transcript_outline` (per-turn
