@@ -373,6 +373,71 @@ bundle id is `io.github.taliesinb.dsh-dock-app.remote-<host>-dsh-<user>` — one
 WebKit data store per remote, and the prefix the full installer's take-over
 uses to leave these apps alone.
 
+## Uninstalling (`tools/uninstall-mac.sh`)
+
+Added 2026-09-23: the take-over's teardown as a standalone, checkout-free
+script (`bash -c "$(curl …/uninstall-mac.sh)" uninstall [--force]`, or
+`pnpm uninstall-dsh` from a clone). Plain shell + `launchctl` + `lsof` + the
+Tailscale CLI + `defaults`/`python3` (plistlib, from the CLT) — nothing is
+cloned or built. It inventories first and then, **asking before each group**
+(default yes; `--force` asks nothing; `--dry-run` prints the plan):
+
+1. LaunchAgents `io.github.taliesinb.dsh-web-relay[.<instance>]`,
+   `ai.symbolica.dsh-remote`, anything `*dsh*`/`*deepseek*` in
+   `~/Library/LaunchAgents` — `launchctl bootout` + plist removed (first, so a
+   KeepAlive relay cannot respawn what is stopped next).
+2. This user's processes: the relays, every `dsh web`/`serve` (built checkout,
+   stock CLI, Desktop app), the Dock apps, then any remaining listener on
+   `127.0.0.1:3080–3099` (SIGTERM, 20 s, SIGKILL); dies if a listener of yours
+   survives. Never another account's processes (`pgrep -u`, `lsof -u`).
+3. Tailscale Serve paths `/dsh*` that are **yours**: decided *before* anything
+   is stopped, by whether a process of this user listens on the path's target
+   port or a relay plist of this user names that port (`--listen
+   127.0.0.1:PORT`). Others' paths on a shared machine are listed and left alone;
+   never `serve reset` (see the 2026-09-22 incident in § Redeploying).
+4. Apps → Trash: `~/Applications/*.app` with bundle id
+   `io.github.taliesinb.dsh-dock-app*` (DSH, DSH Preview, DSH-<instance>, the
+   thin clients), Safari web apps named `DSH*`, `/Applications/DSH.app` and
+   `*deepseek*` ids. Quit, `lsregister -u`, then Finder's *delete* (Put Back
+   works; the first time Terminal may ask for Finder automation) with a `mv`
+   into `~/.Trash` as the fallback. Their Dock tiles are dropped by editing
+   `persistent-apps` (`defaults export com.apple.dock -` → plistlib →
+   `defaults import` → `killall Dock`), the shell equivalent of
+   `dock-app.mjs`'s `removeDockTile`.
+5. A global `dsh` CLI (npm/pnpm/bun/brew), the relay symlinks in
+   `~/Library/Application Support/dsh-tailscale-remote`, and — its own
+   question, 1.7 GB and not a git clone — a deploy-remote.sh `~/dsh`.
+
+Kept on purpose and said so at the end: `~/.dsh` (incl. `bootstrap-mac.json`,
+`logs/`, `deploy/`), `~/.dsh-preview`, the checkouts (`~/github/tali-dash-plugins`,
+`~/.dsh-thin-client`), Homebrew and its formulae/casks (node, pnpm, afm,
+Tailscale, STP, Chrome), `~/.zprofile`, the CLT, `~/Library/Logs/DSH Dock`.
+A re-bootstrap afterwards finds `~/.dsh/profiles` and takes over as usual.
+
+Two `pgrep` facts learnt writing it, both now handled in the bootstrap too
+(`my_dsh_pids` / `dsh_pids` helpers): **(a)** BSD `pgrep` excludes its own
+*ancestors* by default, so a DSH agent running the script never saw the very
+server it runs under (this Mac's live `dsh web` tree was invisible while the
+preview tree showed) — `pgrep -a` includes them; **(b)** under `bash -c
+"$(curl …)"` the whole script is the shell's argv and contains every pattern
+(`dsh web`, `apps/cli/lib/bin.js`…) — macOS `ps`/`pgrep` happen to hide argvs
+that long (they show an empty command), but the helpers also skip `$$`, any
+process whose command mentions the script's name, and any process whose
+command `ps` cannot show. Related: never `my_dsh_pids … | head -1` inside an
+assignment — `head` closes the pipe, the loop's next `echo` gets SIGPIPE, and
+with `pipefail` the assignment fails, which under `set -e` exits the script
+silently (found in the dry run; `| tr '\n' ' '` + `${x%% *}` instead).
+
+Verified 2026-09-23 on the development laptop: `--dry-run` inventories the two relays
+(live + preview), 9 processes, 6 listeners, both Serve paths as "yours",
+three Dock apps, the support dir; the `$0`-flag form (`… uninstall-mac.sh)"
+--dry-run`) works. `trash()` and the tile surgery were unit-tested on a fake
+`DSH Fake Test.app` (bundle id `…dsh-dock-app.faketest`, tile pinned the
+`ensureDockTile` way): Finder moved it to the Trash, exactly its tile went,
+the other 20 tiles stayed; a first attempt failed with `plistlib.load` on a
+non-seekable stdin → `plistlib.loads(sys.stdin.buffer.read())`. A full real run
+has not been done on this Mac (it would take down the session that wrote it).
+
 ## Why a shell script and not a `.pkg` (the original ask)
 
 The request was "a once-off .pkg that forces you to pick a directory, installs

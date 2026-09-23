@@ -355,7 +355,11 @@ can reproduce or maintain it:
   `/dsh/<user>` via `pnpm remote-app`) and the standalone
   `tools/bootstrap-mac-thin-client.sh [HOST [USER]]` (CLT, Tailscale, node
   tarball, shallow clone, `dock-app:remote`; nothing built locally), plus why
-  `bash -c "$(curl …)"` needs a `$0` placeholder word before any flags.
+  `bash -c "$(curl …)"` needs a `$0` placeholder word before any flags. And
+  the checkout-free **uninstaller** `tools/uninstall-mac.sh [--force]`
+  (LaunchAgents, this user's processes and Serve paths, apps → Trash + Dock
+  tiles, global CLI; keeps `~/.dsh` and the checkouts) with the two `pgrep`
+  facts it surfaced (ancestor exclusion → `-a`; the script text as argv).
 - `browser-automation-plugin.md` — per-chat Safari Technology Preview /
   Chrome windows and the isolated page reader (`browser-automation` plugin):
   why a plugin and not MCP config, the STP `--mcp` facts that shape it, the

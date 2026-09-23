@@ -46,6 +46,16 @@ building anything locally? The thin client, minutes instead of an hour
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/taliesinb/dsh-plugins/main/tools/bootstrap-mac-thin-client.sh)" <host>
 ```
 
+And the way back (`tools/uninstall-mac.sh`, no checkout needed): stops every
+DSH process, unloads the launch-at-login relays, removes this user's tailnet
+routes, moves the DSH apps to the Trash (Dock tiles too), removes a global
+`dsh` CLI — asking before each group unless `--force`; `~/.dsh` and the
+checkouts stay:
+
+```sh
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/taliesinb/dsh-plugins/main/tools/uninstall-mac.sh)" uninstall [--force]
+```
+
 Tooling: `pnpm install-plugins` / `remove-plugins`, `pnpm bootstrap-remote user@host`
 (the bootstrap over ssh), `pnpm deploy-remote user@host` (ship the built fork
 to another Mac as a headless remote), `pnpm remote-app <host>` (a Dock app

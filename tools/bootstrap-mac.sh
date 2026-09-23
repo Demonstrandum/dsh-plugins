@@ -75,6 +75,8 @@
 # so re-running after fixing a failure resumes where it stopped. Steps that
 # only a human can finish (Apple Intelligence toggle, STP licence, provider
 # keys in the GUI, tailnet ACL) are collected into a to-do list at the end.
+# The way back is tools/uninstall-mac.sh (stops, unloads and trashes all of
+# this, keeps ~/.dsh and the checkouts; no checkout needed to run it).
 set -euo pipefail
 
 REPO="https://github.com/taliesinb/dsh-plugins"
@@ -136,7 +138,7 @@ while [ $# -gt 0 ]; do
     --repo) REPO="$2"; shift 2 ;;
     --repo=*) REPO="${1#--repo=}"; shift ;;
     --list) printf '%s\n' "${STEPS[@]}"; exit 0 ;;
-    -h|--help) sed -n "2,71p" "$0"; exit 0 ;;
+    -h|--help) sed -n "2,73p" "$0"; exit 0 ;;
     *) echo "unknown argument: $1 (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -232,6 +234,17 @@ write_marker() { # write_marker STARTED
   printf '{ "tool": "tali-dash-plugins/tools/bootstrap-mac.sh", "started": "%s", "dir": "%s", "instance": "%s", "portBase": %s }\n' \
     "$1" "${DIR:-}" "$INSTANCE" "${WEB_PORT:-null}" >"$MARKER"
 }
+# my_dsh_pids RE: this user's processes matching RE, minus this script's own shells (its text contains every
+# pattern; under `bash -c "$(curl …)"` the text is the argv — macOS ps/pgrep hide such long argvs, but do not rely on it).
+my_dsh_pids() {
+  local pid
+  for pid in $(pgrep -a -u "$(id -u)" -f "$1" 2>/dev/null || true); do   # -a: ancestors too (a DSH agent running this)
+    [ "$pid" = "$$" ] && continue
+    cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+    case "$cmd" in ""|*bootstrap-mac*) continue ;; esac   # "": an argv too long for ps = a `bash -c "<script>"` shell, never a DSH process
+    echo "$pid"
+  done
+}
 have_brew() { [ -x /opt/homebrew/bin/brew ]; }
 # Homebrew: install exactly what we ask for. No `brew update` on first use (a fresh tap sync prints pages
 # of unrelated new formulae/casks and can take a minute), no upgrading of already-installed dependents,
@@ -293,8 +306,9 @@ if wants preflight; then
     port_busy "$port" && FOUND+=("a server is listening on 127.0.0.1:$port$(pid="$(lsof -ti tcp:$port -sTCP:LISTEN 2>/dev/null | head -1 || true)"; [ -n "$pid" ] && echo " (pid $pid: $(ps -o comm= -p "$pid" 2>/dev/null))")")
   done
   # This user's dsh processes only: on a shared machine other accounts legitimately run their own.
-  pgrep -u "$(id -u)" -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' >/dev/null 2>&1 && FOUND+=("a dsh process of yours is running ($(pgrep -u "$(id -u)" -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' | head -1))")
-  pgrep -u "$(id -u)" -f 'dsh (web|serve)|@deepseek-ai/dsh|DSH\.app/Contents/MacOS/' >/dev/null 2>&1 && FOUND+=("a stock dsh / DSH.app process of yours is running")
+  dsh_running="$(my_dsh_pids 'apps/cli/(lib/bin\.js|src/bin\.ts)' | tr '\n' ' ')"   # never `| head -1`: SIGPIPE + pipefail inside an assignment exits the script
+  [ -z "$dsh_running" ] || FOUND+=("a dsh process of yours is running (${dsh_running%% *})")
+  [ -z "$(my_dsh_pids 'dsh (web|serve)|@deepseek-ai/dsh|DSH\.app/Contents/MacOS/')" ] || FOUND+=("a stock dsh / DSH.app process of yours is running")
   [ -d "$DSH_HOME_DIR/profiles" ] && FOUND+=("$DSH_HOME_DIR/profiles exists (DSH home already initialised)")
   for la in io.github.taliesinb.dsh-web-relay ai.symbolica.dsh-remote; do
     [ -f "$HOME/Library/LaunchAgents/$la.plist" ] && FOUND+=("LaunchAgent $la is installed")
@@ -331,7 +345,7 @@ if wants preflight; then
     done
     if [ "$DRY" = 0 ]; then
       for _ in $(seq 1 20); do lsof -ti tcp:"$WEB_PORT" -sTCP:LISTEN >/dev/null 2>&1 || lsof -ti tcp:"$PROXY_PORT" -sTCP:LISTEN >/dev/null 2>&1 || break; sleep 1; done
-      pgrep -u "$(id -u)" -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' | xargs kill 2>/dev/null || true   # this user's only
+      my_dsh_pids 'apps/cli/(lib/bin\.js|src/bin\.ts)' | xargs kill 2>/dev/null || true   # this user's only
     fi
     if [ -f "$HOME/dsh/checkout/apps/cli/lib/bin.js" ]; then
       log "removing the deploy-remote.sh tree: ~/dsh (checkout, plugins, deps, logs) and ~/.dsh/deploy"
@@ -339,7 +353,7 @@ if wants preflight; then
     fi
     # ---- take over ANY other DSH on this Mac (a colleague's manual install), not just our own shapes ----
     # Every `dsh web` of this user, whatever started it (stock CLI, Desktop app, a terminal).
-    for pid in $(pgrep -u "$(id -u)" -f 'dsh (web|serve)|@deepseek-ai/dsh|dsh/(lib|src)/bin\.(js|ts)|DSH\.app/Contents/MacOS/' 2>/dev/null); do
+    for pid in $(my_dsh_pids 'dsh (web|serve)|@deepseek-ai/dsh|dsh/(lib|src)/bin\.(js|ts)|DSH\.app/Contents/MacOS/'); do
       log "stopping dsh process $pid ($(ps -o command= -p "$pid" 2>/dev/null | cut -c1-80))"
       [ "$DRY" = 1 ] || kill "$pid" 2>/dev/null || true
     done
@@ -391,7 +405,7 @@ if wants preflight; then
     fi
     if [ "$DRY" = 0 ]; then
       for port in $(seq 3080 3099); do [ -n "$(lsof -u "$(id -u)" -a -ti tcp:$port -sTCP:LISTEN 2>/dev/null || true)" ] && die "a process of yours still listens on :$port after the teardown"; done
-      pgrep -u "$(id -u)" -f 'apps/cli/(lib/bin\.js|src/bin\.ts)' >/dev/null 2>&1 && die "a dsh process survived the teardown"
+      [ -z "$(my_dsh_pids 'apps/cli/(lib/bin\.js|src/bin\.ts)')" ] || die "a dsh process survived the teardown"
     fi
     ok "old install stopped and removed; ~/.dsh kept$( [ -d "$HOME/Applications/$DOCK_NAME.app" ] && echo '; the Dock app will be rebuilt' )"
   elif [ -f "$MARKER" ]; then
