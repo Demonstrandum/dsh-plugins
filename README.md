@@ -119,6 +119,13 @@ Everything else — tools, remote access, apps, UI — is a plugin.
   (fails the call with "user aborted sleep", so the model stops and asks)
   buttons; a system-prompt line steers the model away from `sleep`. Host +
   browser halves.
+- `chat-title` — the agent reviews the automatic chat title: a `rename_chat`
+  tool over the harness's session-title service (titles in the in-tree
+  titler's configured style; refuses in subagents and never overrides a title
+  the human chose), a short system-prompt rule (rename when the automatic
+  title is wrong or generic, when a better name appears in the first few
+  turns, or when the subject changes) and a runtime-context line showing the
+  current automatic title. Off for presets without tools. Host-only.
 - `session-introspect` — `transcript_*` tools that let an agent read *other*
   agents' transcripts over the harness's own session query, never the zstd logs:
   `transcript_find` (by `workspace/title`, age), `transcript_outline` (per-turn

@@ -132,7 +132,7 @@ generated API in `docs/cordis-api/`):
    `dsh plugin --profile <name> add ./plugins/<dir>` (pnpm-links the local
    directory; `remove` undoes it). Layer order, git installs, and the pnpm
    `allowBuilds` catch: `docs/user/develop/basic/publish.md`.
-   **All nineteen live plugins at once:** `pnpm install-plugins [--profile web]`
+   **All twenty-two live plugins at once:** `pnpm install-plugins [--profile web]`
    (`tools/install-plugins.sh`; `pnpm remove-plugins` undoes it). Rows then
    resolve by package name from the profile's hoisted `node_modules`, so no
    patch carries an absolute path. A "superplugin" package that merely lists
@@ -397,6 +397,21 @@ can reproduce or maintain it:
   navigate, `then` on navigate, selector/expression `*_wait_for`),
   `selector`/`text` targets for click/fill/hover, reopen-after-Chrome-restart
   under the same window id, most-recently-used window default.
+- `chat-title-plugin.md` — the agent as reviewer of the automatic chat title
+  (`chat-title` plugin, host-only): a `rename_chat` tool over
+  `ctx.sessionTitle.rename` in the titler's style (read from the
+  `session-title-llm` loader row; refuses in subagents), an 80-word
+  system-prompt rule and a runtime-context line carrying the current
+  automatic title (placeholder vs provider wording), both gated on the
+  agent's scope seeing the tool so no-tools presets get nothing; why `rename`
+  can only write `source.kind: 'user'` and how `tool/result.meta.chatTitle`
+  tells the agent's own titles from the human's (never overridden); how the
+  design moved from "agent names every chat first" to reviewer after the
+  comparison with `session-title-llm`; the headless throwaway-home
+  verification (titler on: no rename; titler disabled: placeholder replaced),
+  the live bundle install taking effect without a restart, and the pnpm-12
+  `packageManager` temp-dir trap (`node --import tsx/esm apps/cli/src/bin.ts`
+  from the checkout root).
 - `client-bundle-rebuild-kills-pending-prompts.md` — `ask_user_question`
   fails with `NO_PROVIDER` ("no user-questions answerer accepted the
   request") seconds after a live-profile client bundle is rebuilt: the HMR

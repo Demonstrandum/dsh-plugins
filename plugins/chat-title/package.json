@@ -1,0 +1,31 @@
+{
+  "name": "tali-chat-title",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin: a rename_chat tool so the agent can name the chat (session title), plus a system-prompt rule and a runtime-context nudge that make it name the chat at the start — as soon as the first message states the task. Host-only, no client bundle.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "title.mjs",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "check": "node --check index.js && node --test tests/*.test.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-llm": "link:../../deepseek-harness/packages/llm/llm",
+    "@deepseek-ai/dsh-tools": "link:../../deepseek-harness/packages/core/tools",
+    "@deepseek-ai/schemastery": "link:../../deepseek-harness/vendor/schemastery"
+  }
+}

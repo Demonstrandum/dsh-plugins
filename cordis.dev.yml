@@ -91,3 +91,10 @@
     # session is idle) and Reboot now. Recipe: recipes/reboot-command.md
     - id: tali-reboot-command
       name: '/Users/USER/github/tali-dash-plugins/plugins/reboot-command/index.js'
+    # Under trial (2026-09-24): chat-title — a rename_chat tool plus a
+    # system-prompt rule and an untitled-chat runtime-context nudge that make
+    # the agent name the chat right after the first message that states the
+    # task (host-only). The preview's default model has no tools, so the tool
+    # path was verified headlessly instead; recipe: recipes/chat-title-plugin.md
+    - id: tali-chat-title
+      name: '/Users/USER/github/tali-dash-plugins/plugins/chat-title/index.js'
