@@ -8,6 +8,7 @@
  *   transcript_tool_stats   per-tool errors, latency, top error messages, what-happened-next
  *   transcript_grep         regex over prompts, assistant text, tool args/results
  *   transcript_event        one full raw event by seq
+ *   transcript_export       joined call/result rows (+ text rows) as jsonl for offline analysis
  *
  * Every tool takes `fmt` (text | json | jsonl) and `out_file` (write the
  * complete rendering through ctx.fs under the session's sandbox mode).

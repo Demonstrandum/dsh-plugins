@@ -398,6 +398,36 @@ DSH facts the implementation depends on (verified in the checkout, 2026-09-16):
 - Cross-machine transcripts (remote workspaces) — out of scope until
   `dsh-remote-workspaces` settles.
 
+## 2.7 Round two: analysis-grade additions (2026-09-23)
+
+The second tool-use study (`rsi/tool-analysis-03.md`) hit eight gaps in the
+tools themselves — every one of them was worked around with a python script
+over a `transcript_grep pattern:"[\s\S]" context_chars:20000 fmt:jsonl`
+export. This round closes them inside the plugin (34 tests, docs regenerated):
+
+| Gap met during analysis | What was added |
+|---|---|
+| no way to bracket a cohort (PRE = ALL − POST by hand; latencies impossible) | `until` beside `since` on every corpus selector (`find`, `tool_stats`, `grep`, `export`); `transcript_tool_stats split_at:<date>` renders the per-tool table before / after side by side (calls, share, err%, p50) |
+| exporting call args across sessions needed the grep hack (excerpts truncate) | **`transcript_export`**: one row per call **joined with its result** — parsed `args`, `argsChars`, `ok`, `code`, `ms`, `resultSeq`, `resultChars`, clipped `result` — plus optional `user` / `assistant` / `reasoning` / `inject` / `system` rows; every row carries `session` and `sessionName`; `errors_only`, `tools`, `kinds`, `limit`; inline output bounded, `out_file` for corpora |
+| grep hits carried no ok/latency/callId; call↔result pairing by heuristics | grep `call`/`result` hits carry `callId`, `ok`, `ms`, `code`; `per_session_limit` stops one long session crowding out the rest |
+| n-grams, run lengths, duplicate calls, "what preceded the error" all done in python | `transcript_tool_stats sections:[…]`: `before_error` (mirror of after-error), `sequences` (bigrams/trigrams, same-tool repeats excluded), `runs` (same-tool streaks within a turn: share of calls in runs ≥ 3, longest run + where), `duplicates` (identical-args repeats within one session), `args` (per tool: % of calls passing each parameter, median array length / string chars); `sections:["all"]` |
+| the agent's *thinking* after an error was invisible in the stats | every top-error group carries **reactions** — the reasoning / assistant text between the failed result and the next call (`reactions:` per group, default 2; rendered as `THOUGHT "…"` / `SAID "…"`); `transcript_read errors_only` keeps those reasoning rows without `include: reasoning` |
+| "was tool X even registered in session S" was unanswerable | `request/header.data.header.tools[]` is recorded per session (`m.toolsAvailable`, first-seen seq); `tool_stats` gains a **used/avail** column (sessions that called it / sessions where it was registered) and a "registered but never called" list — adoption is now exact; the `system/message` prompt is a `system` row (grep `kinds:["system"]`, read `include:["injections"]`) |
+| `transcript_find` had no model / size columns | `details:true` adds model, cwd, events, calls, errors and registered-tool count (one log read per listed session; default stays free) |
+
+First real run (tensatory corpus, `tools:["edit_many","edit","read_many"]`,
+`sections:["all"]`, `split_at` at the fs-tools mount): `before_error` shows
+**`bash → edit ✗ ×15`, `bash → edit_many ✗ ×10`** — the mixed-mode trap
+(bash mutation invalidates the read guard) quantified in one line; the
+reaction under the top `edit_many` error reads *"wondering if there's a
+whitespace mismatch … I should try a smaller, more targeted chunk"*; the
+split table shows `edit_many` 39 % → 42 % of fs calls with err% 9 → 14.
+
+Caveats: `split_at`/`since`/`until` bracket by session **creation** time, so
+a long-lived session straddling the date lands on one side whole. Host
+module edits need a `dsh web` restart to go live (a patch-row reload re-runs
+`apply` from Node's module cache).
+
 ## 3. Findings from the first corpus-wide run
 
 `transcript_tool_stats sessions:["*"] tools:["chrome_*","safari_*"]` over 53

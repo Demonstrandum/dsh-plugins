@@ -520,7 +520,9 @@ can reproduce or maintain it:
   the plugin breakages it exposed (turnTail chain→list, `requestBody` on
   Fetch routes), and how to promote the trial branch.
 - `session-introspect-plugin.md` — model-facing `transcript_*` tools for
-  reading *other* agents' transcripts (`session-introspect` plugin: find by
+  reading *other* agents' transcripts and running tool-use studies (§2.7:
+  `transcript_export`, `split_at`/`until` cohorts, adoption used/avail,
+  error reactions, sequences/runs/duplicates/args) (`session-introspect` plugin: find by
   `workspace/title`, per-turn outline, timeline render, per-tool error/latency
   stats with what-happened-next, grep, raw event; `fmt` text/json/jsonl and
   `out_file` via `ctx.fs` on every tool) over `ctx.sessionQuery`; the survey

@@ -177,10 +177,12 @@ export function createResolver(ctx, options) {
    * Resolve a `sessions` selector for corpus-wide tools: `"*"`, `"<ws>/*"`,
    * one spec, or an array of specs. `since` filters by createdAt.
    */
-  async function select(selector, exec, { since } = {}, signal) {
+  async function select(selector, exec, { since, until } = {}, signal) {
     const all = await listAll({ callerCwd: callerCwd(exec) }, signal)
     const sinceMs = parseSince(since)
-    const inWindow = (e) => sinceMs === null || (e.createdAt ?? 0) >= sinceMs
+    const untilMs = parseSince(until, 'until')
+    if (sinceMs !== null && untilMs !== null && untilMs <= sinceMs) throw new IntrospectError(`until (${new Date(untilMs).toISOString()}) must be later than since (${new Date(sinceMs).toISOString()}).`)
+    const inWindow = (e) => (sinceMs === null || (e.createdAt ?? 0) >= sinceMs) && (untilMs === null || (e.createdAt ?? 0) < untilMs)
     if (selector === undefined || selector === null || selector === '') selector = 'self'
     const specs = Array.isArray(selector) ? selector : [selector]
     const out = new Map()
@@ -255,12 +257,14 @@ function ambiguous(raw, hits) {
 }
 
 /**
- * `since`: ISO date/time, or a relative `7d` / `12h` / `30m`.
+ * `since` / `until` / `split_at`: ISO date/time, or a relative `7d` / `12h` / `30m` (that long ago).
+ * @param {unknown} value
+ * @param {string} [name] - parameter name for the error message
  * @returns {number | null} epoch ms
  */
-export function parseSince(since) {
-  if (since === undefined || since === null || since === '') return null
-  const s = String(since).trim()
+export function parseSince(value, name = 'since') {
+  if (value === undefined || value === null || value === '') return null
+  const s = String(value).trim()
   const rel = /^(\d+)\s*([mhdw])$/i.exec(s)
   if (rel) {
     const n = Number(rel[1])
@@ -268,6 +272,6 @@ export function parseSince(since) {
     return Date.now() - n * unit
   }
   const t = Date.parse(s)
-  if (Number.isNaN(t)) throw new IntrospectError(`since "${s}" is not an ISO date or a relative duration like 7d, 12h, 30m.`)
+  if (Number.isNaN(t)) throw new IntrospectError(`${name} "${s}" is not an ISO date or a relative duration like 7d, 12h, 30m.`)
   return t
 }

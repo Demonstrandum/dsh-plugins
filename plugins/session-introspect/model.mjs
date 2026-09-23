@@ -16,7 +16,7 @@ import { basename } from 'node:path'
 
 /** Event types that carry nothing a transcript reader needs; hidden unless asked for raw events. */
 const HIDDEN_TYPES = new Set([
-  'step/start', 'step/end', 'system/message', 'request/header', 'request/context',
+  'step/start', 'step/end', 'request/header', 'request/context',
   'session/title-llm-request', 'session/end-seed', 'permission/preset', 'sandbox/mode',
   'approval/policy', 'agent/inbox/spliced', 'todo/write', 'command/done', 'assistant/attempt',
 ])
@@ -147,6 +147,8 @@ export function buildModel(snapshot, meta = {}) {
   let title = meta.title
   let model = null
   let current = null // current turn record
+  const toolsAvailable = new Map() // tool name → seq of the request/header that first listed it
+  let systemPromptSeq = null
 
   const startTurn = (turn, seq, time) => {
     const rec = {
@@ -283,6 +285,19 @@ export function buildModel(snapshot, meta = {}) {
       case 'request/header': {
         const config = data.header?.config
         if (config && typeof config === 'object') model = { provider: config.provider ?? null, model: config.model ?? null }
+        // The registered tool list of this request: the only record of which tools the agent could have called.
+        const declared = Array.isArray(data.header?.tools) ? data.header.tools : []
+        for (const t of declared) {
+          const name = t && typeof t === 'object' ? t.name : t
+          if (typeof name === 'string' && !toolsAvailable.has(name)) toolsAvailable.set(name, seq)
+        }
+        break
+      }
+      case 'system/message': {
+        // The system prompt as sent (first one kept as the session's prompt; every one is a greppable `system` row).
+        const text = textOf(data.message?.content)
+        if (systemPromptSeq === null && text !== '') systemPromptSeq = seq
+        push({ ...base, kind: 'system', turn: current?.turn ?? data.turn ?? null, step: data.step ?? null, text })
         break
       }
       case 'request/context': {
@@ -331,6 +346,9 @@ export function buildModel(snapshot, meta = {}) {
     createdAt: header.createdAt ?? null,
     live: meta.live === true,
     model,
+    toolsAvailable: [...toolsAvailable.keys()].sort(),
+    toolFirstSeen: Object.fromEntries(toolsAvailable),
+    systemPromptSeq,
     events,
     rows,
     calls,
@@ -369,7 +387,13 @@ export function sessionSummary(m) {
     turns: m.stats.turns,
     calls: m.stats.calls,
     errors: m.stats.errors,
+    toolsAvailable: m.toolsAvailable?.length ?? 0,
   }
+}
+
+/** `workspace/title` label of a model or listing entry. */
+export function sessionName(m) {
+  return `${m.workspace}/${m.title ?? '(untitled)'}`
 }
 
 /**

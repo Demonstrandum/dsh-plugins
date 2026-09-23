@@ -76,16 +76,20 @@ function imagesText(images) {
 export function renderFind(value) {
   const rows = value.sessions
   if (rows.length === 0) return `No sessions matched${value.query ? ` "${value.query}"` : ''}.${value.hint ? ` ${value.hint}` : ''}`
+  const details = value.details === true
   const lines = [table(
-    ['id', 'workspace/title', 'created', 'live', ''],
+    details
+      ? ['id', 'workspace/title', 'created', 'live', 'model', 'events', 'calls', 'err', 'tools', 'cwd', '']
+      : ['id', 'workspace/title', 'created', 'live', ''],
     rows.map(s => [
       shortId(s.id),
       `${s.depth ? '↳ ' : ''}${s.workspace}/${s.title ?? '(untitled)'}`,
       fmtTime(s.createdAt),
       s.live ? 'yes' : 'no',
+      ...details ? [s.model ?? (s.readError ? '(unreadable)' : '?'), s.events ?? '', s.calls ?? '', s.errors ?? '', s.toolsAvailable ?? '', s.cwd ?? ''] : [],
       s.self ? '(this session)' : s.depth ? `subagent depth ${s.depth}` : '',
     ]),
-    ['l', 'l', 'l', 'l', 'l'],
+    details ? ['l', 'l', 'l', 'l', 'l', 'r', 'r', 'r', 'r', 'l', 'l'] : ['l', 'l', 'l', 'l', 'l'],
   )]
   lines.push(`${value.total} session${value.total === 1 ? '' : 's'}${value.truncated ? `; ${value.truncated} more not shown — narrow with query/workspace/since or raise limit` : ''}.`)
   if (value.hint) lines.push(value.hint)
@@ -99,6 +103,7 @@ function sessionLine(s) {
   if (s.cwd) bits.push(`cwd ${s.cwd}`)
   if (s.model) bits.push(s.model)
   bits.push(`${s.events} events`, `${s.turns} turns`, `${s.calls} calls${s.errors ? ` (${s.errors} ✗)` : ''}`)
+  if (s.toolsAvailable) bits.push(`${s.toolsAvailable} tools registered`)
   if (s.live) bits.push('LIVE')
   return bits.join(' · ')
 }
@@ -151,6 +156,7 @@ export function renderRow(r, opts = {}) {
     case 'user': return `${tag} USER${ts} ${quote(r.text, max)}${r.images?.length ? ` ${imagesText(r.images)}` : ''}`
     case 'inject': return `${tag} INJECT ${r.plugin ?? ''}${ts} ${quote(r.text, Math.min(max, 200))}`
     case 'instructions': return `${tag} INSTRUCTIONS${ts} ${quote(r.text, Math.min(max, 120))}`
+    case 'system': return `${tag} SYSTEM${ts} ${quote(r.text, Math.min(max, 200))}${r.textChars ? ` (${fmtTokens(r.textChars)} chars)` : ''}`
     case 'checkpoint': return `${tag} CHECKPOINT (compaction)${ts} ${quote(r.text, Math.min(max, 200))}`
     case 'assistant': return `${tag} ASSISTANT${ts} ${quote(r.text, max)}`
     case 'reasoning': return `${tag} REASONING${ts} ${quote(r.text, max)}`
@@ -200,18 +206,96 @@ export function renderStats(value) {
   const scopeLabel = one ? `${shortId(one.id)} ${one.workspace}/${one.title ?? '(untitled)'}` : `${s.sessions} sessions read${skipped}${s.from ? `, created ${fmtTime(s.from)} → ${fmtTime(s.to)}` : ''}`
   lines.push(`${scopeLabel} · ${s.calls} calls · ${s.errors} errors${s.tools?.length ? ` · tools ${s.tools.join(', ')}` : ''}`)
   if (value.tools.length === 0) { lines.push('No tool calls matched.'); return lines.join('\n') }
+  const withAvail = value.tools.some(t => t.available !== null && t.available !== undefined)
+  const multi = s.sessions > 1
   const rows = []
   for (const t of value.tools) {
     const first = t.topErrors[0]
-    rows.push([t.tool, t.calls, t.errors, `${Math.round(t.errorRate * 100)}%`, fmtMs(t.p50Ms), fmtMs(t.p90Ms), first ? `×${first.count} ${first.message}` : ''])
-    for (const e of t.topErrors.slice(1)) rows.push(['', '', '', '', '', '', `×${e.count} ${e.message}`])
+    const avail = withAvail ? (multi ? `${t.sessions}/${t.available ?? '?'}` : '') : (multi ? String(t.sessions) : '')
+    rows.push([t.tool, t.calls, t.errors, `${Math.round(t.errorRate * 100)}%`, ...multi ? [avail] : [], fmtMs(t.p50Ms), fmtMs(t.p90Ms), first ? `×${first.count} ${first.message}` : ''])
+    for (const e of t.topErrors.slice(1)) rows.push(['', '', '', '', ...multi ? [''] : [], '', '', `×${e.count} ${e.message}`])
   }
-  lines.push(table(['tool', 'calls', 'err', 'err%', 'p50', 'p90', 'top errors (normalized; see fmt=json for example seqs)'], rows, ['l', 'r', 'r', 'r', 'r', 'r', 'l']))
+  const header = ['tool', 'calls', 'err', 'err%', ...multi ? [withAvail ? 'used/avail' : 'sessions'] : [], 'p50', 'p90', 'top errors (normalized; see fmt=json for example seqs)']
+  lines.push(table(header, rows, ['l', 'r', 'r', 'r', ...multi ? ['r'] : [], 'r', 'r', 'l']))
+  if (multi && withAvail) lines.push('used/avail = sessions that called the tool / sessions where it was registered (from request/header).')
+  if (value.unused?.length) lines.push(`registered but never called: ${value.unused.slice(0, 40).map(u => `${u.tool} (${u.available})`).join(', ')}${value.unused.length > 40 ? ` … ${value.unused.length - 40} more` : ''}`)
+  // reactions: what the agent thought/said right after each top error
+  const reactions = []
+  for (const t of value.tools) for (const e of t.topErrors) for (const r of e.reactions ?? []) reactions.push({ tool: t.tool, message: e.message, ...r })
+  if (reactions.length) {
+    lines.push('agent reactions right after an error (reasoning/assistant text before the next call):')
+    let last = null
+    for (const r of reactions) {
+      const head = `${r.tool} ✗ ${clip(r.message, 70)}`
+      if (head !== last) { lines.push(`  ${head}`); last = head }
+      lines.push(`    ${multi ? `${shortId(r.session)} ` : ''}[${r.seq}] ${r.kind === 'reasoning' ? 'THOUGHT' : 'SAID'} "${r.text}"`)
+    }
+  }
   if (value.afterError.length) {
     lines.push('after an error, the next call was:')
     for (const a of value.afterError.slice(0, 12)) {
       const rel = a.relation === 'same-args' ? 'retry, identical args' : a.relation === 'retry' ? 'retry, changed args' : a.relation === 'end' ? 'nothing — session ended' : 'switch'
       lines.push(`  ${a.tool} ✗ → ${a.next ?? '(none)'} (${rel}) ×${a.count}`)
+    }
+  }
+  if (value.beforeError?.length) {
+    lines.push('before an error, the previous call was:')
+    for (const b of value.beforeError.slice(0, 12)) lines.push(`  ${b.prev ?? '(turn start)'} → ${b.tool} ✗ ×${b.count}`)
+  }
+  if (value.sequences) {
+    const q = value.sequences
+    lines.push(`tool sequences (${q.pairs} adjacent pairs, ${q.sameToolPairs} same-tool repeats excluded — see runs):`)
+    lines.push('  bigrams:  ' + q.bigrams.map(b => `${b.tools.join(' → ')} ×${b.count}`).join(' · '))
+    lines.push('  trigrams: ' + q.trigrams.map(b => `${b.tools.join(' → ')} ×${b.count}`).join(' · '))
+  }
+  if (value.runs) {
+    lines.push('same-tool runs within a turn (tools with a run ≥ 3):')
+    lines.push(table(['tool', 'calls', 'runs', 'runs≥3', 'calls in runs≥3', 'share', 'longest'],
+      value.runs.slice(0, 20).map(r => [r.tool, r.calls, r.runs, r.runs3, r.callsInRuns3, `${Math.round(r.share3 * 100)}%`, `${r.maxRun.len}${multi ? ` @ ${shortId(r.maxRun.session)}` : ''} seq ${r.maxRun.seq}`]),
+      ['l', 'r', 'r', 'r', 'r', 'r', 'l']))
+  }
+  if (value.duplicates) {
+    lines.push('identical-args repeats within one session:')
+    for (const d of value.duplicates.slice(0, 15)) {
+      lines.push(`  ${d.tool}: ${d.groups} group${d.groups === 1 ? '' : 's'}, ${d.extraCalls} extra call${d.extraCalls === 1 ? '' : 's'}`)
+      for (const t of d.top) lines.push(`    ×${t.count} ${multi ? `${shortId(t.session)} ` : ''}seq ${t.seq}: ${t.args}`)
+    }
+  }
+  if (value.args) {
+    lines.push('parameter shapes (share of calls passing each parameter; median length of arrays / chars of strings):')
+    for (const a of value.args.slice(0, 25)) {
+      const ks = a.keys.map(k => `${k.key} ${Math.round(k.pct * 100)}%${k.arrayMedianLen !== undefined ? ` [med ${k.arrayMedianLen}, max ${k.arrayMaxLen}]` : ''}${k.stringMedianChars !== undefined ? ` (~${k.stringMedianChars}ch)` : ''}`)
+      lines.push(`  ${a.tool} (${a.calls}): ${ks.join(', ')}`)
+    }
+  }
+  if (value.split) {
+    const sp = value.split
+    lines.push(`split at ${fmtTime(sp.at)}: before ${sp.before.sessions} sessions / ${sp.before.calls} calls / ${sp.before.errors} errors · after ${sp.after.sessions} sessions / ${sp.after.calls} calls / ${sp.after.errors} errors`)
+    const b = new Map(sp.before.tools.map(t => [t.tool, t]))
+    const a = new Map(sp.after.tools.map(t => [t.tool, t]))
+    const names = [...new Set([...b.keys(), ...a.keys()])].sort((x, y) => ((a.get(y)?.calls ?? 0) + (b.get(y)?.calls ?? 0)) - ((a.get(x)?.calls ?? 0) + (b.get(x)?.calls ?? 0)))
+    const pct = (t, tot) => tot ? `${(100 * (t?.calls ?? 0) / tot).toFixed(1)}%` : '—'
+    lines.push(table(['tool', 'before', 'share', 'err%', 'p50', 'after', 'share', 'err%', 'p50'],
+      names.map(n => {
+        const x = b.get(n); const y = a.get(n)
+        return [n, x?.calls ?? 0, pct(x, sp.before.calls), x ? `${Math.round(x.errorRate * 100)}%` : '—', fmtMs(x?.p50Ms), y?.calls ?? 0, pct(y, sp.after.calls), y ? `${Math.round(y.errorRate * 100)}%` : '—', fmtMs(y?.p50Ms)]
+      }), ['l', 'r', 'r', 'r', 'r', 'r', 'r', 'r', 'r']))
+  }
+  lines.push(...skippedLines(value.skipped))
+  return lines.join('\n')
+}
+
+// ---------------------------------------------------------------- export
+
+export function renderExport(value) {
+  const lines = [`${value.rows.length} row${value.rows.length === 1 ? '' : 's'} (${value.kinds.join(', ')}) from ${value.sessions.length} session${value.sessions.length === 1 ? '' : 's'}${value.tools?.length ? ` · tools ${value.tools.join(', ')}` : ''}${value.truncated ? ` — truncated at limit ${value.limit}; use out_file or narrow` : ''}`]
+  for (const r of value.rows) {
+    const where = `${shortId(r.session)} [${r.seq}]${r.turn !== null && r.turn !== undefined ? ` T${r.turn}` : ''}`
+    if (r.kind === 'call') {
+      const status = r.ok === null ? '?' : r.ok ? '✓' : '✗'
+      lines.push(`${where} ${r.tool} ${status} ${fmtMs(r.ms)}${r.code ? ` code=${r.code}` : ''} ${clip(JSON.stringify(r.args), 200)}${r.result ? ` → ${clip(r.result, 120)}` : ''}`)
+    } else {
+      lines.push(`${where} ${r.kind.toUpperCase()} ${clip(r.text ?? '', 200)}`)
     }
   }
   lines.push(...skippedLines(value.skipped))

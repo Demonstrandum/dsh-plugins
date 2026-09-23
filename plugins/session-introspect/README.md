@@ -1,11 +1,13 @@
 # tali-session-introspect
 
-DSH plugin: six read-only `transcript_*` tools that let an agent read **other
+DSH plugin: seven read-only `transcript_*` tools that let an agent read **other
 agents' session transcripts** — find a session by `workspace/title`, get a
-per-turn outline, render a compact timeline, aggregate per-tool error rates and
-latencies across many sessions, grep, and read one raw event. Built for the
+per-turn outline, render a compact timeline, aggregate per-tool error rates,
+latencies, adoption and call patterns across many sessions, grep, read one raw
+event, and export joined call/result rows for offline analysis. Built for the
 recurring workflow *"look at session `tensatory/interval-slider-proto` and see
-how that agent is experiencing tool X"*.
+how that agent is experiencing tool X"* — and for corpus-wide tool-use studies
+(`rsi/tool-analysis-0*.md`).
 
 Everything goes through `ctx.sessionQuery` (DSH's session-history service):
 the plugin never opens `~/.dsh/sessions`, never decodes zstd, and never knows
@@ -22,12 +24,13 @@ Generated reference (parameters, canonical values): [`docs/tools.md`](docs/tools
 
 | Tool | Purpose |
 |---|---|
-| `transcript_find` | sessions by query / workspace / age — no log reads |
+| `transcript_find` | sessions by query / workspace / age (`since`/`until`) — no log reads; `details: true` adds model, cwd, events/calls/errors and registered-tool count |
 | `transcript_outline` | per-turn TOC: seq range, duration, steps, tool counts (✗ per tool), tokens, how the turn ended, prompt |
-| `transcript_read` | timeline of a turn / seq range: `USER`, `ASSISTANT`, `CALL`, `RESULT ✓/✗ latency code excerpt`, images as `<image W×H type size>`; filters `tools`, `errors_only`, `include`; `raw: true` for original events |
-| `transcript_tool_stats` | per tool: calls, errors, err%, p50/p90 latency, normalized top errors, **what the agent did after each failure**; over one session, a workspace (`"tensatory/*"`) or everything (`"*"`) |
-| `transcript_grep` | regex over prompts / assistant text / tool args / results with excerpt + seq |
+| `transcript_read` | timeline of a turn / seq range: `USER`, `ASSISTANT`, `CALL`, `RESULT ✓/✗ latency code excerpt`, images as `<image W×H type size>`; filters `tools`, `errors_only` (keeps the reasoning right after each failure), `include` (`injections` shows the system prompt too); `raw: true` for original events |
+| `transcript_tool_stats` | per tool: calls, errors, err%, **used/avail** (sessions that called it / sessions where it was registered), p50/p90 latency, normalized top errors each with the agent's **reactions** (reasoning/assistant text right after the failure), what the agent did next; opt-in `sections`: `before_error`, `sequences` (bigrams/trigrams), `runs` (same-tool streaks), `duplicates` (identical-args repeats), `args` (parameter shapes); `split_at` compares before/after a date; over one session, a workspace (`"tensatory/*"`) or everything (`"*"`) |
+| `transcript_grep` | regex over prompts / assistant text / tool args / results (and `system` prompts on request) with excerpt + seq; call/result hits carry `callId`, `ok`, `ms`, `code`; `per_session_limit` |
 | `transcript_event` | one raw event by seq with neighbor summaries |
+| `transcript_export` | one row per tool call **joined with its result** (parsed args, ok, code, ms, result text) and optional user/assistant/reasoning/inject/system rows, from one or many sessions, as jsonl for python/jq — the corpus export for tool-use studies |
 
 Every tool accepts
 
@@ -66,7 +69,7 @@ per request.
 
 ```sh
 pnpm install                 # link: deps into the DSH checkout (dsh-tools, schemastery)
-pnpm check                   # syntax + 24 tests (fixtures are trimmed real logs) + docs freshness
+pnpm check                   # syntax + 34 tests (trimmed real logs + synthetic analytics logs) + docs freshness
 node scripts/smoke-log.mjs <session.v3.jsonl.zstd> outline|read [turn]|stats [globs]|rows [n]
 node scripts/make-fixture.mjs <session.v3.jsonl.zstd> <name>   # trimmed fixture from a real log
 node scripts/gen-tool-docs.mjs                                 # regenerate docs/tools.md
@@ -91,3 +94,9 @@ The headless session's own log can then be inspected with the tools.
   `deepseek-harness/<title>` under `scope: all` — the ambiguity list shows cwds.
 - Latency is `tool/result.time − tool/call.time` (wall time from dispatch to
   result), including any approval wait.
+- Tool availability comes from `request/header.tools[]`; a session with no
+  recorded request (e.g. a crash before the first step) shows `available` as
+  null and is left out of the used/avail column.
+- `since` / `until` / `split_at` bracket by session **creation** time.
+- Host module edits need a `dsh web` restart to take effect in a running
+  server (a live patch-row reload re-runs `apply` from Node's module cache).

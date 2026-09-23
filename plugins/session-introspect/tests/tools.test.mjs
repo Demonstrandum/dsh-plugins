@@ -26,8 +26,8 @@ const run = (name, args) => tool(name).execute(args, exec)
 
 test.after(() => rmSync(root, { recursive: true, force: true }))
 
-test('six tools registered with the shared parameters', () => {
-  assert.deepEqual(tools.map(t => t.name), ['transcript_find', 'transcript_outline', 'transcript_read', 'transcript_tool_stats', 'transcript_grep', 'transcript_event'])
+test('seven tools registered with the shared parameters', () => {
+  assert.deepEqual(tools.map(t => t.name), ['transcript_find', 'transcript_outline', 'transcript_read', 'transcript_tool_stats', 'transcript_grep', 'transcript_event', 'transcript_export'])
   for (const t of tools) {
     const props = t.parameters.properties ?? t.parameters
     assert.ok(props.fmt, `${t.name} fmt`)

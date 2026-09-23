@@ -1,16 +1,16 @@
 /**
- * tools.mjs — the six model-facing tools. Each returns one canonical JSON
+ * tools.mjs — the seven model-facing tools. Each returns one canonical JSON
  * value (or a `{ kind: 'file' }` handle when `out_file` is set); `output.render`
  * turns it into text / json / jsonl. Session access goes through the resolver
  * (resolve.mjs) and therefore through `ctx.sessionQuery` only.
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { clip, matchesTool, sessionSummary, turnRows } from './model.mjs'
+import { clip, matchesTool, sessionName, sessionSummary, turnRows } from './model.mjs'
 import { boundRows, commonParameters, dropUndefined, IntrospectError, normalizeFmt, renderAs, renderValue, writeOutFile } from './output.mjs'
-import { renderEvent, renderFind, renderGrep, renderOutline, renderRead, renderRow, renderStats } from './render.mjs'
+import { renderEvent, renderExport, renderFind, renderGrep, renderOutline, renderRead, renderRow, renderStats } from './render.mjs'
 import { parseSince } from './resolve.mjs'
-import { toolStats } from './stats.mjs'
+import { SECTIONS, toolStats } from './stats.mjs'
 
 const SESSION_PARAM = {
   type: 'string',
@@ -21,6 +21,9 @@ const SESSIONS_PARAM = {
   items: { type: 'string' },
   description: 'Several sessions: session spellings, "<workspace>/*", or "*" for all. Overrides session.',
 }
+const SINCE_PARAM = { type: 'string', description: 'Only sessions created at/after this ISO date/time or within a relative window like "7d", "12h" (applies to sessions/"*" selections).' }
+const UNTIL_PARAM = { type: 'string', description: 'Only sessions created before this ISO date/time (or "7d" = seven days ago). With since this brackets a cohort.' }
+const GREP_KINDS = ['user', 'assistant', 'reasoning', 'call', 'result', 'inject', 'system']
 
 /**
  * @param {object} deps
@@ -53,11 +56,13 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
   }
   const find = defineTool({
     name: 'transcript_find',
-    description: 'List or look up DSH sessions (any workspace) by title, workspace, id or age, so another agent\'s transcript can be inspected with the other transcript_* tools. Returns id, workspace/title, creation time and whether the session is live. Costs no log reads.',
+    description: 'List or look up DSH sessions (any workspace) by title, workspace, id or age, so another agent\'s transcript can be inspected with the other transcript_* tools. Returns id, workspace/title, creation time and whether the session is live. Costs no log reads unless details:true (then also model, cwd, event/call/error counts and the number of registered tools per session).',
     parameters: {
       query: { type: 'string', description: 'Case-insensitive substring over "workspace/title" and id (e.g. "tensatory", "slider", "2b81"). Omit to list everything.' },
       workspace: { type: 'string', description: 'Only this workspace (basename of the working directory, e.g. "tensatory").' },
-      since: { type: 'string', description: 'Only sessions created after this ISO date/time or within a relative window like "7d", "12h".' },
+      since: SINCE_PARAM,
+      until: UNTIL_PARAM,
+      details: { type: 'boolean', description: 'Read each listed session and add model, cwd, events, calls, errors and registered-tool count (one log read per session; the listing itself stays cheap without it).' },
       limit: { type: 'integer', description: `Maximum rows (default ${limits.findLimit}).` },
       ...commonParameters,
     },
@@ -66,21 +71,35 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
     async execute(args, exec) {
       const all = await resolver.listAll({ callerCwd: resolver.callerCwd(exec) }, exec.signal)
       const sinceMs = parseSince(args.since)
+      const untilMs = parseSince(args.until, 'until')
       const q = (args.query ?? '').trim().toLowerCase()
       const ws = (args.workspace ?? '').trim().toLowerCase()
       let hits = all.filter(e => (ws === '' || e.workspace.toLowerCase() === ws)
         && (sinceMs === null || (e.createdAt ?? 0) >= sinceMs)
+        && (untilMs === null || (e.createdAt ?? 0) < untilMs)
         && (q === '' || `${e.workspace}/${e.title ?? ''}`.toLowerCase().includes(q) || e.id.toLowerCase().includes(q)))
       const total = hits.length
       const limit = Math.max(1, Math.floor(args.limit ?? limits.findLimit))
       const truncated = Math.max(0, total - limit)
       hits = hits.slice(0, limit)
       const me = resolver.callerId(exec)
+      const sessions = hits.map(e => ({ id: e.id, workspace: e.workspace, title: e.title, cwd: e.cwd ?? null, createdAt: e.createdAt, live: e.live, depth: e.depth, parent: e.parent, self: e.id === me }))
+      if (args.details === true) {
+        const { models, skipped } = await resolver.models(hits, exec.signal)
+        const byId = new Map(models.map(m => [m.id, m]))
+        const failed = new Map(skipped.map(s => [s.id, s.error]))
+        for (const s of sessions) {
+          const m = byId.get(s.id)
+          if (m) Object.assign(s, { model: m.model?.model ?? null, provider: m.model?.provider ?? null, events: m.stats.events, turns: m.stats.turns, calls: m.stats.calls, errors: m.stats.errors, toolsAvailable: m.toolsAvailable.length, title: m.title ?? s.title })
+          else if (failed.has(s.id)) s.readError = failed.get(s.id)
+        }
+      }
       const value = {
         query: args.query ?? null,
         total,
         truncated,
-        sessions: hits.map(e => ({ id: e.id, workspace: e.workspace, title: e.title, cwd: e.cwd ?? null, createdAt: e.createdAt, live: e.live, depth: e.depth, parent: e.parent, self: e.id === me })),
+        details: args.details === true,
+        sessions,
         hint: ws !== '' && total === 0 ? `Known workspaces: ${[...new Set(all.map(e => e.workspace))].sort().join(', ')}.` : undefined,
       }
       return finish(exec, args, value, findSpec)
@@ -137,7 +156,7 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       seq_to: { type: 'integer', description: 'Last event seq to include.' },
       tools: { type: 'array', items: { type: 'string' }, description: 'Only calls/results of these tools; globs allowed ("chrome_*", "*_screenshot"). User/assistant text and turn markers stay.' },
       errors_only: { type: 'boolean', description: 'Only failed calls (their CALL, RESULT and the assistant text right after), plus turn markers and prompts.' },
-      include: { type: 'array', items: { type: 'string', enum: ['args', 'results', 'assistant', 'reasoning', 'injections', 'all'] }, description: 'Row classes to include. Default: args, results, assistant. Add "reasoning" for model reasoning blocks and "injections" for plugin/AGENTS.md context injections; "all" for everything.' },
+      include: { type: 'array', items: { type: 'string', enum: ['args', 'results', 'assistant', 'reasoning', 'injections', 'all'] }, description: 'Row classes to include. Default: args, results, assistant. Add "reasoning" for model reasoning blocks and "injections" for plugin/AGENTS.md context injections and the system prompt; "all" for everything.' },
       max_result_chars: { type: 'integer', description: `Excerpt length per text (default ${limits.maxResultChars}). Full text of one event: transcript_event.` },
       max_chars: { type: 'integer', description: `Inline size budget (default ${limits.maxChars}); later rows are omitted with a seq_from continuation hint. Lifted by out_file.` },
       raw: { type: 'boolean', description: 'Emit original event objects (json/jsonl only) instead of timeline rows.' },
@@ -178,6 +197,7 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
           sel = sel.filter(r => (r.kind !== 'call' && r.kind !== 'result') || matchesTool(r.tool, args.tools))
           filters.push(`tools ${args.tools.join(',')}`)
         }
+        const reactions = new Set() // reasoning rows kept in errors_only mode even without include: reasoning
         if (args.errors_only === true) {
           const failing = new Set()
           for (let i = 0; i < sel.length; i++) {
@@ -185,8 +205,12 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
             if (r.kind === 'result' && r.ok === false) {
               failing.add(r.seq)
               if (r.callId) { const c = sel.find(x => x.kind === 'call' && x.callId === r.callId); if (c) failing.add(c.seq) }
-              const next = sel.slice(i + 1).find(x => x.kind === 'assistant' || x.kind === 'result')
-              if (next?.kind === 'assistant') failing.add(next.seq)
+              // the agent's reaction: every reasoning / assistant row up to the next call
+              for (let j = i + 1; j < sel.length; j++) {
+                const x = sel[j]
+                if (x.kind === 'call' || x.kind === 'result' || x.kind === 'turn-end' || x.kind === 'user') break
+                if (x.kind === 'assistant' || x.kind === 'reasoning') { failing.add(x.seq); if (x.kind === 'reasoning') reactions.add(x.seq) }
+              }
             }
           }
           const failingTurns = new Set(sel.filter(r => failing.has(r.seq)).map(r => r.turn))
@@ -198,8 +222,8 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
             case 'call': return all || include.has('args') || include.has('results')
             case 'result': return all || include.has('results')
             case 'assistant': return all || include.has('assistant')
-            case 'reasoning': return all || include.has('reasoning')
-            case 'inject': case 'instructions': return all || include.has('injections')
+            case 'reasoning': return all || include.has('reasoning') || reactions.has(r.seq)
+            case 'inject': case 'instructions': case 'system': return all || include.has('injections')
             case 'other': return all
             default: return true
           }
@@ -233,21 +257,34 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
   }
   const stats = defineTool({
     name: 'transcript_tool_stats',
-    description: 'How tools behaved for the agent(s) in one or many sessions: per tool the call count, error count and rate, p50/p90 wall latency, the most frequent error messages (normalized so one bug is one row, with an example session/seq in json), and what the agent did right after each failure (retry with identical args, retry with changed args, switch tool). The direct measure of a tool\'s ergonomics; use tools globs like ["chrome_*"] and sessions ["*"] for a corpus-wide view.',
+    description: 'How tools behaved for the agent(s) in one or many sessions: per tool the call count, error count and rate, sessions that used it vs sessions where it was registered (adoption), p50/p90 wall latency, the most frequent error messages (normalized so one bug is one row, with an example session/seq in json) each with the agent\'s reaction (the reasoning/assistant text right after the failure), and what the agent did next (retry identical, retry changed, switch tool). Opt-in sections: before_error, sequences (tool bigrams/trigrams), runs (same-tool streaks), duplicates (identical-args repeats), args (parameter shapes). split_at compares the per-tool table before/after a date. Use tools globs like ["chrome_*"] and sessions ["*"] for a corpus-wide view.',
     parameters: {
       session: SESSION_PARAM,
       sessions: SESSIONS_PARAM,
       tools: { type: 'array', items: { type: 'string' }, description: 'Only these tools; globs allowed. Default: all tools.' },
-      since: { type: 'string', description: 'Only sessions created after this ISO date/time or within "7d", "12h" (applies to sessions/"*" selections).' },
+      since: SINCE_PARAM,
+      until: UNTIL_PARAM,
+      split_at: { type: 'string', description: 'ISO date/time (or "7d"): also report the per-tool table for sessions created before vs at/after this instant, side by side.' },
+      sections: { type: 'array', items: { type: 'string', enum: [...SECTIONS, 'all'] }, description: 'Extra analytics: before_error, sequences, runs, duplicates, args, or "all". Default: none beyond the base table, reactions and after-error.' },
       top_errors: { type: 'integer', description: 'Error groups listed per tool (default 5).' },
+      reactions: { type: 'integer', description: 'Agent reactions (reasoning/assistant text right after the failure) kept per error group (default 2; 0 disables).' },
+      top_sequences: { type: 'integer', description: 'Bigrams/trigrams listed in the sequences section (default 15).' },
       ...commonParameters,
     },
     output: output(statsSpec),
     isConcurrencySafe: () => true,
     async execute(args, exec) {
-      const entries = await resolver.select(args.sessions?.length ? args.sessions : args.session, exec, { since: args.since }, exec.signal)
+      const entries = await resolver.select(args.sessions?.length ? args.sessions : args.session, exec, { since: args.since, until: args.until }, exec.signal)
       const { models, skipped } = await resolver.models(entries, exec.signal)
-      const value = toolStats(models, { tools: args.tools, topErrors: Math.max(1, args.top_errors ?? 5) })
+      const sections = args.sections?.includes('all') ? SECTIONS : (args.sections ?? [])
+      const value = toolStats(models, {
+        tools: args.tools,
+        topErrors: Math.max(1, args.top_errors ?? 5),
+        reactions: Math.max(0, Math.floor(args.reactions ?? 2)),
+        sections,
+        topSequences: Math.max(1, Math.floor(args.top_sequences ?? 15)),
+        splitAt: parseSince(args.split_at, 'split_at'),
+      })
       value.sessions = models.map(m => ({ id: m.id, workspace: m.workspace, title: m.title }))
       value.skipped = skipped
       return finish(exec, args, value, statsSpec)
@@ -266,12 +303,14 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       pattern: { type: 'string', required: true, description: 'JavaScript regular expression (case-insensitive unless case_sensitive); an invalid regex is searched literally.' },
       session: SESSION_PARAM,
       sessions: SESSIONS_PARAM,
-      kinds: { type: 'array', items: { type: 'string', enum: ['user', 'assistant', 'reasoning', 'call', 'result', 'inject'] }, description: 'Only these row kinds. Default: all.' },
+      kinds: { type: 'array', items: { type: 'string', enum: GREP_KINDS }, description: 'Only these row kinds ("system" = the system prompt as sent). Default: all but system.' },
       tools: { type: 'array', items: { type: 'string' }, description: 'Only calls/results of these tools (globs).' },
       case_sensitive: { type: 'boolean', description: 'Match case (default false).' },
       context_chars: { type: 'integer', description: 'Excerpt characters on each side of the match (default 160).' },
       limit: { type: 'integer', description: `Maximum hits (default ${limits.grepLimit}).` },
-      since: { type: 'string', description: 'Only sessions created after this ISO date/time or within "7d" (for sessions/"*" selections).' },
+      per_session_limit: { type: 'integer', description: 'Maximum hits per session, so one long session cannot crowd out the rest (default: unlimited).' },
+      since: SINCE_PARAM,
+      until: UNTIL_PARAM,
       ...commonParameters,
     },
     output: output(grepSpec),
@@ -285,7 +324,8 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       const kinds = args.kinds?.length ? new Set(args.kinds) : null
       const ctxChars = Math.max(20, args.context_chars ?? 160)
       const limit = Math.max(1, Math.floor(args.limit ?? limits.grepLimit))
-      const entries = await resolver.select(args.sessions?.length ? args.sessions : args.session, exec, { since: args.since }, exec.signal)
+      const perSession = args.per_session_limit ? Math.max(1, Math.floor(args.per_session_limit)) : Infinity
+      const entries = await resolver.select(args.sessions?.length ? args.sessions : args.session, exec, { since: args.since, until: args.until }, exec.signal)
       const hits = []
       let truncated = false
       const sessions = []
@@ -300,9 +340,10 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
           continue
         }
         sessions.push({ id: m.id, workspace: m.workspace, title: m.title })
+        let mine = 0
         for (const r of m.rows) {
           const kind = r.kind === 'instructions' || r.kind === 'checkpoint' ? 'inject' : r.kind
-          if (kinds && !kinds.has(kind)) continue
+          if (kinds ? !kinds.has(kind) : kind === 'system') continue
           if ((r.kind === 'call' || r.kind === 'result') && args.tools?.length && !matchesTool(r.tool, args.tools)) continue
           const text = grepText(r)
           if (!text) continue
@@ -311,8 +352,15 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
           if (!match) continue
           const start = Math.max(0, match.index - ctxChars)
           const end = Math.min(text.length, match.index + match[0].length + ctxChars)
-          hits.push({ session: m.id, seq: r.seq, kind, tool: r.tool ?? null, turn: r.turn ?? null, excerpt: text.slice(start, end).replace(/\s+/g, ' ').trim(), match: clip(match[0], 120) })
+          const hit = { session: m.id, seq: r.seq, kind, tool: r.tool ?? null, turn: r.turn ?? null }
+          if (r.callId) hit.callId = r.callId
+          if (r.kind === 'call') { hit.ok = r.call?.ok ?? null; hit.ms = r.call?.ms ?? null; if (r.call?.code) hit.code = r.call.code }
+          if (r.kind === 'result') { hit.ok = r.ok; hit.ms = r.ms; if (r.code) hit.code = r.code }
+          hit.excerpt = text.slice(start, end).replace(/\s+/g, ' ').trim()
+          hit.match = clip(match[0], 120)
+          hits.push(hit)
           if (hits.length >= limit) { truncated = true; break outer }
+          if (++mine >= perSession) break
         }
       }
       const value = { pattern, flags: flags.replace('g', ''), sessions, hits, truncated, skipped }
@@ -355,7 +403,86 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
     },
   })
 
-  return [find, outline, read, stats, grep, event]
+  // -------------------------------------------------------------- export
+  const exportSpec = {
+    text: renderExport,
+    rows: (v) => ({ header: { kinds: v.kinds, tools: v.tools ?? null, sessions: v.sessions, truncated: v.truncated, skipped: v.skipped }, rows: v.rows }),
+  }
+  const exportTool = defineTool({
+    name: 'transcript_export',
+    description: 'Export tool calls (each joined with its result: full parsed args, ok, error code, latency, result text) and optionally user/assistant/reasoning/inject/system rows from one or many sessions as jsonl for offline analysis (python, jq). Every row carries session id and workspace/title, so no header join is needed. Use out_file for anything beyond a few hundred rows; inline output is bounded by max_chars.',
+    parameters: {
+      session: SESSION_PARAM,
+      sessions: SESSIONS_PARAM,
+      since: SINCE_PARAM,
+      until: UNTIL_PARAM,
+      tools: { type: 'array', items: { type: 'string' }, description: 'Only calls of these tools (globs). Default: all tools.' },
+      kinds: { type: 'array', items: { type: 'string', enum: ['call', 'user', 'assistant', 'reasoning', 'inject', 'system'] }, description: 'Row kinds to export. Default: ["call"] (one row per call, result joined in).' },
+      errors_only: { type: 'boolean', description: 'Only failed calls.' },
+      max_result_chars: { type: 'integer', description: 'Result text kept per call row (default 400; 0 drops result text, keeping only resultChars).' },
+      max_text_chars: { type: 'integer', description: 'Text kept per non-call row (default 2000).' },
+      limit: { type: 'integer', description: 'Maximum rows (default 5000).' },
+      max_chars: { type: 'integer', description: `Inline size budget when out_file is not given (default ${limits.maxChars}).` },
+      ...commonParameters,
+    },
+    output: output(exportSpec),
+    isConcurrencySafe: () => true,
+    async execute(args, exec) {
+      const kinds = new Set(args.kinds?.length ? args.kinds : ['call'])
+      const maxResult = Math.max(0, Math.floor(args.max_result_chars ?? 400))
+      const maxText = Math.max(40, Math.floor(args.max_text_chars ?? 2000))
+      const limit = Math.max(1, Math.floor(args.limit ?? 5000))
+      const entries = await resolver.select(args.sessions?.length ? args.sessions : args.session, exec, { since: args.since, until: args.until }, exec.signal)
+      const { models, skipped } = await resolver.models(entries, exec.signal)
+      const rows = []
+      let truncated = false
+      outer: for (const m of models) {
+        const name = sessionName(m)
+        for (const r of m.rows) {
+          let row = null
+          if (r.kind === 'call') {
+            if (!kinds.has('call')) continue
+            if (args.tools?.length && !matchesTool(r.tool, args.tools)) continue
+            const c = r.call
+            if (args.errors_only === true && c.ok !== false) continue
+            row = {
+              kind: 'call', session: m.id, sessionName: name, seq: r.seq, turn: r.turn, step: r.step, time: r.time, tool: r.tool, callId: r.callId,
+              args: c.argsObj ?? c.args, argsChars: c.args.length,
+              ok: c.ok, code: c.code, ms: c.ms, resultSeq: c.resultSeq, resultChars: c.text.length,
+              ...maxResult > 0 ? { result: c.text.length > maxResult ? `${c.text.slice(0, maxResult - 1)}…` : c.text } : {},
+              ...c.reason && c.reason !== c.text ? { reason: clip(c.reason, maxResult || 200) } : {},
+              ...c.images?.length ? { images: c.images } : {},
+            }
+          } else {
+            const kind = r.kind === 'instructions' || r.kind === 'checkpoint' ? 'inject' : r.kind
+            if (!kinds.has(kind) || args.errors_only === true) continue
+            row = { kind, session: m.id, sessionName: name, seq: r.seq, turn: r.turn ?? null, time: r.time, ...r.plugin ? { plugin: r.plugin } : {}, text: r.text.length > maxText ? `${r.text.slice(0, maxText - 1)}…` : r.text, textChars: r.text.length }
+          }
+          rows.push(row)
+          if (rows.length >= limit) { truncated = true; break outer }
+        }
+      }
+      const value = {
+        kinds: [...kinds],
+        tools: args.tools ?? null,
+        sessions: models.map(m => ({ id: m.id, workspace: m.workspace, title: m.title, toolsAvailable: m.toolsAvailable })),
+        rows,
+        limit,
+        truncated,
+        skipped,
+      }
+      if (!args.out_file) {
+        const fmt = normalizeFmt(args.fmt)
+        const one = fmt === 'text' ? (r) => renderExport({ ...value, rows: [r] }).split('\n')[1] ?? '' : (r) => JSON.stringify(r)
+        const { kept, omitted } = boundRows(rows, one, maxCharsOf(args), 400, r => r.seq)
+        value.rows = kept
+        if (omitted) { value.truncated = true; value.omitted = omitted }
+      }
+      return finish(exec, args, value, exportSpec)
+    },
+  })
+
+  return [find, outline, read, stats, grep, event, exportTool]
 }
 
 // ------------------------------------------------------------------ helpers
@@ -381,7 +508,7 @@ function grepText(r) {
   switch (r.kind) {
     case 'call': return r.args
     case 'result': return r.reason && r.reason !== r.text ? `${r.text}\n${r.reason}` : r.text
-    case 'user': case 'assistant': case 'reasoning': case 'inject': case 'instructions': case 'checkpoint': case 'other': case 'title': case 'approval': case 'retry': case 'command': return r.text
+    case 'user': case 'assistant': case 'reasoning': case 'inject': case 'instructions': case 'checkpoint': case 'system': case 'other': case 'title': case 'approval': case 'retry': case 'command': return r.text
     default: return ''
   }
 }
