@@ -87,6 +87,57 @@ Dock app and the Remotes feature all hang off it, and installing a Mac
 without it produces exactly the half-working state INSTALLING.md's
 troubleshooting table is full of.
 
+## Re-running on an existing clone (stale, diverged, dirty, half-dead)
+
+The `clone` step adopts whatever is at `--dir` (default
+`~/github/tali-dash-plugins`) and brings it to *current main*; nothing there is
+assumed fresh. Checked 2026-09-23 against a throwaway clone with the fork
+submodule pointed at a local path (`git -c protocol.file.allow=always`), in each
+of these states:
+
+- **Parent repo behind or diverged** (a local commit, or a clone from before one
+  of the history rewrites): `git pull --ff-only`; when that fails, the dirty
+  files are listed and stashed (`stash push -u -m "bootstrap-mac <date>"`) and
+  the clone is `reset --hard origin/main`. An installer, not a dev checkout.
+- **Fork submodule stale / rebased upstream**: irrelevant to `git submodule
+  update --init deepseek-harness` — it fetches what is missing and checks out
+  the parent's *pinned SHA* (detached), so a force-pushed `feat/embed-session`
+  is never a non-fast-forward problem; there is no branch to fast-forward.
+  Verified: `checkout HEAD~3` in the submodule → back at the pin.
+- **Fork submodule dirty**: git keeps edits that do not collide with the
+  checkout, but a local edit to a file that changed between the two commits
+  fails with `Your local changes to the following files would be overwritten by
+  checkout`. The step now lists the edits, stashes them in the submodule
+  (tracked first, `-u` on a second failure) and retries; the run ends with
+  `your edits: git -C …/deepseek-harness stash list`.
+- **Half-dead `deepseek-harness/`** (a clone that died with the directory
+  populated but `.git/modules/deepseek-harness` missing — exactly what a first
+  run over a bad network leaves): `fatal: destination path … already exists and
+  is not an empty directory`, twice, abort. Detected as "its git toplevel is not
+  itself" (a bare subdirectory of the parent reports the parent — plain
+  `rev-parse --is-inside-work-tree` is true there, the first attempt at this
+  check), moved to `deepseek-harness.broken-<timestamp>`, re-cloned.
+- **Submodule URL**: only an effective `git@github.com:` URL is rewritten to
+  https; an override already in the clone's config (a mirror, a local path) is
+  respected. Before, the rewrite was unconditional.
+- **Stale builds — the real gap.** After any of the above the pin has moved,
+  yet `apps/cli/lib/bin.js` and every `lib/client.js` still exist, and the
+  `fork`/`plugins` steps used to say "already built" and ship the old code.
+  Now `$DSH_HOME/bootstrap-built.json` records `{fork, plugins}` = the commits
+  each build came from; the fork rebuilds when its SHA differs (`fork checkout
+  moved 9384b80976 → 5029131621 since the last build — rebuilding`), all
+  plugins rebuild (`pnpm install` + `pnpm build`) when the plugins repo's SHA
+  differs, and an existing build with no record rebuilds once ("unknown
+  provenance"). The file lives in `~/.dsh` so the take-over and the uninstaller
+  leave it alone; `--rebuild` still forces everything.
+- **Clean and current**: a no-op ("adopting it", pin unchanged, nothing
+  rebuilt).
+
+The thin-client script's clone is shallow and single-branch; its re-run is
+`fetch --depth 1 origin main` + `reset --hard origin/main` (non-FF-proof by
+construction), and a `--dir` that exists without being a clone dies with a
+clear message instead of git's.
+
 ## Redeploying a deploy-remote host (`--replace`, the default)
 
 The first remote Mac was set up by `tools/deploy-remote.sh` (INSTALLING.md
@@ -553,6 +604,9 @@ because everything is scriptable and a `tart clone` is a free snapshot.
 | `something already listens on :3080` in the `home` step | another DSH instance; stop it or run `--skip home` if `~/.dsh/profiles/web` already exists |
 | `still waiting for the Tailscale login…` | complete the browser login at the printed `log in here:` URL (same user as your other DSH Macs); `--tailscale-timeout 600` bounds the wait |
 | `no /dsh in tailscale serve status` | MagicDNS + HTTPS certs off on the tailnet, or Tailscale run from bare launchd (the relay plist uses `zsh -lc`; see INSTALLING.md A2) |
+| `Your local changes to the following files would be overwritten by checkout` under the submodule step | a local edit in `deepseek-harness/` collides with the pinned commit; since 2026-09-23 the step stashes and retries by itself (`git -C deepseek-harness stash list` has it) — on an older script: stash by hand, re-run `--only clone` |
+| `destination path '…/deepseek-harness' already exists and is not an empty directory` | a half-dead earlier clone (directory populated, gitdir missing); since 2026-09-23 moved aside to `deepseek-harness.broken-<ts>` automatically — on an older script: `rm -rf deepseek-harness`, re-run `--only clone` |
+| the GUI runs old code after a re-run that moved the pin | pre-2026-09-23 scripts skipped the build when `bin.js` existed; now `~/.dsh/bootstrap-built.json` tracks the built SHAs — or `--rebuild` |
 | fork `pnpm install`/`pnpm dsh`: `[install-lefthook] cannot enable extensions.worktreeConfig while core.worktree is in the common config` | freshly cloned submodule; the clone step's migration did not run (re-run `--only clone`), or do it by hand: `git config --file .git/modules/deepseek-harness/config core.repositoryFormatVersion 1; … extensions.worktreeConfig true; … --unset core.worktree; git config --file .git/modules/deepseek-harness/config.worktree core.worktree ../../../deepseek-harness` |
 | `Host key verification failed` cloning the submodule | the `git@github.com:` URL in `.gitmodules`; the clone step overrides it to https — if it did not, `git config submodule.deepseek-harness.url https://github.com/taliesinb/deepseek-harness.git` then `git submodule update --init` |
 | `ERR_PNPM_IGNORED_BUILDS` in a plugin | pnpm ≥ 12 — `pnpm install --dangerously-allow-all-builds` (the script does) |

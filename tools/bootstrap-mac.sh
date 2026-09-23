@@ -675,16 +675,41 @@ if wants clone; then
     [ "$DRY" = 1 ] || git -C "$DIR" submodule init >/dev/null 2>&1 || true
     for name in $(git -C "$DIR" config -f .gitmodules --name-only --get-regexp 'submodule\..*\.url' 2>/dev/null | sed -E 's/^submodule\.(.*)\.url$/\1/'); do
       [ "$name" = extras ] && continue   # private: stays on ssh (an https fetch would prompt for credentials)
-      sshurl="$(git -C "$DIR" config -f .gitmodules --get "submodule.$name.url" || true)"
-      case "$sshurl" in
+      # The EFFECTIVE url (this clone's config, seeded from .gitmodules by `submodule init`): an override someone
+      # already put there (https, a mirror, a local path) is respected; only an ssh url is rewritten.
+      cururl="$(git -C "$DIR" config --get "submodule.$name.url" 2>/dev/null || git -C "$DIR" config -f .gitmodules --get "submodule.$name.url" || true)"
+      case "$cururl" in
         git@github.com:*)
-          https="https://github.com/${sshurl#git@github.com:}"
+          https="https://github.com/${cururl#git@github.com:}"
           log "submodule $name: fetching over https ($https) instead of ssh"
           [ "$DRY" = 1 ] || git -C "$DIR" config "submodule.$name.url" "$https" ;;
       esac
     done
   fi
-  run git -C "$DIR" submodule update --init deepseek-harness || die "submodule checkout failed"
+  # The fork is pinned by SHA (detached), so a rebased/force-pushed fork is no problem: `submodule update`
+  # fetches whatever is missing and checks the pin out. What DOES fail: (a) local edits in the submodule
+  # that the checkout would overwrite — stash them (tracked first, then untracked too) and retry; (b) a
+  # leftover deepseek-harness/ that is not a git worktree (a clone that died half-way) — move it aside.
+  SUB="$DIR/deepseek-harness"
+  # "not a git checkout" = its git toplevel is not itself (a bare subdirectory of the parent clone reports the parent).
+  if [ "$DRY" = 0 ] && [ -d "$SUB" ] && [ -n "$(ls -A "$SUB" 2>/dev/null)" ] && [ "$(git -C "$SUB" rev-parse --show-toplevel 2>/dev/null || true)" != "$(cd "$SUB" && pwd -P)" ]; then
+    aside="$SUB.broken-$(date +%Y%m%d-%H%M%S)"
+    warn "$SUB exists but is not a git checkout (an earlier clone died half-way?) — moving it to $aside"
+    mv "$SUB" "$aside" || die "could not move $SUB aside"
+  fi
+  if ! run git -C "$DIR" submodule update --init deepseek-harness; then
+    [ "$DRY" = 1 ] && die "submodule checkout failed"
+    git -C "$SUB" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "submodule checkout failed (see $LOG)"
+    dirty="$(git -C "$SUB" status --short 2>/dev/null | head -8)"
+    [ -n "$dirty" ] || die "submodule checkout failed and the fork checkout is clean — a network or permission problem? (see $LOG)"
+    log "local edits in the fork checkout $SUB block the pinned commit (saved as a stash there):"; echo "$dirty" | sed 's/^/    /'
+    git -C "$SUB" stash push -q -m "bootstrap-mac $(date +%F)" >>"$LOG" 2>&1 || true
+    if ! run git -C "$DIR" submodule update --init deepseek-harness; then
+      git -C "$SUB" stash push -q -u -m "bootstrap-mac $(date +%F) (untracked)" >>"$LOG" 2>&1 || true
+      run git -C "$DIR" submodule update --init deepseek-harness || die "submodule checkout still fails after stashing local edits (see $LOG; git -C $SUB stash list)"
+    fi
+    ok "fork checkout at the pinned commit; your edits: git -C $SUB stash list"
+  fi
   # `extras/` is an OPTIONAL private layer (symbolica-ai/dsh-extras: deployment inventory, pins of private
   # plugins). Its existence is public, its contents need org access over ssh. Absent access → warn and
   # continue; the public plugin set is complete on its own. Inside it, nested pins are fetched recursively.
@@ -730,25 +755,50 @@ if [ "$DRY" = 0 ] && [ -f "$MARKER" ] && ! grep -q "\"dir\": \"$DIR\"" "$MARKER"
 fi
 
 # ===========================================================================
+# Built artifacts are only as fresh as the commit they were built from: after an adopt-and-update (the pin moved,
+# `git pull` brought new plugin sources) `apps/cli/lib/bin.js` / `lib/client.js` still exist but are STALE. The
+# commit each build came from is recorded in $DSH_HOME/bootstrap-built.json ({fork, plugins}); a mismatch
+# rebuilds. No record (an install from before 2026-09-23) rebuilds once.
+BUILT="${DSH_HOME:-$HOME/.dsh}/bootstrap-built.json"
+built_sha() { grep -o "\"$1\": *\"[0-9a-f]*\"" "$BUILT" 2>/dev/null | grep -o '[0-9a-f]\{7,\}' || true; }
+record_built() { # record_built fork|plugins SHA
+  local f p; f="$(built_sha fork)"; p="$(built_sha plugins)"
+  case "$1" in fork) f="$2" ;; plugins) p="$2" ;; esac
+  [ "$DRY" = 1 ] || { mkdir -p "$(dirname "$BUILT")"; printf '{ "fork": "%s", "plugins": "%s" }\n' "$f" "$p" >"$BUILT"; }
+}
+FORK_SHA="$(git -C "$CK" rev-parse HEAD 2>/dev/null || true)"
+PLUGINS_SHA="$(git -C "$DIR" rev-parse HEAD 2>/dev/null || true)"
+
 if wants fork; then
   banner "Build the DSH fork ($CK)"
-  if [ "$REBUILD" = 0 ] && [ -f "$CK/apps/cli/lib/bin.js" ] && [ -d "$CK/node_modules" ]; then
-    ok "already built (apps/cli/lib/bin.js exists; --rebuild to force)"
+  if [ "$REBUILD" = 0 ] && [ -f "$CK/apps/cli/lib/bin.js" ] && [ -d "$CK/node_modules" ] && [ -n "$FORK_SHA" ] && [ "$(built_sha fork)" = "$FORK_SHA" ]; then
+    ok "already built from ${FORK_SHA:0:10} (apps/cli/lib/bin.js exists; --rebuild to force)"
   else
+    if [ -f "$CK/apps/cli/lib/bin.js" ] && [ "$REBUILD" = 0 ]; then
+      prev="$(built_sha fork)"
+      [ -n "$prev" ] && log "fork checkout moved ${prev:0:10} → ${FORK_SHA:0:10} since the last build — rebuilding" || log "existing build of unknown provenance (no $BUILT record) — rebuilding once"
+    fi
     log "pnpm install (the fork pins pnpm via packageManager; pnpm fetches that version itself)"
     if [ "$DRY" = 1 ] && [ ! -d "$CK" ]; then log "would run pnpm install && pnpm run build in $CK"; else
     (cd "$CK" && runq pnpm install) || die "pnpm install failed in $CK"
     log "pnpm run build (~2 minutes)"
     (cd "$CK" && runq pnpm run build) || die "fork build failed"
-    [ -f "$CK/apps/cli/lib/bin.js" ] || die "build reported success but $CK/apps/cli/lib/bin.js is missing"
+    [ -f "$CK/apps/cli/lib/bin.js" ] || [ "$DRY" = 1 ] || die "build reported success but $CK/apps/cli/lib/bin.js is missing"
     fi
-    ok "built"
+    record_built fork "$FORK_SHA"
+    ok "built from ${FORK_SHA:0:10}"
   fi
 fi
 
 # ===========================================================================
 if wants plugins; then
   banner "Install + build the plugins ($DIR/plugins)"
+  RB="$REBUILD"
+  if [ "$RB" = 0 ] && [ -n "$PLUGINS_SHA" ] && [ "$(built_sha plugins)" != "$PLUGINS_SHA" ] && ls "$DIR"/plugins/*/lib/client.js >/dev/null 2>&1; then
+    prev="$(built_sha plugins)"
+    [ -n "$prev" ] && log "plugin sources moved ${prev:0:10} → ${PLUGINS_SHA:0:10} since the last build — rebuilding all plugins" || log "existing plugin builds of unknown provenance (no $BUILT record) — rebuilding once"
+    RB=1
+  fi
   # The dev overlay is the one file with absolute paths; harmless to fix even if unused.
   if [ -f "$DIR/cordis.dev.yml" ] && grep -q '/Users/USER/github/tali-dash-plugins' "$DIR/cordis.dev.yml" && [ "$DIR" != /Users/USER/github/tali-dash-plugins ]; then
     [ "$DRY" = 1 ] || sed -i '' "s#/Users/USER/github/tali-dash-plugins#$DIR#g" "$DIR/cordis.dev.yml"
@@ -775,18 +825,19 @@ if wants plugins; then
     ndeps="$(pkg_field "$pdir" 'Object.keys({...(p.dependencies??{}),...(p.devDependencies??{})}).length' || echo 0)"
     isclient="$(pkg_field "$pdir" 'p.dsh?.client ? "yes" : ""' || true)"
     hasbuild="$(pkg_field "$pdir" 'p.scripts?.build ? "yes" : ""' || true)"
-    if [ "$ndeps" != 0 ] && { [ ! -d "$pdir/node_modules" ] || [ "$REBUILD" = 1 ]; }; then
+    if [ "$ndeps" != 0 ] && { [ ! -d "$pdir/node_modules" ] || [ "$RB" = 1 ]; }; then
       # Dependency build scripts (esbuild, sharp, ripgrep, chrome-devtools-mcp) are approved declaratively in each
       # plugin's pnpm-workspace.yaml (`allowBuilds`). No CLI flag: --dangerously-allow-all-builds conflicts with
       # allowBuilds on pnpm 10.32 ("Cannot have both neverBuiltDependencies and onlyBuiltDependencies").
       (cd "$pdir" && runq pnpm install) || die "pnpm install failed in plugins/$p"
     fi
-    if [ -n "$hasbuild" ] && { [ ! -f "$pdir/lib/client.js" ] || [ "$REBUILD" = 1 ]; }; then
+    if [ -n "$hasbuild" ] && { [ ! -f "$pdir/lib/client.js" ] || [ "$RB" = 1 ]; }; then
       (cd "$pdir" && runq pnpm build) || die "build failed in plugins/$p"
     fi
     if [ -n "$isclient" ] && [ ! -f "$pdir/lib/client.js" ] && [ "$DRY" = 0 ]; then die "plugins/$p is a client plugin without lib/client.js"; fi
     ok "$p"
   done
+  [ -z "$PLUGINS_SHA" ] || record_built plugins "$PLUGINS_SHA"
 fi
 
 # ===========================================================================

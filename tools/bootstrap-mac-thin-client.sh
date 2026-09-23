@@ -279,6 +279,7 @@ if [ -d "$DIR/.git" ]; then
   fi
 elif [ "$DRY" = 1 ]; then log "would run: git clone --depth 1 $REPO $DIR"
 else
+  [ -z "$(ls -A "$DIR" 2>/dev/null)" ] || die "$DIR exists and is not a git clone — remove it (or pass another --dir)"
   mkdir -p "$(dirname "$DIR")"
   run git clone -q --depth 1 --single-branch "$REPO" "$DIR" || die "clone failed"
   ok "$DIR at $(git -C "$DIR" log -1 --format='%h %s' 2>/dev/null)"
