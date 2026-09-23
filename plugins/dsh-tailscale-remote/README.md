@@ -1,5 +1,9 @@
 # dsh-tailscale-remote
 
+**Linux desktop client:** `nix run .` from the repository root launches the
+Electron thin client with automatic loopback forwarding. See
+[linux-app/README.md](linux-app/README.md) for setup and usage.
+
 Drive this DeepSeek Harness Web GUI from another device on your tailnet, at
 
 ```

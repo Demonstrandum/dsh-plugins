@@ -23,6 +23,10 @@ install, update / switch version / remove).
 
 ## Quick start
 
+### Manual build and run
+
+To build and run a DSH server locally:
+
 ```sh
 git clone --recurse-submodules https://github.com/taliesinb/dsh-plugins tali-dash-plugins
 cd tali-dash-plugins/deepseek-harness && pnpm install && pnpm run build   # the fork
@@ -30,6 +34,8 @@ cd .. && for p in plugins/*/; do (cd "$p" && pnpm install); done           # plu
 pnpm install-plugins                     # all live plugins into ~/.dsh/profiles/web as bundles
 cd deepseek-harness && pnpm dsh web      # run
 ```
+
+### Mac
 
 Or, on a fresh machine, the one-command version of all of the above plus the
 optional layers (`tools/bootstrap-mac.sh`, see `INSTALLING.md`):
@@ -57,6 +63,30 @@ checkouts stay:
 ```sh
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/taliesinb/dsh-plugins/main/tools/uninstall-mac.sh)" uninstall [--force]
 ```
+
+### Linux with Nix
+
+To run the thin client via Nix (from a graphical desktop with Tailscale connected):
+
+```sh
+nix run github:taliesinb/dsh-plugins
+# Or, from a local checkout: nix run .
+```
+
+On the first launch it will prompt you to provide your remote instance's URL.
+
+Alternatively, it's possible to pass the server directly to `nix run`:
+
+```sh
+# Supply the server on the first launch:
+nix run github:taliesinb/dsh-plugins -- https://host.example.ts.net/dsh/user/
+# Or use a short tailnet host name and remote account (uses tailscale status):
+nix run github:taliesinb/dsh-plugins -- remote user
+```
+
+[Client documentation](plugins/dsh-tailscale-remote/linux-app/README.md) · [NixOS setup](recipes/nixos-thin-client.md).
+
+### Tooling
 
 Tooling: `pnpm install-plugins` / `remove-plugins`, `pnpm bootstrap-remote user@host`
 (the bootstrap over ssh), `pnpm deploy-remote user@host` (ship the built fork
