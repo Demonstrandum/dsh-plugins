@@ -94,7 +94,9 @@ if [ -n "$WITHOUT" ]; then
 fi
 
 # The optional private layer (extras/dsh-extras.yml): plugins with `install: true` whose `requires.command`
-# (if any) is present join the set. Absent submodule → nothing added.
+# (if any) is present join the set. Absent submodule → nothing added. NB: macOS's /bin/bash is 3.2, where
+# "${EMPTY[@]}" under `set -u` is an error (fixed in 4.4) — an empty array must be expanded as
+# ${ARR[@]+"${ARR[@]}"}; that is exactly the no-extras case (a fresh account without the deploy key).
 EXTRA_DIRS=()
 if [ -f "$HERE/extras/dsh-extras.yml" ] && [ -f "$HERE/tools/extras-manifest.mjs" ] && [ -z "${NO_EXTRAS:-}" ]; then
   while IFS=$'\t' read -r epath ebundle einstall ereq; do
@@ -106,7 +108,7 @@ if [ -f "$HERE/extras/dsh-extras.yml" ] && [ -f "$HERE/tools/extras-manifest.mjs
 fi
 
 DIRS=(); NAMES=()
-for p in "${PLUGINS[@]}" "${EXTRA_DIRS[@]}"; do
+for p in "${PLUGINS[@]}" ${EXTRA_DIRS[@]+"${EXTRA_DIRS[@]}"}; do
   case "$p" in /*) dir="$p"; p="extras:$(basename "$dir")" ;; *) dir="$HERE/plugins/$p" ;; esac
   [ -f "$dir/package.json" ] || die "missing plugin directory: $dir"
   name="$(node -p "require('$dir/package.json').name")"
@@ -135,6 +137,6 @@ log "composed rows in profile '$PROFILE':"
 if [ "$ACTION" = add ]; then
   n="$(cd "$CHECKOUT" && pnpm dsh --profile "$PROFILE" --dump-config 2>/dev/null | grep -cE '^- id: tali-' || true)"
   [ "$n" -ge "${#PLUGINS[@]}" ] || log "warning: expected ${#PLUGINS[@]} tali- rows, dump shows $n"
-  for d in "${EXTRA_DIRS[@]}"; do (cd "$CHECKOUT" && pnpm dsh --profile "$PROFILE" --dump-config 2>/dev/null | grep -qE "^- id: $(node -p "require('$d/package.json').name")") && log "extras: $(basename "$d") composed" || log "warning: extras plugin $(basename "$d") not in the composed profile"; done
+  for d in ${EXTRA_DIRS[@]+"${EXTRA_DIRS[@]}"}; do (cd "$CHECKOUT" && pnpm dsh --profile "$PROFILE" --dump-config 2>/dev/null | grep -qE "^- id: $(node -p "require('$d/package.json').name")") && log "extras: $(basename "$d") composed" || log "warning: extras plugin $(basename "$d") not in the composed profile"; done
 fi
 log "done"
