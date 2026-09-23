@@ -6,6 +6,7 @@
  * `fs/edit-intent` (waterfall) and `fs/observed` (emit) like
  * dsh-fs-observation-policy, a `sandboxPolicy` resolver and a bare `tools`.
  */
+import { spawnSync } from 'node:child_process'
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, resolve as resolvePath } from 'node:path'
 
@@ -13,7 +14,7 @@ class FsError extends Error {
   constructor(message, code) { super(message); this.code = code }
 }
 
-export function fakeCtx({ workspaceRoot, mode = 'workspace-write', withPolicy = true }) {
+export function fakeCtx({ workspaceRoot, mode = 'workspace-write', withPolicy = true, withShell = true }) {
   /** owner(session id) → Map(targetKey → { kind, version }) — the policy's record */
   const observed = new Map()
   /** abs path → version token; bumped on every mutation (also by `externalWrite`) */
@@ -72,16 +73,29 @@ export function fakeCtx({ workspaceRoot, mode = 'workspace-write', withPolicy = 
     },
   }
 
+  /** A tiny ctx.shell: runs the command with /bin/sh in `workdir`, records requests. */
+  const shellRuns = []
+  const shell = {
+    resolve(request) { return { ...request, timeoutMs: request.timeoutMs ?? 30_000 } },
+    async run(spec) {
+      shellRuns.push(spec)
+      const r = spawnSync('/bin/sh', ['-c', spec.command], { cwd: spec.workdir, encoding: 'utf8', timeout: spec.timeoutMs })
+      return { exitCode: r.status, signal: r.signal ?? null, timedOut: r.error?.code === 'ETIMEDOUT', aborted: false, timeoutMs: spec.timeoutMs, stdout: { text: r.stdout ?? '', truncated: false }, stderr: { text: r.stderr ?? '', truncated: false } }
+    },
+  }
+
   const ctx = {
     fs,
     events,
     registered,
+    shellRuns,
     logger: { info() {}, warn() {} },
     tools: { register(t) { registered.push(t) }, get(name) { return registered.find(t => t.name === name) } },
     systemPrompt: { sections: [], section(s) { this.sections.push(s) }, getSectionOrder() { return 1500 } },
     get(name) {
       if (name === 'fs') return fs
       if (name === 'sandboxPolicy') return { resolve: () => ({ mode, workspaceRoot }) }
+      if (name === 'shell' && withShell) return shell
       return undefined
     },
     emit(name, target, state, exec) {

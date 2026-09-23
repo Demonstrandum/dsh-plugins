@@ -7,8 +7,11 @@
  *   list_dir    directories included, several roots, bounded depth, sizes
  *   read_many   several files / line ranges per call; emits fs/observed so the
  *               read-before-edit guard treats it like `read`
- *   edit_many   several literal replacements across files; everything is
- *               validated (guard, match, uniqueness) before anything is written
+ *   edit_many   several edits (replace / replace_all / insert_after / insert_before /
+ *               replace_between / append) across files; everything is validated
+ *               (guard, match, uniqueness) before anything is written; unread files
+ *               with unique anchors go through, others return the matching regions;
+ *               optional `verify` command runs in the same call
  *   search      ripgrep with context, files/count modes, several roots and
  *               patterns, include/exclude globs, exclude_pattern, -i, -F
  *
@@ -59,10 +62,12 @@ export function build(ctx, config) {
 }
 
 export const PROMPT_HINT = 'Batch filesystem tools: use list_dir (not ls/tree) to explore directories; read_many (not sed -n/cat/head) to read '
-  + 'several files or ranges in one call; edit_many (not python/sed heredocs) to apply several literal replacements across files in one '
-  + 'validated call — read_many counts as reading for its read-before-edit guard; search (not grep/rg) for content search with context, '
-  + 'files-only/count modes, include/exclude globs and several roots. Prefer bash `workdir` over `cd X &&` prefixes; the session cwd is '
-  + 'the workspace root.'
+  + 'several files or ranges in one call; edit_many (not python/sed heredocs) for edits: several literal replacements across files, '
+  + 'replace_all for every occurrence, insert_after/insert_before a unique marker, replace_between two markers (or to end of file), append — '
+  + 'all validated before anything is written — and `verify: { command }` to run the typecheck/tests in the same call instead of a separate bash call. '
+  + 'An unread file whose anchors match uniquely is edited anyway; otherwise the matching regions come back. search (not grep/rg) for content '
+  + 'search with context, files-only/count modes, include/exclude globs and several roots. Prefer bash `workdir` over `cd X &&` prefixes; '
+  + 'the session cwd is the workspace root.'
 
 export function apply(ctx, config) {
   const tools = build(ctx, config)

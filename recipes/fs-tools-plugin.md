@@ -110,13 +110,30 @@ Source of truth for this: `<dsh-src>/packages/fs/tool-fs/src/{read,edit}.ts`,
 | `exclude: ['util/**']` did not skip `src/util/` | gitignore glob semantics: a glob with `/` anchors at the root | `**/util/**`; documented in the parameter description |
 | two headless runs died with Anthropic `Internal server error` | transient provider 500s (a trivial prompt with the same overlay passed) | retried; all later runs clean |
 
+## 3a. Round two (2026-09-23): what the first week showed, and what changed
+
+`rsi/tool-analysis-03.md` measured the week after the mount (40 sessions,
+7,245 calls): standalone `ls` vanished (181 → 5) and `edit`'s error rate
+halved, but **python-heredoc edits did not move (555 → 533)** and `edit_many`
+became the worst tool (15 % errors). The causes, and the fixes in this round:
+
+| Finding | Change |
+|---|---|
+| 59 % of heredocs chain `pnpm typecheck`/tests/`grep` after the edit; `edit(_many) → bash` is the #1 bigram (342) — edit-then-verify is ~650 round-trips | `verify: { command, workdir?, timeout_ms?, max_lines? }` runs after a successful apply through `ctx.shell` (`ctx.get('shell')`, optional; `shellEnv.collect` when present; the caller's sandbox policy); output tailed; non-zero exit reported, not an error |
+| the switch into "bash mode" starts with a *structural* edit (delete between markers, truncate, append: 9 % + 2 % + 4 %) that `edit` cannot express | `op`: `insert_after`, `insert_before`, `replace_between` (`end` omitted = EOF, `inclusive`), `append` — translated to marker-anchored literal edits, `append` via `writeText` + `replaceIfVersion` |
+| `replace_all` used 0× while 26 % of heredocs replace every occurrence | the ambiguity message now says `set replace_all: true`; the prompt hint names it |
+| 31 of 50 `edit_many` failures: one unread file in an N-file batch → whole batch resent; 15 stale (12 after a bash mutation) | **unread/stale files are read by the tool; unique anchors go through** (result says so); otherwise the matching / nearest **regions** come back and `fs/observed` is emitted with the current version so the plain retry is authorised. Decision (the maintainer): the guard is anti-blind-overwrite, a unique anchor is not blind |
+| 3 partial applies (`stopped at edit #8 … Applied before the stop`) — the version check ran only at apply time | validation compares `intent.version` with `stat().version` for every file before anything is written; apply-time CAS remains for true races |
+| 5 `search` failures were rg's raw `No such file or directory` | roots are checked through `ctx.fs` first (`~` expands); existing roots are searched, missing ones named with the cwd they resolved against; all-missing is `SEARCH_NO_PATHS` |
+
+The fake ctx gained a `/bin/sh` `shell` (`withShell: false` to drop it); 23
+tests. Prompt hint updated accordingly.
+
 ## 4. Not done / next
 
-- **Adoption measurement**: after a week, `transcript_tool_stats sessions:["*"] since:"7d"`
-  and the `classify.py` categories (`~/projects/deepseek-harness/rsi-validate/`)
-  — do `py_edit`, `sed_range`, `ls`, `grep_search` drop?
-- `edit_many … then: { command }` to absorb the 304 edit+typecheck bundles —
-  deferred; bash `workdir` covers it.
+- **Adoption measurement**: `transcript_tool_stats sessions:["*"] split_at:<mount date> sections:["all"]`
+  (session-introspect §2.7) — do `py_edit` and the `edit_many → bash` bigram drop;
+  does `verify` get used; what do the reactions under `edit_many` errors say now?
 - Remaining proposals from the validation: bash cwd echo / sticky `workdir`
   (1,825 `cd` prefixes), bash output shaping, `wait_for_http`, the stale
   escalation-hint message, `dsh_dev_instance`.

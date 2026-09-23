@@ -7,7 +7,7 @@ transcript corpus showed agents falling into (see
 
 | habit (calls in 41 sessions) | tool |
 |---|---|
-| `python3 - <<'EOF' … s.replace(old, new) …` file edits (555) | `edit_many` |
+| `python3 - <<'EOF' … s.replace(old, new) … EOF; pnpm typecheck` file edits (555, 59 % chaining a check) | `edit_many` (+ `verify`) |
 | `sed -n 'X,Yp' a; echo ---; sed -n … b` range reads (485) | `read_many` |
 | `ls` / `tree` / `find -maxdepth` (568; `glob` returns files only) | `list_dir` |
 | `grep -rn -A3 --include=*.ts … \| grep -v …` (918) | `search` |
@@ -48,27 +48,65 @@ reported inline; the rest of the call still returns. `max_lines` (default
 ### `edit_many`
 
 ```
-edit_many { edits: { file_path, old_string, new_string, replace_all? }[], dry_run?: bool }
+edit_many {
+  edits: ({ file_path, op?: 'replace', old_string, new_string, replace_all? }
+        | { file_path, op: 'insert_after' | 'insert_before', marker, new_string }
+        | { file_path, op: 'replace_between', start, end?, new_string, inclusive? }
+        | { file_path, op: 'append', new_string })[],
+  verify?: { command, workdir?, timeout_ms?, max_lines? },
+  dry_run?: bool,
+}
 ```
 
-Several literal replacements across several files in one call, with the same
-rules as `edit` (exactly one match unless `replace_all`). Two phases:
+Several edits across several files in one call, then optionally a check
+command in the same call. Ops (`replace` is the default and follows `edit`'s
+rules — exactly one match unless `replace_all`):
 
-1. **validate** — every target resolved; every file passes the read-guard
-   (`fs/edit-intent` → `FS_NOT_OBSERVED` if not read this session, exactly as
-   `edit`); every `old_string` is found and unique **in the file as it will be
-   after the earlier edits of the same call** (so edit #2 may match text
-   produced by edit #1). All problems are collected and returned together,
-   numbered `#k`; **nothing is written if any fails.**
+| op | anchors | effect |
+|---|---|---|
+| `replace` | `old_string` (unique, or `replace_all`) | literal replacement; `""` deletes |
+| `insert_after` / `insert_before` | `marker` (unique) | `new_string` as its own line(s) right after / before the **line** holding the marker |
+| `replace_between` | `start` (unique), `end` (unique after start; omit = end of file) | the text between the markers becomes `new_string` (markers stay unless `inclusive: true`); `""` deletes — `start` + no `end` + `""` truncates the file after the marker |
+| `append` | — | `new_string` at the end of the file (a newline is added before it if missing) |
+
+Structural ops are translated into marker-anchored literal replacements, so
+they inherit the uniqueness rule and the compare-and-swap; only `append` takes
+the versioned whole-file write. Two phases:
+
+1. **validate** — every target resolved; the read-guard (`fs/edit-intent`)
+   consulted **and** the current version compared with the observed one;
+   every anchor is found and unique **in the file as it will be after the
+   earlier edits of the same call** (so edit #2 may match text produced by
+   edit #1). All problems are collected and returned together, numbered `#k`;
+   **nothing is written if any fails.** A failed anchor comes back with its
+   **regions**: every occurrence with a line of context when there are
+   several, the nearest lines (matching the anchor's first line) when there
+   are none.
 2. **apply** — in order, through `ctx.fs.editText` with the version guard from
    the intent slot (compare-and-swap in the backend) and an `fs/observed` after
-   each, so a bash-side write between read and edit fails `FS_STALE_VERSION`
-   *before the first write*, and a following single `edit` needs no re-read.
+   each, so a following single `edit` needs no re-read.
+3. **verify** — if given and the apply succeeded, `command` runs through
+   `ctx.shell` (the same executor and sandbox policy as `bash`; `workdir`
+   default = the workspace; `timeout_ms` default 120 s) and the result carries
+   `exitCode`, the **last `max_lines` (default 40) lines** of stdout+stderr and
+   how many were dropped. **A failing check is reported, not a tool error** —
+   the edits are already applied. Not run in `dry_run` or after a validation
+   failure.
 
-A failure during apply (a concurrent writer) reports which edits were applied
-and which were not. `dry_run` stops after validation. The result lists, per
-file, the line of each replacement. UI: a diff card per edit (call and
-result), like `edit`.
+**Unread and changed files.** A file the session has not read this session
+(`FS_NOT_OBSERVED`), or whose version moved since it was read (a bash-side
+mutation), is *read by the tool*: when every anchor in it matches exactly
+once, the edit goes through and the result says so (`— file was not read this
+session; applied because every anchor matched uniquely`); otherwise the batch
+is refused with the regions above **and the observation is recorded**, so the
+corrected retry is authorised without a separate read. Rationale: the guard
+exists to stop blind overwrites; a unique literal anchor is not blind.
+
+A failure during apply (a true concurrent writer racing the validation)
+reports which edits were applied and which were not. `dry_run` stops after
+validation. The result lists, per file, the op and line of each edit. UI: a
+diff card per `replace` edit (call and result), like `edit`; the call card
+notes `+ verify`.
 
 Sandbox denials render as the shared `[sandbox: file access denied under <mode>
 mode]` marker. The tool carries **no** `sandbox_permissions`; for a one-off

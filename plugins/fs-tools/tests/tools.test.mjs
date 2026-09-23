@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { Config, PROMPT_HINT, apply, build } from '../index.js'
-import { countOccurrences } from '../edit-many.mjs'
+import { countOccurrences, planEdit, regionsFor } from '../edit-many.mjs'
 import { buildSearchArgv, parseSearchArgs } from '../search.mjs'
 import { fakeCtx, fakeExec, textOf } from './fake-ctx.mjs'
 
@@ -121,24 +121,156 @@ test('countOccurrences counts non-overlapping matches', () => {
   assert.equal(countOccurrences('abc', 'x'), 0)
 })
 
-test('edit_many: unread file is refused before any write (FS_NOT_OBSERVED), with all problems listed', async () => {
+test('edit_many: unread file — a unique anchor goes through (and says so); a missing file is a problem; nothing written on any problem', async () => {
   const fresh = fakeCtx({ workspaceRoot: root })
   const [, , editMany] = build(fresh, Config({}))
-  const before = readFileSync(join(root, 'src/b.ts'), 'utf8')
-  await assert.rejects(
-    editMany.execute({ edits: [
-      { file_path: 'src/b.ts', old_string: 'n * 2', new_string: 'n * 3' },
-      { file_path: 'src/c-missing.ts', old_string: 'x', new_string: 'y' },
-    ] }, exec),
-    (e) => {
-      assert.equal(e.code, 'EDIT_MANY_INVALID')
-      assert.match(e.message, /2 problems, nothing written/)
-      assert.match(e.message, /#1 .*has not been read — read it \(read or read_many\)/)
-      assert.match(e.message, /#2 .*has not been read/)
-      return true
-    },
-  )
-  assert.equal(readFileSync(join(root, 'src/b.ts'), 'utf8'), before)
+  const b = join(root, 'src/b.ts')
+  const before = readFileSync(b, 'utf8')
+  try {
+    await assert.rejects(
+      editMany.execute({ edits: [
+        { file_path: 'src/b.ts', old_string: 'n * 2', new_string: 'n * 3' },
+        { file_path: 'src/c-missing.ts', old_string: 'x', new_string: 'y' },
+      ] }, exec),
+      (e) => {
+        assert.equal(e.code, 'EDIT_MANY_INVALID')
+        assert.match(e.message, /^edit_many: 1 problem, nothing written:\n {2}#2 .*c-missing\.ts": not found$/)
+        return true
+      },
+    )
+    assert.equal(readFileSync(b, 'utf8'), before, 'the valid edit is not applied while another entry has a problem')
+    // the tool read b.ts: the observation is recorded, so the guard now knows the file
+    const intent = await fresh.waterfall('fs/edit-intent', { targetKey: b, path: b }, exec, () => undefined)
+    assert.equal(intent.version, (await fresh.fs.stat({ path: b })).version)
+    // alone, the unique edit on an unread file goes through and the result says why
+    const c2 = fakeCtx({ workspaceRoot: root })
+    const [, , em2] = build(c2, Config({}))
+    const args = { edits: [{ file_path: 'src/b.ts', old_string: 'n * 2', new_string: 'n * 3' }] }
+    const v = await em2.execute(args, exec)
+    assert.equal(v.applied[0].guard, 'unread')
+    assert.match(textOf(em2, args, v), /src\/b\.ts: 1 edit \(line 2\) — file was not read this session; applied because every anchor matched uniquely/)
+    assert.match(readFileSync(b, 'utf8'), /n \* 3/)
+    
+  } finally {
+    writeFileSync(b, before)
+  }
+})
+
+test('edit_many: unread file with an ambiguous / missing anchor — refused with the matching regions, observation recorded so the plain retry works', async () => {
+  const c = fakeCtx({ workspaceRoot: root })
+  const [, , editMany] = build(c, Config({}))
+  const a = join(root, 'src/a.ts')
+  const before = readFileSync(a, 'utf8')
+  try {
+    await assert.rejects(
+      editMany.execute({ edits: [
+        { file_path: 'src/a.ts', old_string: 'foo(', new_string: 'x(' },
+        { file_path: 'src/a.ts', old_string: 'export function omega', new_string: 'y' },
+      ] }, exec),
+      (e) => {
+        assert.equal(e.code, 'EDIT_MANY_INVALID')
+        assert.match(e.message, /#1 .*appears 3 times — make it more specific or set replace_all: true \(foo\(\) \[file not read this session\]\n {4}3 matches:\n {4}3: export function alpha\(\) \{\n {4}4: {3}return foo\(1\)\n {4}5: \}\n {6}…\n {4}6: \n {4}7: export const twice = foo\(2\) \+ foo\(3\)\n {2}#2/)
+        assert.match(e.message, /#2 .*old_string not found \(export function omega\) \[file not read this session\]\n {4}nearest lines \(the file is 7 lines\):\n {4}\s*1: import/)
+        return true
+      },
+    )
+    assert.equal(readFileSync(a, 'utf8'), before)
+    // the regions came back and the observation was recorded: the corrected retry is authorised without a read
+    assert.ok(c.events.some(e => e.name === 'fs/observed' && e.path === a))
+    const v = await editMany.execute({ edits: [{ file_path: 'src/a.ts', old_string: 'export function alpha', new_string: 'export function omega' }] }, exec)
+    assert.equal(v.applied[0].guard, undefined, 'after the tool\'s own read the file counts as observed')
+    
+  } finally {
+    writeFileSync(a, before)
+  }
+})
+
+test('regionsFor / planEdit: occurrences with context, nearest-line fallback, structural op translation', () => {
+  const text = 'a\nfoo x\nb\nfoo y\nc\n'
+  assert.match(regionsFor(text, 'foo'), /^2 matches:\n1: a\n2: foo x\n3: b\n {2}…\n3: b\n4: foo y\n5: c$/)
+  assert.match(regionsFor(text, 'foo z'), /^nearest lines \(the file is 5 lines\):\n1: a\n2: foo x/)
+  assert.match(regionsFor(text, 'nothing here'), /^no line resembles/)
+  const after = planEdit({ index: 0, op: 'insert_after', marker: 'foo x', newString: 'NEW\n' }, text, 'f')
+  assert.deepEqual([after.oldString, after.newString], ['foo x', 'foo x\nNEW'])
+  const before = planEdit({ index: 0, op: 'insert_before', marker: 'y', newString: 'NEW' }, text, 'f')
+  assert.deepEqual([before.oldString, before.newString], ['foo y', 'NEW\nfoo y'])
+  const between = planEdit({ index: 0, op: 'replace_between', start: 'foo x', end: 'foo y', newString: '\nMID\n', inclusive: false }, text, 'f')
+  assert.deepEqual([between.oldString, between.newString], ['foo x\nb\nfoo y', 'foo x\nMID\nfoo y'])
+  const incl = planEdit({ index: 0, op: 'replace_between', start: 'foo x', end: 'foo y', newString: 'ONE', inclusive: true }, text, 'f')
+  assert.deepEqual([incl.oldString, incl.newString], ['foo x\nb\nfoo y', 'ONE'])
+  const toEnd = planEdit({ index: 0, op: 'replace_between', start: 'b\n', newString: '', inclusive: false }, text, 'f')
+  assert.deepEqual([toEnd.oldString, toEnd.newString], ['b\nfoo y\nc\n', 'b\n'])
+  const app = planEdit({ index: 0, op: 'append', newString: 'tail' }, 'x', 'f')
+  assert.equal(app.whole, 'x\ntail\n')
+  assert.match(planEdit({ index: 2, op: 'insert_after', marker: 'foo', newString: 'z' }, text, 'f').problem, /^#3 f: marker appears 2 times/)
+  assert.match(planEdit({ index: 0, op: 'replace_between', start: 'a', end: 'zzz', newString: '' }, text, 'f').problem, /end marker not found after the start marker/)
+})
+
+test('edit_many: structural ops end to end (insert_after, insert_before, replace_between to EOF, append) + verify runs after a successful apply', async () => {
+  const c = fakeCtx({ workspaceRoot: root })
+  const [, readMany, editMany] = build(c, Config({}))
+  const a = join(root, 'src/a.ts')
+  const before = readFileSync(a, 'utf8')
+  try {
+    await readMany.execute({ files: ['src/a.ts'] }, exec)
+    const args = {
+      edits: [
+        { file_path: 'src/a.ts', op: 'insert_after', marker: 'import { foo } from "./b"', new_string: 'import { bar } from "./c"' },
+        { file_path: 'src/a.ts', op: 'insert_before', marker: 'export function alpha', new_string: '/** alpha */' },
+        { file_path: 'src/a.ts', op: 'replace_between', start: 'return foo(1)\n}', new_string: '\n', inclusive: false },
+        { file_path: 'src/a.ts', op: 'append', new_string: 'export const END = 1' },
+      ],
+      verify: { command: 'wc -l < src/a.ts && echo verified', max_lines: 5 },
+    }
+    const v = await editMany.execute(args, exec)
+    assert.equal(readFileSync(a, 'utf8'), 'import { foo } from "./b"\nimport { bar } from "./c"\n\n/** alpha */\nexport function alpha() {\n  return foo(1)\n}\nexport const END = 1\n')
+    assert.deepEqual(v.applied.map(x => x.op), ['insert_after', 'insert_before', 'replace_between', 'append'])
+    assert.equal(v.verify.exitCode, 0)
+    assert.match(v.verify.output, /8\nverified$/)
+    assert.equal(c.shellRuns[0].workdir, root, 'verify runs in the workspace by default')
+    assert.equal(c.shellRuns[0].sandboxPolicy.mode, 'workspace-write', 'verify carries the caller\'s sandbox policy')
+    const t = textOf(editMany, args, v)
+    assert.match(t, /^applied 4 edits in 1 file\.\n {2}.*src\/a\.ts: 4 edits \(insert_after line 1, insert_before line 4, replace_between line 6, append line 8\)\nverify `wc -l < src\/a\.ts && echo verified` → exit 0 \(2 lines\):\n\s*8\nverified$/)
+    // presentation: only replace ops become diff cards; the call card notes verify
+    assert.equal(editMany.output.presentationMeta(args, v).diffs.length, 0)
+    assert.match(editMany.presentCall(args).title, /\+ verify$/)
+    
+  } finally {
+    writeFileSync(a, before)
+  }
+})
+
+test('edit_many: verify failure is reported, not a tool error; output is tailed; skipped on dry_run and on validation failure; workdir + timeout honoured', async () => {
+  const c = fakeCtx({ workspaceRoot: root })
+  const [, readMany, editMany] = build(c, Config({}))
+  const b = join(root, 'src/b.ts')
+  const before = readFileSync(b, 'utf8')
+  await readMany.execute({ files: ['src/b.ts'] }, exec)
+  const args = { edits: [{ file_path: 'src/b.ts', old_string: 'n * 2', new_string: 'n * 6' }], verify: { command: 'for i in 1 2 3 4 5 6; do echo line$i; done; echo boom >&2; exit 3', max_lines: 4, workdir: 'src' } }
+  const v = await editMany.execute(args, exec)
+  assert.match(readFileSync(b, 'utf8'), /n \* 6/, 'edits stay applied when the check fails')
+  assert.equal(v.verify.exitCode, 3)
+  assert.equal(v.verify.outputLines, 7)
+  assert.equal(v.verify.truncatedLines, 3)
+  assert.equal(v.verify.output, 'line4\nline5\nline6\nboom')
+  assert.equal(c.shellRuns.at(-1).workdir, join(root, 'src'))
+  assert.match(textOf(editMany, args, v), /verify `.*` → exit 3 \(last 4 of 7 lines\):\nline4\nline5\nline6\nboom$/)
+  writeFileSync(b, before)
+  await readMany.execute({ files: ['src/b.ts'] }, exec)
+  const dry = await editMany.execute({ ...args, dry_run: true }, exec)
+  assert.equal(dry.verify.skipped, 'dry_run')
+  assert.match(textOf(editMany, args, dry), /verify skipped \(dry_run\)\.$/)
+  const runsBefore = c.shellRuns.length
+  await assert.rejects(editMany.execute({ edits: [{ file_path: 'src/b.ts', old_string: 'nope', new_string: 'x' }], verify: { command: 'echo ran' } }, exec), /nothing written/)
+  assert.equal(c.shellRuns.length, runsBefore, 'verify does not run after a validation failure')
+  const noShell = fakeCtx({ workspaceRoot: root, withShell: false })
+  const [, rm2, em2] = build(noShell, Config({}))
+  await rm2.execute({ files: ['src/b.ts'] }, exec)
+  const v2 = await em2.execute({ edits: [{ file_path: 'src/b.ts', old_string: 'n * 2', new_string: 'n * 7' }], verify: { command: 'true' } }, exec)
+  assert.match(v2.verify.skipped, /no shell service/)
+  writeFileSync(b, before)
+  await assert.rejects(run('edit_many', { edits: [{ file_path: 'src/b.ts', old_string: 'a', new_string: 'b' }], verify: { command: '' } }), /verify\.command must be a non-empty string/)
+  await assert.rejects(run('edit_many', { edits: [{ file_path: 'src/b.ts', old_string: 'a', new_string: 'b' }], verify: { command: 'x', max_lines: 0 } }), /verify\.max_lines must be a positive integer/)
 })
 
 test('edit_many: read_many authorises; several edits in one file + another file; later edit sees earlier result; observed after', async () => {
@@ -187,7 +319,7 @@ test('edit_many: not-found and ambiguous old_string are collected together, noth
       { file_path: 'src/a.ts', old_string: 'does not exist', new_string: 'y' },
       { file_path: 'src/a.ts', old_string: 'alpha', new_string: 'beta' },
     ] }, exec),
-    /2 problems, nothing written:\n {2}#1 .*appears 3 times — make it more specific or set replace_all.*\n {2}#2 .*old_string not found \(does not exist\)/,
+    /2 problems, nothing written:\n {2}#1 .*appears 3 times — make it more specific or set replace_all: true.*\n {4}3 matches:\n[\s\S]*\n {2}#2 .*old_string not found \(does not exist\)\n {4}no line resembles the first line of the anchor/,
   )
   assert.equal(readFileSync(join(root, 'src/a.ts'), 'utf8'), before)
   const dry = await editMany.execute({ dry_run: true, edits: [{ file_path: 'src/a.ts', old_string: 'alpha', new_string: 'beta' }] }, exec)
@@ -196,22 +328,44 @@ test('edit_many: not-found and ambiguous old_string are collected together, noth
   assert.equal(readFileSync(join(root, 'src/a.ts'), 'utf8'), before)
 })
 
-test('edit_many: a bash-side write after the read makes the batch fail stale with a re-read remedy, before any write', async () => {
+test('edit_many: a bash-side write after the read (stale) — unique anchor in the CURRENT content goes through with a note; a now-missing anchor shows the regions; nothing partial', async () => {
   const c = fakeCtx({ workspaceRoot: root })
   const [, readMany, editMany] = build(c, Config({}))
-  await readMany.execute({ files: ['src/b.ts'] }, exec)
+  await readMany.execute({ files: ['src/b.ts', 'src/a.ts'] }, exec)
   const b = join(root, 'src/b.ts')
+  const a = join(root, 'src/a.ts')
   const original = readFileSync(b, 'utf8')
-  c.externalWrite(b, original.replace('n * 2', 'n * 2 // touched by bash'))
-  await assert.rejects(
-    editMany.execute({ edits: [{ file_path: 'src/b.ts', old_string: 'n * 2', new_string: 'n * 4' }] }, exec),
-    (e) => { assert.equal(e.code, 'FS_STALE_VERSION'); assert.match(e.message, /stopped at edit #1.*changed since it was read — re-read it/s); assert.match(e.message, /Nothing was applied/); return true },
-  )
-  assert.match(readFileSync(b, 'utf8'), /touched by bash/)
-  // re-reading fixes it
-  await readMany.execute({ files: ['src/b.ts'] }, exec)
-  await editMany.execute({ edits: [{ file_path: 'src/b.ts', old_string: 'n * 2 // touched by bash', new_string: 'n * 2' }] }, exec)
-  assert.equal(readFileSync(b, 'utf8'), original)
+  try {
+    const aBefore = readFileSync(a, 'utf8')
+    c.externalWrite(b, original.replace('n * 2', 'n * 20 // touched by bash'))
+    // the anchor the model remembers is gone: refused with regions, note explains why
+    await assert.rejects(
+      editMany.execute({ edits: [
+        { file_path: 'src/a.ts', old_string: 'return foo(1)', new_string: 'return foo(0)' },
+        { file_path: 'src/b.ts', old_string: 'n * 2\n', new_string: 'n * 4\n' },
+      ] }, exec),
+      (e) => {
+        assert.equal(e.code, 'EDIT_MANY_INVALID')
+        assert.match(e.message, /1 problem, nothing written:\n {2}#2 .*old_string not found \(n \* 2\\n\) \[file changed since it was read\]\n {4}nearest lines[\s\S]*2: {3}return n \* 20 \/\/ touched by bash/)
+        return true
+      },
+    )
+    assert.equal(readFileSync(a, 'utf8'), aBefore, 'the valid edit to a.ts was not applied (all-or-nothing, decided before any write)')
+    // an anchor unique in the current content goes through without a re-read
+    const args = { edits: [{ file_path: 'src/b.ts', old_string: 'n * 20 // touched by bash', new_string: 'n * 2' }] }
+    const v = await editMany.execute(args, exec)
+    assert.equal(readFileSync(b, 'utf8'), original)
+    assert.equal(v.applied[0].guard, undefined, 'the refusal above already recorded the fresh observation')
+    // straight stale + unique (no failed attempt in between)
+    c.externalWrite(b, original.replace('n * 2', 'n * 2 // again'))
+    const v2 = await editMany.execute({ edits: [{ file_path: 'src/b.ts', old_string: '// again', new_string: '' }] }, exec)
+    assert.equal(v2.applied[0].guard, 'stale')
+    assert.match(textOf(editMany, {}, v2), /file had changed since it was read; applied because every anchor matched uniquely/)
+    assert.equal(readFileSync(b, 'utf8'), original.replace('n * 2', 'n * 2 '))
+    
+  } finally {
+    writeFileSync(b, original)
+  }
 })
 
 test('edit_many: sandbox denial outside the workspace root is the [sandbox: …] marker', async () => {
@@ -241,8 +395,12 @@ test('edit_many: without an observation policy (no listener) edits are unconditi
 
 test('edit_many: argument validation', async () => {
   await assert.rejects(run('edit_many', { edits: [] }), /non-empty array/)
-  await assert.rejects(run('edit_many', { edits: [{ file_path: 'a', old_string: '', new_string: 'b' }] }), /old_string must be a non-empty string/)
+  await assert.rejects(run('edit_many', { edits: [{ file_path: 'a', old_string: '', new_string: 'b' }] }), /old_string must not be empty/)
   await assert.rejects(run('edit_many', { edits: [{ file_path: 'a', old_string: 'x', new_string: 'x' }] }), /must differ/)
+  await assert.rejects(run('edit_many', { edits: [{ file_path: 'a', op: 'rotate', new_string: 'x' }] }), /op.* must be one of .*replace.*insert_after/)
+  await assert.rejects(run('edit_many', { edits: [{ file_path: 'a', op: 'insert_after', new_string: 'x' }] }), /edits\[0\]\.marker is required for op "insert_after"/)
+  await assert.rejects(run('edit_many', { edits: [{ file_path: 'a', op: 'replace_between', start: 's' }] }), /edits\[0\]\.new_string is required/)
+  await assert.rejects(run('edit_many', { edits: [{ file_path: 'a', op: 'append', new_string: '' }] }), /new_string must not be empty/)
 })
 
 // ---------------------------------------------------------------- search
@@ -302,4 +460,15 @@ test('search: max_results caps matches with a note; invalid regex surfaces rg di
   assert.ok(v.totalMatches > 2)
   assert.match(text('search', {}, v), /showing first 2; raise max_results/)
   await assert.rejects(run('search', { pattern: 'foo(' }), (e) => { assert.equal(e.code, 'SEARCH_FAILED'); assert.match(e.message, /unclosed group|regex/i); return true })
+})
+
+test('search: missing roots are skipped and named with the cwd; ~ expands; all-missing is a clear error', async () => {
+  const v = await run('search', { pattern: 'foo', paths: ['src', 'nope/dir', '~/definitely-not-here-fs-tools-test'], mode: 'files' })
+  assert.ok(v.totalMatches > 0)
+  assert.deepEqual(v.missingPaths, ['nope/dir', '~/definitely-not-here-fs-tools-test'])
+  assert.equal(v.cwd, root)
+  assert.match(text('search', {}, v), /\(2 roots not found and skipped: nope\/dir, ~\/definitely-not-here-fs-tools-test — paths resolve against \/.*\)$/)
+  const none = await run('search', { pattern: 'zzz-no-such-text', paths: ['src', 'nope'] })
+  assert.match(text('search', {}, none), /^No matches found\n\(1 root not found and skipped: nope/)
+  await assert.rejects(run('search', { pattern: 'foo', paths: ['nope', 'also/nope'] }), (e) => { assert.equal(e.code, 'SEARCH_NO_PATHS'); assert.match(e.message, /none of the paths exist \(nope, also\/nope\); paths resolve against/); return true })
 })

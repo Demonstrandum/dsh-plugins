@@ -15,7 +15,7 @@
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { FsToolsError, dropUndefined, plural, positiveInt } from './common.mjs'
+import { FsToolsError, callContext, displayPath, dropUndefined, plural, positiveInt, resolvePath } from './common.mjs'
 
 export const DEFAULT_MAX_RESULTS = 250
 export const MAX_CONTEXT = 20
@@ -213,7 +213,12 @@ export function aggregate(parsed, input, cwd) {
 
 /** @param {ReturnType<typeof aggregate>} v */
 export function renderSearch(v) {
-  if (v.totalMatches === 0) return 'No matches found'
+  const missing = v.missingPaths?.length ? `\n(${plural(v.missingPaths.length, 'root')} not found and skipped: ${v.missingPaths.join(', ')} — paths resolve against ${v.cwd})` : ''
+  if (v.totalMatches === 0) return `No matches found${missing}`
+  return `${renderMatches(v)}${missing}`
+}
+
+function renderMatches(v) {
   const head = `Found ${plural(v.totalMatches, 'match', 'matches')} in ${plural(v.totalFiles, 'file')}`
   if (v.mode === 'files') {
     const cut = v.truncated ? ` (showing first ${v.files.length} files; raise max_results or narrow)` : ''
@@ -247,7 +252,7 @@ export function createSearchTool(ctx, caps) {
     parameters: {
       pattern: { type: 'string', description: 'Regular expression (ripgrep/Rust syntax; use literal:true for a fixed string).' },
       patterns: { type: 'array', items: { type: 'string' }, description: 'Several patterns; a line matching any of them matches.' },
-      paths: { type: 'array', items: { type: 'string' }, description: 'Files or directories to search (relative to the session workspace). Default: ["."].' },
+      paths: { type: 'array', items: { type: 'string' }, description: 'Files or directories to search (relative to the session workspace, absolute, or ~). Roots that do not exist are reported and skipped. Default: ["."].' },
       include: { type: 'array', items: { type: 'string' }, description: 'Only files matching these globs, e.g. ["*.ts", "*.tsx"]. Gitignore semantics: a glob containing "/" is anchored at the search root, so use "**/dir/**" for a directory at any depth.' },
       exclude: { type: 'array', items: { type: 'string' }, description: 'Skip files matching these globs, e.g. ["*.spec.ts", "**/tests/**"] (same anchoring rule as include).' },
       exclude_pattern: { type: 'string', description: 'Drop matching lines whose text matches this (JavaScript) regex — the `| grep -v` filter.' },
@@ -267,7 +272,28 @@ export function createSearchTool(ctx, caps) {
     isConcurrencySafe: () => true,
     async execute(args, exec) {
       const input = parseSearchArgs(args, caps)
-      const cwd = exec?.agent?.session?.header?.cwd ?? process.cwd()
+      const call = callContext(ctx, exec)
+      const cwd = call.cwd
+      // Expand `~`, check every root through ctx.fs; search what exists, name what does not (with the cwd it was resolved against).
+      const missingPaths = []
+      if (input.paths.length > 0) {
+        const fs = ctx.get('fs')
+        const kept = []
+        for (const p of input.paths) {
+          const expanded = String(p).replace(/^~(?=\/|$)/, process.env.HOME ?? '~')
+          if (fs === undefined) { kept.push(expanded); continue }
+          try {
+            const target = await resolvePath(fs, p, call)
+            const info = await fs.stat(target, call.signal)
+            if (info === undefined) missingPaths.push(p)
+            else kept.push(expanded.startsWith('/') ? expanded : displayPath(target, expanded))
+          } catch {
+            missingPaths.push(p)
+          }
+        }
+        if (kept.length === 0) throw new FsToolsError(`search: none of the paths exist (${missingPaths.join(', ')}); paths resolve against ${cwd}`, 'SEARCH_NO_PATHS')
+        input.paths = kept
+      }
       const argv = buildSearchArgv(input)
       let run
       try {
@@ -275,14 +301,15 @@ export function createSearchTool(ctx, caps) {
       } catch (error) {
         throw new FsToolsError(`search could not run ripgrep: ${error instanceof Error ? error.message : String(error)}`, 'SEARCH_FAILED', { cause: error })
       }
+      const decorate = (v) => dropUndefined({ ...v, cwd, ...missingPaths.length ? { missingPaths } : {} })
       if (run.signal !== null || run.exitCode === null) throw new FsToolsError(`search was killed (${run.signal ?? 'unknown signal'})`, 'SEARCH_FAILED')
-      if (run.exitCode === 1) return dropUndefined(aggregate(new Map(), input, cwd))
+      if (run.exitCode === 1) return decorate(aggregate(new Map(), input, cwd))
       if (run.exitCode !== 0) {
         const detail = run.stderr.trim().split('\n').slice(-3).join(' ')
-        throw new FsToolsError(`search failed (rg exit ${run.exitCode}): ${detail || 'no diagnostic'}`, 'SEARCH_FAILED')
+        throw new FsToolsError(`search failed (rg exit ${run.exitCode}): ${detail || 'no diagnostic'} (paths resolve against ${cwd})`, 'SEARCH_FAILED')
       }
       if (run.lossy) throw new FsToolsError(`search produced more than ${RAW_OUTPUT_MAX_BYTES} bytes of raw output; narrow the pattern, paths or include`, 'SEARCH_TOO_LARGE')
-      return dropUndefined(aggregate(parseRgJson(run.stdout), input, cwd))
+      return decorate(aggregate(parseRgJson(run.stdout), input, cwd))
     },
     presentCall: (args) => {
       const pats = [...(args.pattern ? [args.pattern] : []), ...(Array.isArray(args.patterns) ? args.patterns : [])]
