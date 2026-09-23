@@ -74,3 +74,11 @@
     # (host-only <style> row). Recipe: recipes/phone-ui.md
     - id: tali-phone-ui
       name: '/Users/USER/github/tali-dash-plugins/plugins/phone-ui/index.js'
+    # Under trial (2026-09-23): wait-tool — a `wait` tool replacing bash
+    # `sleep N`, rendered in the chat as a live progress bar with Skip (return
+    # early, as if elapsed) and Abort ("user aborted sleep" error). The preview's
+    # default model has no tools, so pick an LM Studio model (minimal preset) to
+    # see a call; the UI half hot-swaps from `pnpm watch`. Recipe:
+    # recipes/wait-tool-plugin.md
+    - id: tali-wait-tool
+      name: '/Users/USER/github/tali-dash-plugins/plugins/wait-tool/index.js'

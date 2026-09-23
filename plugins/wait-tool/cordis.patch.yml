@@ -1,0 +1,8 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# Registers the global `wait` tool (max 1 hour per call by default) and a
+# system-prompt hint steering the model away from bash `sleep`. Override
+# `config` in the profile's cordis.patch.yml (a later layer replaces the whole
+# value).
+- insert:
+    - id: tali-wait-tool
+      name: tali-wait-tool

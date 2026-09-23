@@ -562,6 +562,16 @@ can reproduce or maintain it:
   ChatView's auto-follow / back-to-bottom / turn navigation, the
   console-first verification on the preview and the relay's boot-on-demand
   503.
+- `wait-tool-plugin.md` — a `wait` tool replacing bash `sleep N`
+  (`wait-tool` plugin, both halves): the model states the duration, so the
+  chat draws a live progress bar with **Skip** (returns early, worded as the
+  timeout having elapsed) and **Abort** (an error, "user aborted sleep", so
+  the model stops and asks); the `status`/`control` Fetch routes with
+  session-ownership checks and the server-clock offset, the `defineTool`
+  output-DSL trap (`required: true` per property, no array), and why a
+  cancelled turn must be thrown as a coded `ABORTED` HarnessError (rejecting
+  with `signal.reason` logs `Error: [object Object]`); the throwaway-home +
+  Chrome trial that exercised all four settlements.
 - `<private-plugin>-graphics3d.md` — native three.js `<private>_show` for
   `Graphics3D` (experiment + implementation, 2026-09-21): the ~26-head box IR that
   `ToBoxes` normalizes every 3D primitive/plot into (and the regions that pass
