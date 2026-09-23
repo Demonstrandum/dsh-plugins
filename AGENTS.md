@@ -569,6 +569,16 @@ can reproduce or maintain it:
   hence a DOM preview; why the rename waits for the local `blank` flip and
   reads the submission echo, not the draft or input phase; the
   `SSH_TTY` trick that keeps the preview's directory picker in the browser.
+- `shared-host-providers-and-keys.md` — cloud providers + API keys on every
+  DSH instance of a shared machine: how DSH stores them (`settings.yaml`
+  `llm-pi-ai.providers.<id>.apiKeyEnv` → `.credentials.yaml` `refs.<NAME>`,
+  mode 600, both chokidar-watched so no restart), why the anthropic row is a
+  catalog restatement (pi-ai 0.85.1 lacks Opus 5.5), the private
+  `dsh-set-providers` rollout tool's rules (replace anthropic, keep existing
+  refs/defaults, keys over ssh stdin never argv), the leftover-free headless
+  smoke test under a temporary `DSH_HOME`, and two new-account traps: deploy
+  keys before the bootstrap, and `install-plugins.sh`'s `EXTRA_DIRS[@]:
+  unbound variable` under macOS bash 3.2 (fixed `95e3335`).
 - `settings-keyboard-shortcut-plugin.md` — ⌘. toggles the web GUI Settings
   panel (`settings-shortcut` plugin): why ⌘, is impossible in Safari (the
   app consumes it before the page), the component-local open state that
