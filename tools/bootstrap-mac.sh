@@ -47,6 +47,11 @@
 #   --allow LOGIN[,LOGIN] tailnet logins admitted to this instance by identity (besides the node's own); e.g. the
 #                         person a --instance is for, when the Mac is logged in to Tailscale as someone else
 #   --repo URL            clone URL (default https://github.com/taliesinb/dsh-plugins)
+#   --ref REF             check out this branch / tag / commit of the repo instead of the current default branch
+#                         (a dev branch on one instance, a known-good commit). A branch becomes a local tracking
+#                         branch so later ff-only updates follow it; a tag/commit is detached. Without --ref a
+#                         clone found on another branch is moved back to the default branch. The fork is always
+#                         the submodule pin of the checked-out commit.
 #   --list                list the step names and exit
 #
 # Steps (in order): preflight clt brew tools apps tailscale clone fork plugins
@@ -82,6 +87,7 @@
 set -euo pipefail
 
 REPO="https://github.com/taliesinb/dsh-plugins"
+REF=""
 DIR=""
 PARENT=""
 YES=0
@@ -142,8 +148,10 @@ while [ $# -gt 0 ]; do
     --tailscale-timeout=*) TS_TIMEOUT="${1#--tailscale-timeout=}"; shift ;;
     --repo) REPO="$2"; shift 2 ;;
     --repo=*) REPO="${1#--repo=}"; shift ;;
+    --ref) REF="$2"; shift 2 ;;
+    --ref=*) REF="${1#--ref=}"; shift ;;
     --list) printf '%s\n' "${STEPS[@]}"; exit 0 ;;
-    -h|--help) sed -n "2,75p" "$0"; exit 0 ;;
+    -h|--help) sed -n "2,80p" "$0"; exit 0 ;;
     *) echo "unknown argument: $1 (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -657,27 +665,51 @@ if wants clone; then
     DIR="${PARENT/#\~/$HOME}/tali-dash-plugins"
   fi
   DIR="${DIR/#\~/$HOME}"
+  # stash_local_edits: park uncommitted edits (this is an installer, not a dev checkout) so a checkout/reset can proceed.
+  stash_local_edits() {
+    local dirty; dirty="$(git -C "$DIR" status --short 2>/dev/null | head -5)"
+    [ -n "$dirty" ] || return 0
+    log "local edits in $DIR (saved as a stash):"; echo "$dirty" | sed 's/^/    /'
+    [ "$DRY" = 1 ] || git -C "$DIR" stash push -q -u -m "bootstrap-mac $(date +%F)" >/dev/null 2>&1 || true
+  }
   if [ -d "$DIR/.git" ] || [ -f "$DIR/.git" ]; then
     ok "existing clone at $DIR — adopting it"
-    # A redeploy means "the current main": fast-forward when that is possible, leave local work alone otherwise.
-    # (Local modifications such as the re-pointed cordis.dev.yml do not block a fast-forward; a real
-    # divergence or a conflicting local edit does, and then we keep what is checked out.)
-    if [ "$DRY" = 0 ]; then
-      if ! git -C "$DIR" pull --ff-only -q 2>>"$LOG"; then
-        # Diverged (e.g. a clone from before the 2026-09-21 history rewrite) or dirty. With no local commits worth
-        # keeping — this is an installer, not a dev checkout — reset onto origin/main; local edits are backed up.
-        dirty="$(git -C "$DIR" status --short 2>/dev/null | head -5)"
-        if [ -n "$dirty" ]; then log "local edits in $DIR (saved as a stash):"; echo "$dirty" | sed 's/^/    /'; [ "$DRY" = 1 ] || git -C "$DIR" stash push -q -u -m "bootstrap-mac $(date +%F)" >/dev/null 2>&1 || true; fi
-        log "resetting $DIR onto origin/main (history diverged — likely a clone from before a rewrite)"
-        [ "$DRY" = 1 ] || { git -C "$DIR" fetch -q origin && git -C "$DIR" reset -q --hard origin/main; } || die "could not reset $DIR onto origin/main"
-      fi
-      ok "$DIR at $(git -C "$DIR" log -1 --format='%h %s' 2>/dev/null)"
-    fi
   else
     log "cloning $REPO → $DIR (a few minutes; the fork comes next as a submodule)"
     [ "$DRY" = 1 ] || mkdir -p "$(dirname "$DIR")"
     run git clone "$REPO" "$DIR" || die "clone failed"
   fi
+  if [ "$DRY" = 0 ]; then
+    git -C "$DIR" fetch -q --tags origin 2>>"$LOG" || warn "could not fetch origin — continuing with what is checked out"
+    DEFAULT_BRANCH="$(git -C "$DIR" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')"; DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
+    CUR_BRANCH="$(git -C "$DIR" symbolic-ref -q --short HEAD 2>/dev/null || echo detached)"
+    if [ -n "$REF" ]; then
+      # --ref: a branch on origin becomes a local tracking branch (later ff-only pulls — this script's or
+      # sync-host's — follow THAT branch); a tag or commit is checked out detached. The fork follows the pin
+      # recorded in that commit, so a branch that needs fork changes bumps the submodule gitlink.
+      if git -C "$DIR" rev-parse -q --verify "refs/remotes/origin/$REF" >/dev/null 2>&1; then
+        [ "$CUR_BRANCH" = "$REF" ] || { stash_local_edits; log "checking out branch $REF (tracking origin/$REF)"; }
+        git -C "$DIR" checkout -q -B "$REF" "origin/$REF" 2>>"$LOG" || die "could not check out branch $REF"
+      elif git -C "$DIR" rev-parse -q --verify "$REF^{commit}" >/dev/null 2>&1; then
+        stash_local_edits; log "checking out $REF (detached; later runs without --ref return to $DEFAULT_BRANCH)"
+        git -C "$DIR" checkout -q --detach "$REF" 2>>"$LOG" || die "could not check out $REF"
+      else die "--ref $REF is neither a branch on origin, a tag nor a commit of $REPO (pushed?)"; fi
+    else
+      # No --ref: the default branch, current. A clone left on another branch or detached (an earlier --ref, a
+      # manual checkout) is moved back — an installer deploys "the current main" unless told otherwise.
+      if [ "$CUR_BRANCH" != "$DEFAULT_BRANCH" ]; then
+        stash_local_edits; log "clone is on '$CUR_BRANCH' — back to $DEFAULT_BRANCH (no --ref given)"
+        git -C "$DIR" checkout -q -B "$DEFAULT_BRANCH" "origin/$DEFAULT_BRANCH" 2>>"$LOG" || die "could not check out $DEFAULT_BRANCH"
+      elif ! git -C "$DIR" pull --ff-only -q 2>>"$LOG"; then
+        # Diverged (a local commit, or a clone from before one of the history rewrites) or a conflicting edit:
+        # nothing here is worth keeping over origin — stash and reset.
+        stash_local_edits
+        log "resetting $DIR onto origin/$DEFAULT_BRANCH (history diverged — likely a clone from before a rewrite)"
+        git -C "$DIR" reset -q --hard "origin/$DEFAULT_BRANCH" 2>>"$LOG" || die "could not reset $DIR onto origin/$DEFAULT_BRANCH"
+      fi
+    fi
+    ok "$DIR at $(git -C "$DIR" log -1 --format='%h %s' 2>/dev/null | cut -c1-70) [$(git -C "$DIR" symbolic-ref -q --short HEAD 2>/dev/null || echo "detached${REF:+ at $REF}")]"
+  elif [ -n "$REF" ]; then log "would check out --ref $REF"; fi
   # .gitmodules points at the fork over ssh (git@github.com:…), which needs a GitHub key on this Mac —
   # a fresh machine has none ("Host key verification failed" on the first remote). The fork is public, so fetch the
   # submodule over https by overriding the URL in this clone's config only; .gitmodules stays as is.

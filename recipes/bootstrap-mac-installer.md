@@ -9,7 +9,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/taliesinb/dsh-plugins/ma
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/taliesinb/dsh-plugins/main/tools/bootstrap-mac.sh)" bootstrap --thin-client <host>
 # from a clone: pnpm bootstrap  /  tools/bootstrap-mac.sh [--checkout-parent DIR | --dir DIR] [--yes] [--dry-run] [--skip STEP,…] [--only STEP,…]
 #               [--no-apps] [--no-tailnet] [--no-apple] [--rebuild] [--no-replace] [--force]
-#               [--thin-client HOST] [--thin-client-user U] [--tailscale-timeout S] [--repo URL] [--list]
+#               [--thin-client HOST] [--thin-client-user U] [--tailscale-timeout S] [--repo URL] [--ref BRANCH|TAG|SHA] [--list]
 # on another Mac over ssh (copies the script, runs it with a tty when you have one, --yes otherwise):
 pnpm bootstrap-remote user@host [same flags]       # an existing DSH there is taken over (see § Redeploying a deploy-remote host)
 # the thin client alone — a Dock app for a DSH on ANOTHER Mac, nothing built locally (see § The thin client):
@@ -132,6 +132,22 @@ of these states:
   leave it alone; `--rebuild` still forces everything.
 - **Clean and current**: a no-op ("adopting it", pin unchanged, nothing
   rebuilt).
+- **A specific version: `--ref BRANCH|TAG|SHA`** (2026-09-23). A branch on
+  origin is checked out as a *local tracking branch* (`checkout -B REF
+  origin/REF`), so later fast-forward updates — this script's, or a
+  deployment tool's plain `git pull --ff-only` — follow that branch; a tag or
+  commit is checked out detached. The fork is always the submodule pin of the
+  checked-out commit (a branch needing fork changes bumps the gitlink), and the
+  built-SHA record makes the fork/plugin rebuilds follow automatically. Without
+  `--ref` the script now *explicitly* returns a clone found on another branch
+  or detached to the default branch (`origin/HEAD`, else `main`) — before, an
+  adopted clone on some other branch was silently fast-forwarded along that
+  branch. Use: deploy a dev branch to one instance of the shared machine
+  (`pnpm bootstrap-remote <user>@<remote> --ref my-branch`; the branch must be
+  pushed — the remote clones from GitHub), pin a colleague to a known-good
+  commit, bisect. Verified on the throwaway clone: branch → tracking branch,
+  same branch again → no-op, sha → detached, then no `--ref` → back on main,
+  a bogus ref → dies before touching anything.
 
 The thin-client script's clone is shallow and single-branch; its re-run is
 `fetch --depth 1 origin main` + `reset --hard origin/main` (non-FF-proof by
