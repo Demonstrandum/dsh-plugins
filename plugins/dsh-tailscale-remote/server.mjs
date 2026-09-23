@@ -53,7 +53,14 @@ export function clientFacts(req) {
   return { proxied, login: login ?? (proxied ? undefined : 'local'), admitted, address, self, userAgent }
 }
 
-/** Session-ish facts in a `POST /api/session/...` body, if any. */
+/**
+ * Session-ish facts in a `POST /api/session/...` body, if any. The Typert
+ * gateway's wire shape is `payload.args` keyed by PARAMETER NAME, so a
+ * `prompt(request)` call arrives as `{ args: { request: { sessionId, … } } }`
+ * (measured 2026-09-21 on the preview: `session/prompt` bodies sniffed nothing
+ * until this looked one level down). Flat `args.sessionId` and positional
+ * `args[0]` are kept for older shapes and the test fixtures.
+ */
 export function sniffSession(method, bodyText) {
   if (!/^session\//.test(method)) return undefined
   let parsed
@@ -63,17 +70,20 @@ export function sniffSession(method, bodyText) {
     return undefined
   }
   const args = parsed?.payload?.args
-  const record = Array.isArray(args) ? args[0] : args
-  if (typeof record !== 'object' || record === null) return undefined
-  const sessionId = typeof record.sessionId === 'string' ? record.sessionId : typeof record.id === 'string' && record.id.startsWith('session-') ? record.id : undefined
-  const cwd = typeof record.cwd === 'string' ? record.cwd : undefined
-  if (sessionId === undefined && cwd === undefined) return undefined
-  return { method, sessionId, cwd }
+  const candidates = Array.isArray(args) ? [args[0]] : [args, ...(typeof args === 'object' && args !== null ? Object.values(args) : [])]
+  for (const record of candidates) {
+    if (typeof record !== 'object' || record === null) continue
+    const sessionId = typeof record.sessionId === 'string' ? record.sessionId : typeof record.id === 'string' && record.id.startsWith('session-') ? record.id : undefined
+    const cwd = typeof record.cwd === 'string' ? record.cwd : undefined
+    if (sessionId !== undefined || cwd !== undefined) return { method, sessionId, cwd }
+  }
+  return undefined
 }
 
 /**
  * @param {import('node:http').Server} httpServer DSH's server (`ctx.webServer.server`)
- * @param {{ now?: () => number }} [options]
+ * @param {{ now?: () => number, onSession?: (facts: ReturnType<typeof clientFacts>, found: { method: string, sessionId?: string, cwd?: string }) => void }} [options]
+ *   `onSession` fires for every sniffed `POST /api/session/*` body (owners.mjs attributes sessions to logins with it).
  */
 export function attachClientTracker(httpServer, options = {}) {
   const now = options.now ?? Date.now
@@ -114,7 +124,9 @@ export function attachClientTracker(httpServer, options = {}) {
           req.off('data', onData)
           if (over) return
           const found = sniffSession(method, text)
-          if (found !== undefined) row.lastSession = { ...found, at: now() }
+          if (found === undefined) return
+          row.lastSession = { ...found, at: now() }
+          try { options.onSession?.(row, found) } catch { /* an observer must not break request handling */ }
         })
       }
     }

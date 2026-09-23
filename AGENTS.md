@@ -657,7 +657,12 @@ can reproduce or maintain it:
   Enable/Disable, URL, allowed-user list, tokened QR), the DSH branch
   `fix/tailscale-mounting` (document-relative Host URLs; why a worktree), the
   measured Tailscale path-strip facts, and the trailing-slash trap. Ports and
-  the Dock app / relay moved on in `dock-app-via-tailnet.md`.
+  the Dock app / relay moved on in `dock-app-via-tailnet.md`. Since 2026-09-21
+  also the `sessionOwners` service (`owners.mjs`): which tailnet login drives
+  which session, joined from the proxy's identity headers and the session ids
+  in `POST /api/session/*` bodies — and the Typert wire-shape trap (`args`
+  keyed by parameter name) that had left the Server pane's session column
+  empty.
 - `transcript-grace-margin.md` — visible "end of transcript" space under the
   last row of an active session (`transcript-grace-margin` plugin, host-only):
   why the shipped client leaves only 16px under a 36px composer fade band,

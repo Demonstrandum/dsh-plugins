@@ -284,3 +284,44 @@ rm -f ~/.dsh/tailscale-remote.json                    # (or the preview home's c
 # drop the plugin row from the profile patch / `dsh plugin --profile web remove dsh-tailscale-remote`
 cd ~/github/deepseek-harness && git worktree remove ../deepseek-harness-tailscale  # keeps the branch
 ```
+
+## Session attribution: the `sessionOwners` service (added 2026-09-21)
+
+**Why.** A shared DSH host (e.g. `alpha`) serves several tailnet users, but
+DSH itself is single-user: a session header has no person in it, and anything
+the host does on a chat's behalf (the private `symba-dsh` plugin runs `symba`
+as the *host's* tailnet identity) is indistinguishable between users. The
+proxy, however, already knows who each request is (`x-dsh-tailscale-remote-login`,
+Serve-verified) and the Server pane's tracker already sniffs the session id
+out of `POST /api/session/*` bodies. `owners.mjs` joins the two.
+
+**What.** `SessionOwners` records `(sessionId, login, method)` from the
+tracker's new `onSession` callback and persists to
+`$DSH_HOME/session-owners[-<instance>].json` (0600, debounced 1 s). `owner` =
+first *driving* request (`session/prompt`, `updateQueue`, `fork`,
+`selectModel`, `rename`; a look-only `attach`/`history` counts only until
+someone drives), `actor` = latest driver. Request identity: proxied login →
+`self` proxied / direct loopback = the node's own login → `token` for
+QR/cookie clients. Exposed as `ctx.provide('sessionOwners', { of, list,
+selfLogin, file })`; consumers `ctx.get('sessionOwners')` and treat absence as
+single-user. Config `ownersFile`.
+
+**The trap that cost the first attempt.** The tracker's `sniffSession` read
+`payload.args.sessionId` / `payload.args[0]`, and the test fixtures matched
+that. The real Typert wire shape is `payload.args` keyed by **parameter
+name**: `prompt(request)` arrives as `{ args: { request: { sessionId, … } } }`
+(`packages/api/gateway/src/index.ts` `remoteRequest` + `assertExactArguments`).
+On the preview the tracker showed the Chrome client at `/api/session/prompt`
+with `lastSession: null` — the Server pane had been silently missing the
+session column for every real client all along. Fix: also look one level down
+(`Object.values(args)`); fixture added.
+
+**Verified** on the preview through the tailnet URL: a prompt from Chrome →
+`session-owners-preview.json` holds `owner.login: tali@symbolica.ai`,
+`method: session/prompt`; the `symba-dsh` agent's `symba_status` then reports
+`user tali`. Tests: `tests/owners.test.mjs` (identity precedence, owner/actor,
+persistence, tracker → owners over a live `http.Server`).
+
+**Limits.** Attribution, not authorization. The actor follows the latest
+prompt, so a second person steering a session takes it over. Nothing is known
+about sessions never driven through the proxy (headless/SDK use).

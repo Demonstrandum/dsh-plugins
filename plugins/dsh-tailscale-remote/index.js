@@ -32,6 +32,8 @@
  *   servePort    HTTPS port on the node                           443
  *   tailscalePath  CLI path override ('' = PATH / app bundle)     ''
  *   stateFile    persisted intent + token ('' = $DSH_HOME/tailscale-remote.json)
+ *   ownersFile   session → tailnet-login attribution (owners.mjs; the `sessionOwners` service)
+ *                ('' = $DSH_HOME/session-owners[-<instance>].json)
  *   cookieName   the proxy's own session cookie                   dsh-tailscale-remote
  *   identityOperators  identity-admitted users may operate the panes (control channel, ownsHost)   true
  *                      false = this node's own device only (token holders never operate)
@@ -52,6 +54,7 @@ import { bundlePathFor, dockAppStatus, installDockApp, uninstallDockApp } from '
 import { FORWARD_PATH, handleForwardUpgrade } from './forward.mjs'
 import { startProxy } from './proxy.mjs'
 import { defaultLogDir, installRelayAgent, relayStatus, restartRelayAgent, stopRelayAgent, uninstallRelayAgent } from './relay/launch-agent.mjs'
+import { SessionOwners, defaultOwnersFile, loginOf } from './owners.mjs'
 import { attachClientTracker, performAction, processTable, workspaceOfSession } from './server.mjs'
 import { defaultStateFile, generateToken, loadState, parseUserList, saveState } from './state.mjs'
 import { createTailscaleManager, normalizeMountPath } from './tailscale.mjs'
@@ -68,6 +71,7 @@ export const Config = Schema.object({
   servePort: Schema.natural().min(1).max(65535).default(443),
   tailscalePath: Schema.string().default(''),
   stateFile: Schema.string().default(''),
+  ownersFile: Schema.string().default(''),
   cookieName: Schema.string().default('dsh-tailscale-remote'),
   identityOperators: Schema.boolean().default(true),
   relayStart: Schema.string().default('pnpm dsh web --no-open'),
@@ -415,8 +419,32 @@ export function apply(ctx, config) {
   // it is plain property access. Guarded so a rename degrades to "no client
   // table" rather than a failed load.
   const httpServer = /** @type {any} */ (ctx.webServer).server
-  const tracker = typeof httpServer?.on === 'function' ? attachClientTracker(httpServer) : undefined
+  // Session attribution (owners.mjs): which tailnet login drives which session,
+  // joined from the proxy's identity headers and the session ids in
+  // `POST /api/session/*` bodies. Persisted per instance; offered to other host
+  // plugins as the `sessionOwners` service (optional coupling — consumers
+  // `ctx.get('sessionOwners')` and treat absence as "single user").
+  const owners = new SessionOwners({
+    file: config.ownersFile || (instance === '' ? defaultOwnersFile() : defaultOwnersFile().replace(/\.json$/, `-${instance}.json`)),
+    log: warn,
+  })
+  ctx.effect(() => () => { void owners.dispose() }, 'tailscale-remote: session owners')
+  const tracker = typeof httpServer?.on === 'function'
+    ? attachClientTracker(httpServer, {
+      onSession: (facts, found) => {
+        if (found.sessionId !== undefined) owners.record(found.sessionId, loginOf(facts, lastRoute?.selfLogin), found.method)
+      },
+    })
+    : undefined
   if (tracker !== undefined) ctx.effect(() => () => tracker.dispose(), 'tailscale-remote: client tracker')
+  ctx.provide('sessionOwners', {
+    /** `{ owner, actor, first, last, logins }` for a session id, or undefined when never seen. */
+    of: (sessionId) => owners.of(sessionId),
+    list: () => owners.list(),
+    /** This node's own tailnet login (what direct loopback requests count as), when known. */
+    selfLogin: () => lastRoute?.selfLogin,
+    file: owners.file,
+  })
   const dshHome = process.env.DSH_HOME || join(homedir(), '.dsh')
   const workspaceCache = new Map()
   const serverStatus = async () => {

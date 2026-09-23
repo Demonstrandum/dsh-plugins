@@ -2,7 +2,7 @@
   "name": "dsh-tailscale-remote",
   "version": "0.1.0",
   "private": true,
-  "description": "DSH plugin: drive the Web GUI from another device on your tailnet at https://<node>.ts.net/dsh/ — an authenticating loopback reverse proxy published with `tailscale serve`, a Tailscale-user allowlist, a QR code carrying the access token, a WKWebView Dock app for this Mac (no token: the node's own Tailscale identity admits it) and an always-on relay LaunchAgent that starts DSH on demand. Needs the DSH branch fix/tailscale-mounting (document-relative Host URLs).",
+  "description": "DSH plugin: drive the Web GUI from another device on your tailnet at https://<node>.ts.net/dsh/ \u2014 an authenticating loopback reverse proxy published with `tailscale serve`, a Tailscale-user allowlist, a QR code carrying the access token, a WKWebView Dock app for this Mac (no token: the node's own Tailscale identity admits it) and an always-on relay LaunchAgent that starts DSH on demand. Needs the DSH branch fix/tailscale-mounting (document-relative Host URLs).",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -19,6 +19,7 @@
     "dock-app.mjs",
     "desktop-branding.js",
     "server.mjs",
+    "owners.mjs",
     "relay/relay.mjs",
     "relay/launch-agent.mjs",
     "scripts/cli.mjs",

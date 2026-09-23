@@ -31,6 +31,7 @@ describe('server pane helpers', () => {
   it('sniffs session ids and cwds only from session/* bodies', () => {
     assert.deepEqual(sniffSession('session/attach', JSON.stringify({ payload: { args: { sessionId: 'session-abc' } } })), { method: 'session/attach', sessionId: 'session-abc', cwd: undefined })
     assert.deepEqual(sniffSession('session/create', JSON.stringify({ payload: { args: [{ cwd: '/w' }] } })), { method: 'session/create', sessionId: undefined, cwd: '/w' })
+    assert.deepEqual(sniffSession('session/prompt', JSON.stringify({ payload: { args: { request: { requestId: 'r', sessionId: 'session-p', mode: 'queue', content: [] } } } })), { method: 'session/prompt', sessionId: 'session-p', cwd: undefined }, 'typert wire shape: args keyed by parameter name')
     assert.equal(sniffSession('settings/read', JSON.stringify({ payload: { args: { sessionId: 'session-x' } } })), undefined)
     assert.equal(sniffSession('session/list', '{nope'), undefined)
   })

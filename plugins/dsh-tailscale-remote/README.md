@@ -239,7 +239,38 @@ A second settings section right after *Tailscale remote*:
   loopback tabs, a short user-agent label (`DSHDock/1.0` → "DSH Dock app"),
   open `/api/remote.mux` WebSockets (= live GUI tabs), request count, and the
   last `POST /api/session/*` body's `sessionId`/`cwd` (observed, never
-  consumed) resolved to a workspace via the sessions store.
+  consumed) resolved to a workspace via the sessions store. The Typert wire
+  shape is `payload.args` keyed by **parameter name** — `session/prompt`
+  arrives as `{ args: { request: { sessionId, … } } }` — so the sniffer looks
+  one level down (it found nothing until it did; measured 2026-09-21).
+
+## The `sessionOwners` service (`owners.mjs`)
+
+DSH itself is single-user: a session carries no person. The tracker above,
+though, sees both the Serve-verified login of every proxied request and the
+session id inside every `POST /api/session/<method>` body, so this plugin
+joins them and offers the result to other **host** plugins as `ctx.get('sessionOwners')`
+(optional coupling — absent means "single-user machine"):
+
+```js
+owners.of(sessionId)  // → { owner, actor, first, last, logins } | undefined
+owners.list()         // every attributed session
+owners.selfLogin()    // this node's own login (what loopback requests count as)
+```
+
+`owner` is the login of the first request that *drove* the session
+(`session/prompt`, `updateQueue`, `fork`, `selectModel`, `rename`; a mere
+look — `attach`, `history` — becomes owner only if nobody ever drove it),
+`actor` the latest driver. Identity of a request: the proxied login; the
+node's own login for direct loopback requests (Dock app / tab on the Mac
+itself) and for `self` proxied ones; the literal `token` for QR/cookie
+clients. Persisted, debounced, mode 0600, at `$DSH_HOME/session-owners[-<instance>].json`
+(config `ownersFile`). Attribution, not authorization: it records who asked
+and grants nothing. First consumer: the `symba-dsh` plugin (private
+symbolica-ai/symba repo, `integrations/dsh/`), which puts the actor's short
+login into the Forge node name (`dsh:tali:0`) so chats of different people
+behind one shared DSH host — all running `symba` as the host's tailnet
+identity — can be told apart and guarded.
 
 ## The Dock app (`dock-app/`)
 
