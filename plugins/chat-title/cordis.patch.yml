@@ -1,0 +1,9 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# Registers the rename_chat tool, the system-prompt rule and the untitled-chat
+# nudge. Override `config` in the profile's cordis.patch.yml (a later layer
+# replaces the whole value):
+#   - id: tali-chat-title
+#     config: { style: natural, maxWords: 6 }
+- insert:
+    - id: tali-chat-title
+      name: tali-chat-title
