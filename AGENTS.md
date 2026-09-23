@@ -3,7 +3,8 @@
 Out-of-tree work on DeepSeek Harness (DSH): **plugin code** under
 `plugins/`, **recipes** (one Markdown file per completed setup/change) under
 `recipes/`, helper scripts under `tools/`, and the DSH fork itself as the
-submodule `deepseek-harness/`. Setting up a fresh machine: [INSTALLING.md](INSTALLING.md). This file is the onboarding
+submodule `deepseek-harness/`. Setting up a fresh machine: [INSTALLING.md](INSTALLING.md); the one-page colleague
+version: [QUICKSTART.md](QUICKSTART.md) (placeholders only — real host/user names live in `extras/`). This file is the onboarding
 guide for agents working here: how DSH plugins work, how this repo is laid
 out, where the authoritative docs live, and how to record what you did.
 

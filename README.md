@@ -17,7 +17,9 @@ Out-of-tree work on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-h
 
 `AGENTS.md` is the development guide (how DSH plugins work, house rules,
 recipe index); **`INSTALLING.md`** is the fresh-machine guide (fork build,
-plugins, Apple on-device model, Tailscale route, Dock app).
+plugins, Apple on-device model, Tailscale route, Dock app);
+**`QUICKSTART.md`** is the one-page version for colleagues (thin client, full
+install, update / switch version / remove).
 
 ## Quick start
 

@@ -1,5 +1,7 @@
 # Installing DSH (the custom fork + plugins) on a fresh machine
 
+> Colleague with two names (`<host>`, `<user>`) and no time? [QUICKSTART.md](QUICKSTART.md).
+
 Assembled 2026-09-18 from the fork checkout, this repo (tools, recipes, plugin
 READMEs) and the session transcripts `deepseek-harness/hybrid-local-remote` (T15–T17, T39–T43)
 and the remote-setup sessions, which set up a remote MacBook Pro (macOS 27.0,
@@ -62,7 +64,13 @@ port 3088) is deliberately left out.
 > `tailscale up`, and drives the browser login (prints/opens the URL, waits).
 > Idempotent (re-run to resume); `--dry-run` shows the plan,
 > `--no-apps` / `--no-tailnet` / `--no-apple` / `--skip STEP` trim it,
-> `--yes` takes every default. The manual steps remain the hand-off list it
+> `--yes` takes every default. `--checkout-parent DIR` puts the clone at
+> `DIR/tali-dash-plugins` (asked otherwise, default `~/github`; `--dir` for a
+> full path). `--ref BRANCH|TAG|SHA` installs that version of this repo instead
+> of current main (a branch stays checked out as a tracking branch, so re-runs
+> follow it; without `--ref` the clone is returned to main) — the fork is
+> always the submodule pin of that commit, and a re-run rebuilds only what the
+> pin move changed. The manual steps remain the hand-off list it
 > prints at the end (Apple Intelligence toggle, STP licence, provider keys).
 > Its last build step asks for the tailnet host of another DSH (e.g. the
 > shared server) and, given one, also builds a **thin client** — a blue Dock
