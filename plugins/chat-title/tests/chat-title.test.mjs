@@ -6,7 +6,7 @@ import { Config, apply, createRenameTool, nudgeText, promptSection } from '../in
 test('slugify mirrors the in-tree slug form', () => {
   assert.equal(slugify('Fix the Login Redirect loop!', 5), 'fix-the-login-redirect-loop')
   assert.equal(slugify('Fix the Login Redirect loop!', 3), 'fix-the-login')
-  assert.equal(slugify('Café Ünïcode — test', 5), 'cafe-unicode-test')
+  assert.equal(slugify('Café Ünïcode / test', 5), 'cafe-unicode-test')
   assert.equal(slugify('   ', 5), '')
 })
 
@@ -101,7 +101,7 @@ test('rename_chat renames again over its own title, but never over the user\'s',
   w.sessionTitle.rename(w.session, 'my-own-name')
   const refused = await tool.execute({ title: 'override attempt' }, exec)
   assert.deepEqual(refused, { applied: false, reason: 'user-titled', title: 'my-own-name', requested: 'override-attempt' })
-  assert.match(tool.output.render({}, refused)[0].text, /their choice stands/)
+  assert.match(tool.output.render({}, refused)[0].text, /Do not call rename_chat again/)
   assert.deepEqual(tool.output.presentationMeta({}, refused), { chatTitle: null })
 })
 
@@ -137,7 +137,8 @@ test('apply registers the tool, the section and the nudge; the nudge clears once
   assert.equal(contexts.length, 1)
   const assemble = { agent: { session: w.session } }
   assert.equal(sections[0].text(assemble), promptSection(config))
-  assert.match(sections[0].text(assemble), /MUST name the chat/)
+  assert.match(sections[0].text(assemble), /Call rename_chat as your first tool call/)
+  assert.ok(sections[0].text(assemble).split(/\s+/).length < 80, 'the section stays short')
   assert.equal(contexts[0].text(assemble), nudgeText(config))
   // No agent (e.g. an agentless assembly) and subagents get nothing.
   assert.equal(sections[0].text({}), '')

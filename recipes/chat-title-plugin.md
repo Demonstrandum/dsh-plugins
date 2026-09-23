@@ -1,8 +1,8 @@
 # Recipe: let the agent name the chat, early (`chat-title` plugin)
 
 **Goal (the maintainer, 2026-09-24):** a plugin that lets agents rename the chat title,
-and *strongly* encourages them to name the chat at the beginning — as soon as
-the conversation carries the minimum context needed to name it.
+and has them name the chat at the beginning, as soon as the conversation
+carries the minimum context needed to name it.
 
 Plugin: `~/github/tali-dash-plugins/plugins/chat-title/` (package
 `tali-chat-title`; the README owns the tool contract, config and the
@@ -16,11 +16,11 @@ Checked against the source checkout (`deepseek-harness/`, fork branch
 
 | Fact | Where |
 |---|---|
-| `ctx.sessionTitle.rename(session, title)` appends `session/title` with `source.kind: 'user'`; that **pins** the title (in-flight automatic generation is superseded, later prompts schedule none). `refresh()` is the only unpin. There is no "agent" source kind — the service knows `fallback`, `provider`, `user`. | `packages/session/session-title/src/index.ts` |
-| A tool body receives `exec.agent.session` (the live session) — the same handle `fs-tools` uses for the cwd. | `packages/core/tools/src/index.ts` `ToolExecutionInput.agent` |
+| `ctx.sessionTitle.rename(session, title)` appends `session/title` with `source.kind: 'user'`; that **pins** the title (in-flight automatic generation is superseded, later prompts schedule none). `refresh()` is the only unpin. There is no "agent" source kind; the service knows `fallback`, `provider`, `user`. | `packages/session/session-title/src/index.ts` |
+| A tool body receives `exec.agent.session` (the live session), the same handle `fs-tools` uses for the cwd. | `packages/core/tools/src/index.ts` `ToolExecutionInput.agent` |
 | `session.header.parentSession` marks a subagent session. | `packages/core/session/src/types.ts` |
 | `output.presentationMeta(args, value)` is persisted as `tool/result.meta` (skipped for nested PTC dispatches). | `docs/cookbook/adding-a-tool.md`, tools `index.ts` ~1815 |
-| `ctx.systemPrompt.section({ name, order, text })` — `text` may be a function of the `AssembleContext`, which the agent loop extends with `agent` (`context.agent?.session`, as `sandbox-policy` reads it). | `packages/core/system-prompt/src/index.ts`, `packages/sandbox/sandbox-policy/src/index.ts` |
+| `ctx.systemPrompt.section({ name, order, text })`: `text` may be a function of the `AssembleContext`, which the agent loop extends with `agent` (`context.agent?.session`, as `sandbox-policy` reads it). | `packages/core/system-prompt/src/index.ts`, `packages/sandbox/sandbox-policy/src/index.ts` |
 | `ctx.systemPrompt.context({ name, order, text })` contributes to the **runtime-context snapshot**: a plugin-sourced user message re-emitted only when the joined text changes (`RuntimeContextProjection.project`). Empty text contributes nothing. | `packages/core/agent-loop/src/runtime-context.ts` |
 | The `base` bundle mounts `session-title` + `session-title-first-prompt-llm`, so `web` and `headless` both have `ctx.sessionTitle`. The live profile sets `style: slug` on the LLM titler. | `packages/bundle/base/cordis.patch.yml`, `~/.dsh/profiles/web/cordis.patch.yml` |
 
@@ -28,15 +28,19 @@ Checked against the source checkout (`deepseek-harness/`, fork branch
 
 Three pieces, one plugin, all host-side:
 
-1. **`rename_chat` tool** — styles the title (`slug` default, matching the
+1. **`rename_chat` tool**: styles the title (`slug` default, matching the
    live profile's slug convention; `natural` optional), calls
    `ctx.sessionTitle.rename` on the agent's own top-level session, and
    records the applied title in `tool/result.meta.chatTitle`.
-2. **System-prompt section** — worded as a rule ("You MUST … as your first
-   tool call … a chat that ends its first turn still untitled is a failure"),
-   with the explicit vague-opening exception ("name it the moment the goal
-   becomes clear"). Static text; only top-level agents see it.
-3. **Runtime-context nudge** — while the title source is `fallback` /
+2. **System-prompt section**: one paragraph of about 75 words ("Call
+   rename_chat as your first tool call once the user's message says what the
+   chat is about"), with the greeting exception ("call it the moment the goal
+   is clear"), the style sentence and the never-override-the-user rule.
+   Static text; only top-level agents see it. A first draft was twice as
+   long, restated the timing five ways and used capitalised MUST/FIRST;
+   the maintainer asked why, and it was cut. One clear instruction is followed more
+   reliably than a long one, and the nudge carries the timing anyway.
+3. **Runtime-context nudge**: while the title source is `fallback` /
    `provider` (or none), one constant line in the runtime-context snapshot.
    Constant on purpose: including the current placeholder title would make
    the snapshot change when the LLM titler lands (fallback → provider) and
@@ -57,18 +61,18 @@ anything else `user`-sourced is the human's. Restart-proof, no side file.
 
 ### Rejected alternatives
 
-- **Registering a `SessionTitleProvider`** (`ctx.sessionTitle.register`) —
+- **Registering a `SessionTitleProvider`** (`ctx.sessionTitle.register`):
   the service accepts one provider; the in-tree LLM titler already holds the
   slot, and a provider generates from *human messages* on the service's
   cadence, not on the agent's judgement of "enough context".
-- **`agent.inject` reminders from a `agent/turn-stopping` hook** — durable
+- **`agent.inject` reminders from a `agent/turn-stopping` hook**: durable
   user messages pile up in the log every turn; the runtime-context snapshot
   is the seam built for exactly this ("dynamic context, re-emitted when it
   changes").
-- **Hiding the tool from subagents via scope** — the global registry is
+- **Hiding the tool from subagents via scope**: the global registry is
   simpler; the tool refuses with `CHAT_TITLE_SUBAGENT` and the section/nudge
   text providers return `''` when `header.parentSession` is set.
-- **A `force` flag to override the human's title** — a model would use it.
+- **A `force` flag to override the human's title**: a model would use it.
   The refusal is final; the human can always rename.
 
 ## Build / test
@@ -110,16 +114,19 @@ with the first `read`** → `session/title` `{"source":{"kind":"user"}}` →
 runtime-context snapshot (seq 10) listed sections
 `sandbox:policy, approval:policy, chat-title:nudge`; the second (seq 25,
 after the rename) had only the first two. A second run with the prompt
-`hi there` produced no `rename_chat` call and a plain greeting reply — the
-vague-opening exception works and the nudge stays armed.
+`hi there` produced no `rename_chat` call and a plain greeting reply: the
+greeting exception works and the nudge stays for the next turn.
+Both runs were repeated after the prompt text was cut to one paragraph
+(same result: `rename_chat` in turn 1 step 1 beside the first `read`; no
+tool call on the greeting).
 
 ## Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
-| `pnpm dsh …` in the checkout fails with `× create the temporary package manager install directory … Operation not permitted` | pnpm 12's version manager tries to install the `packageManager`-pinned pnpm 11 into a temp dir the agent sandbox denies. Bypass pnpm: run the script's command directly — `node --import tsx/esm apps/cli/src/bin.ts …` **from the checkout root** (tsconfig `paths` resolution; from another cwd you get `does not provide an export named 'FiberState'` or `Cannot find package 'tsx'`). |
+| `pnpm dsh …` in the checkout fails with `× create the temporary package manager install directory … Operation not permitted` | pnpm 12's version manager tries to install the `packageManager`-pinned pnpm 11 into a temp dir the agent sandbox denies. Bypass pnpm: run the script's command directly, `node --import tsx/esm apps/cli/src/bin.ts …` **from the checkout root** (tsconfig `paths` resolution; from another cwd you get `does not provide an export named 'FiberState'` or `Cannot find package 'tsx'`). |
 | `error: unknown option '--cwd'` | The headless profile takes no cwd flag; the session cwd is the process cwd. Reference files by absolute path in the task instead. |
-| Model never calls `rename_chat` | Check the system prompt contains the `Chat title (rename_chat)` section (a `system/message` event) and that the runtime-context snapshot lists `chat-title:nudge`. If the section is missing, `ctx.tools.get(toolName, scope)` returned undefined — the tool is hidden in that scope (preset tool filter). |
+| Model never calls `rename_chat` | Check the system prompt contains the `Chat title:` section (a `system/message` event) and that the runtime-context snapshot lists `chat-title:nudge`. If the section is missing, `ctx.tools.get(toolName, scope)` returned undefined: the tool is hidden in that scope (preset tool filter). |
 | Tool answers `Not renamed: the user named this chat …` although nobody did | A `user`-sourced title with no matching `tool/result.meta.chatTitle`: another plugin renamed with `rename` (e.g. `session-title-slug`'s prefix), or the rename ran as a PTC sub-dispatch (no meta persisted) before a restart. By design; rename in the sidebar if it matters. |
 | Preview (`~/.dsh-preview`, :3088) shows the section but the model ignores it | The preview's Apple Foundation model has no tools (`minimal-no-tools`); use the headless method above. |
 
@@ -128,7 +135,7 @@ vague-opening exception works and the nudge stays armed.
 - Built, unit-tested (9 tests), verified end to end headlessly (task prompt
   → renamed in step 1; greeting → not renamed).
 - **Live since 2026-09-24** (the maintainer: "make it live"): installed into the `web`
-  profile as a bundle — `node --import tsx/esm apps/cli/src/bin.ts plugin
+  profile as a bundle: `node --import tsx/esm apps/cli/src/bin.ts plugin
   --profile web add <plugins>/plugins/chat-title` from the checkout (the
   `pnpm dsh` wrapper hits the temp-dir trap above; the write under
   `~/.dsh/profiles/web` needed one sandbox approval). `chat-title` is in
@@ -137,11 +144,11 @@ vague-opening exception works and the nudge stays armed.
   active in the running server within the same session: the very next request
   of the installing chat carried the `chat-title:nudge` runtime context, its
   `rename_chat` call renamed the live session, and the nudge was gone from
-  the following snapshot — profile bundle changes are picked up live
+  the following snapshot. Profile bundle changes are picked up live
   (same observation as `brand-kit-plugin.md`'s "new bundle row taking effect
   live without a restart").
 - The `cordis.dev.yml` row remains for the preview home (`~/.dsh-preview`),
-  which does not carry the bundle — one home gets one or the other, never both.
+  which does not carry the bundle; one home gets one or the other, never both.
 - `--dump-config` on the live profile fails with `EPERM … profiles/web/cordis.yml`
   from an agent sandbox (read denied outside the workspace); run it from a
   terminal to list the composed rows.

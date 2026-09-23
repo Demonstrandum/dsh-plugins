@@ -1,5 +1,5 @@
 /**
- * title.mjs — the pure part of tali-chat-title: title styling and the
+ * title.mjs: the pure part of tali-chat-title, title styling and the
  * "who named this chat" reading of a session log. No Cordis, no I/O, so the
  * tests run against plain values.
  */
@@ -43,7 +43,7 @@ export function slugify(text, maxWords) {
  * Apply the configured style to a proposed title.
  * @param {string} text - raw model input
  * @param {{ style: 'natural' | 'slug', maxWords: number }} options
- * @returns {string} the styled title (may be empty — the caller rejects that)
+ * @returns {string} the styled title; may be empty, which the caller rejects
  */
 export function styleTitle(text, options) {
   if (options.style === 'slug') return slugify(text, options.maxWords)
@@ -75,10 +75,10 @@ export function agentTitlesOf(events) {
  * Classify the standing title of a session for the tool and the nudge.
  *
  *   'none'      no title event yet (before the first prompt)
- *   'automatic' fallback / provider title — a placeholder the agent should replace
+ *   'automatic' fallback / provider title: a placeholder the agent should replace
  *   'agent'     a `user`-sourced title this tool applied
  *   'user'      a `user`-sourced title the human chose (Rename in the sidebar,
- *               a `slug:` prefix, …) — never overridden by the agent
+ *               a `slug:` prefix); never overridden by the agent
  *
  * @param {{ title: string, source: { kind: string } } | undefined} current - `ctx.sessionTitle.get(session)`
  * @param {Set<string>} agentTitles - from {@link agentTitlesOf}
@@ -99,7 +99,7 @@ export function classifyTitle(current, agentTitles, lastApplied) {
 export function styleGuidance(options) {
   const n = Math.max(2, options.maxWords)
   if (options.style === 'slug') {
-    return `${n} or fewer lowercase ASCII words joined by single hyphens, specific to the task — like fix-login-redirect or explain-water, never generic like help-request or new-chat. Whatever you pass is normalized to this form.`
+    return `${n} or fewer lowercase words joined by hyphens, specific to the task (fix-login-redirect), not generic (help-request).`
   }
-  return `a specific ${Math.min(2, n)}–${n} word phrase in the user's language, like "Fix login redirect loop", never generic like "Help request" or "New chat".`
+  return `a specific phrase of ${Math.min(2, n)} to ${n} words in the user's language ("Fix login redirect loop"), not generic ("Help request").`
 }

@@ -1,7 +1,6 @@
 /**
- * tali-chat-title — lets the agent name the chat, and pushes it to do so at
- * the START of the chat, as soon as the conversation carries enough context
- * to say what it is about.
+ * tali-chat-title: lets the agent name the chat, and has it do so at the
+ * start, as soon as the conversation says what it is about.
  *
  * Three pieces, all host-side (no client bundle):
  *
@@ -9,16 +8,14 @@
  *                          the calling agent's own top-level session, after
  *                          applying the configured style (slug / natural).
  *                          Refuses in subagent sessions and never overrides a
- *                          title the HUMAN chose (sidebar Rename, `slug:` prefix).
- *   system-prompt section  the standing rule: name the chat right after the
- *                          first message that states the task, before other
- *                          work — a `MUST`, not a suggestion.
- *   runtime-context nudge  while the chat still carries only an automatic
- *                          placeholder title, every request carries a one-line
- *                          "not named yet — do it now" reminder; it disappears
- *                          (one snapshot change) once the agent or the user
- *                          names the chat. Constant text, so it costs one
- *                          cache break per chat, not one per turn.
+ *                          title the human chose (sidebar Rename, `slug:` prefix).
+ *   system-prompt section  the rule: call rename_chat as the first tool call
+ *                          once the user's message states the task.
+ *   runtime-context nudge  while the title is still automatic (none, fallback,
+ *                          provider), every request carries one reminder line;
+ *                          it disappears once the agent or the user names the
+ *                          chat. Constant text, so it costs one snapshot change
+ *                          to appear and one to go, not one per turn.
  *
  * Config (all optional):
  *
@@ -50,15 +47,9 @@ export const Config = Schema.object({
  * @param {{ toolName: string, style: 'slug' | 'natural', maxWords: number }} config
  */
 export function promptSection(config) {
-  return [
-    `Chat title (${config.toolName}): every chat opens under an automatic placeholder title that tells the user nothing. `
-    + `You MUST name the chat yourself by calling ${config.toolName} as soon as you have the minimum context to say what the chat is about — `
-    + 'normally right after reading the FIRST user message, as your first tool call, before any other work. Do not wait until the task is done, '
-    + 'and do not skip it because the task is small. If the opening message is only a greeting or too vague to name, name the chat the moment the '
-    + 'goal becomes clear. A chat that ends its first turn still untitled is a failure.',
-    `Title style: ${styleGuidance(config)} Name what the chat is ABOUT (the task, the subject), not what you are doing this second.`,
-    `Rename again only when the chat's subject changes materially. If the user renames the chat themselves, leave their title alone — ${config.toolName} refuses in that case and that is final.`,
-  ].join('\n')
+  return `Chat title: every chat starts under a placeholder title. Call ${config.toolName} as your first tool call once the user's message says what the chat is about. `
+    + `If the first message is only a greeting, call it the moment the goal is clear. Title: ${styleGuidance(config)} `
+    + 'Rename again only if the subject of the chat changes. Never override a title the user set themselves.'
 }
 
 /**
@@ -66,7 +57,7 @@ export function promptSection(config) {
  * @param {{ toolName: string }} config
  */
 export function nudgeText(config) {
-  return `Chat title: NOT NAMED YET — the sidebar still shows an automatic placeholder. If the conversation so far tells you what this chat is about, call ${config.toolName} now, before anything else.`
+  return `Chat title: not set yet. If the conversation says what this chat is about, call ${config.toolName} now, before other tools.`
 }
 
 /**
@@ -78,10 +69,9 @@ export function nudgeText(config) {
 export function createRenameTool(ctx, config, applied) {
   return defineTool({
     name: config.toolName,
-    description: `Rename this chat (the session title shown in the sidebar). Call it as soon as you know what the chat is about — normally right after the first user message, before other tools. `
-      + `Title: ${styleGuidance(config)} Returns the applied title. Refuses when the user has renamed the chat themselves or when called from a subagent.`,
+    description: `Rename this chat (the title shown in the sidebar). Title: ${styleGuidance(config)} Refuses if the user renamed the chat themselves or when called from a subagent.`,
     parameters: {
-      title: { type: 'string', required: true, description: 'The new chat title — what this chat is about.' },
+      title: { type: 'string', required: true, description: 'The new chat title: what this chat is about.' },
     },
     output: {
       schema: { type: 'object', additionalProperties: true },
@@ -91,13 +81,13 @@ export function createRenameTool(ctx, config, applied) {
     isConcurrencySafe: () => true,
     async execute(args, exec) {
       const session = exec?.agent?.session
-      if (session === undefined) throw new ChatTitleError('no live session is attached to this call; the chat cannot be renamed from here.', 'CHAT_TITLE_NO_SESSION')
+      if (session === undefined) throw new ChatTitleError('no live session is attached to this call.', 'CHAT_TITLE_NO_SESSION')
       if (session.header?.parentSession !== undefined) {
-        throw new ChatTitleError('this is a subagent session, not the chat the user sees; only the top-level agent names the chat. Do nothing further about the title.', 'CHAT_TITLE_SUBAGENT')
+        throw new ChatTitleError('this is a subagent session; only the top-level agent names the chat. Do not retry.', 'CHAT_TITLE_SUBAGENT')
       }
       const raw = typeof args.title === 'string' ? args.title : ''
       const title = styleTitle(raw, config)
-      if (title.length === 0) throw new ChatTitleError(`title "${raw}" is empty after normalization; pass a few descriptive words.`, 'CHAT_TITLE_EMPTY')
+      if (title.length === 0) throw new ChatTitleError(`title "${raw}" is empty after normalization; use a few descriptive words.`, 'CHAT_TITLE_EMPTY')
 
       const current = ctx.sessionTitle.get(session)
       const kind = classifyTitle(current, agentTitlesOf(session.snapshotEvents()), applied.get(session))
@@ -121,13 +111,13 @@ export function createRenameTool(ctx, config, applied) {
  */
 function renderResult(value, config) {
   if (value.applied) {
-    const was = value.previous === null ? '' : ` (was the automatic placeholder "${value.previous}")`
-    return `Chat renamed to "${value.title}"${was}. Do not rename it again unless the subject of the chat changes materially.`
+    const was = value.previous === null ? '' : ` (was "${value.previous}")`
+    return `Chat renamed to "${value.title}"${was}. Rename again only if the subject changes.`
   }
   if (value.reason === 'user-titled') {
-    return `Not renamed: the user named this chat "${value.title}" themselves, and their choice stands. Do not call ${config.toolName} again in this chat.`
+    return `Not renamed: the user named this chat "${value.title}" themselves. Do not call ${config.toolName} again in this chat.`
   }
-  return `Chat is already named "${value.title}"; nothing to do.`
+  return `Chat is already named "${value.title}".`
 }
 
 export function apply(ctx, config) {
