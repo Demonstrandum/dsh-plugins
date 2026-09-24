@@ -222,7 +222,12 @@ function RebootDialog({ store, rpc, sessions }: { store: DialogStore, rpc: Clien
         <div style={{ padding: 20, fontSize: 13, lineHeight: 1.5 }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>Rebooting DSH…</div>
           {comeback === 'going-down' && <div>Shutting the server down.</div>}
-          {comeback === 'waiting' && <div>The server is down. Waiting for it to answer again, then this page reloads.</div>}
+          {comeback === 'waiting' && (
+            <>
+              <div>The server is down.</div>
+              <div style={{ marginTop: 8 }}>Waiting for it to answer again, then this page reloads.</div>
+            </>
+          )}
           {verdict?.kind === 'quit' && <div style={{ marginTop: 8, ...small }}>Nothing is set up to start DSH again — start it by hand if this page does not come back.</div>}
         </div>
       </Modal>
