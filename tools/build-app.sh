@@ -2,7 +2,7 @@
 #
 # build-app.sh — build the self-contained macOS app (DSH.app) and its DMG.
 #
-#   pnpm build-app [--skip-pack] [--no-dmg] [--no-prune] [--with-office] [--name "DSH Canary"] [--glyph-color "#E5484D"] [--port 3090] [--sign IDENTITY]
+#   pnpm build-app [--skip-pack] [--no-dmg] [--no-prune] [--with-office] [--build N] [--update-feed URL] [--name "DSH Canary"] [--glyph-color "#E5484D"] [--port 3090] [--sign IDENTITY]
 #
 # Three steps, each its own script under tools/bundle/ (run them by hand to iterate on one):
 #   1. fetch-node.mjs  — official Node 24 LTS macOS build, sha256-verified, trimmed to bin/node
@@ -23,7 +23,7 @@ STAGE_ARGS=(); APP_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --skip-pack) STAGE_ARGS+=("$1"); shift ;;
-    --no-dmg|--no-prune|--with-office|--name|--glyph-color|--port|--sign|--version) if [[ "$1" == --no-dmg || "$1" == --no-prune || "$1" == --with-office ]]; then APP_ARGS+=("$1"); shift; else APP_ARGS+=("$1" "$2"); shift 2; fi ;;
+    --no-dmg|--no-prune|--with-office|--name|--glyph-color|--port|--sign|--version|--build|--update-feed|--update-repo) if [[ "$1" == --no-dmg || "$1" == --no-prune || "$1" == --with-office ]]; then APP_ARGS+=("$1"); shift; else APP_ARGS+=("$1" "$2"); shift 2; fi ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
