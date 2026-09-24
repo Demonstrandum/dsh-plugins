@@ -1031,7 +1031,6 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
                   <span style={{ ...S.muted, marginLeft: 'auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }} title={current.resolved}>{current.resolved}</span>
                 )}
               </span>
-              <span style={S.caption}>Tab completes, ↑↓ pick a suggestion. <code>~</code> is the home directory on the remote.</span>
             </div>
           )}
           <div style={S.field}>

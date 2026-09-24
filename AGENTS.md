@@ -77,6 +77,16 @@ disabled in a session, a denial is final.
   of them by absolute path.
 - The recipe owns the system-level story; the plugin README owns the plugin.
   Cross-reference rather than duplicate.
+- **No explanatory blurbs in the UI.** The maintainer does not want captions, help
+  paragraphs or hint sentences under fields, in dialogs or in panels ("The URL
+  its Tailscale remote publishes (keep the trailing slash). Your tailnet
+  login is used to sign in; a token is only needed when…", "Must already exist
+  there; it becomes an ordinary workspace…", "Tab completes, ↑↓ pick a
+  suggestion…" — all removed on request, 2026-09-24). A label, a placeholder,
+  a short status line (e.g. "Directory will be created") and an error message
+  when something fails are the whole vocabulary. Put the explanation in the
+  README, not on the screen. This has been the default move of several agents;
+  it is not to his taste.
 
 ## The plugin model (Cordis)
 
