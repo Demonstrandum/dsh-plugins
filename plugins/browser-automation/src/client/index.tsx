@@ -131,20 +131,19 @@ function targetOf(args: Record<string, unknown>): string {
 }
 
 /**
- * Collapsed summary from the result text: `[c:0:1]; 1280×720 px; viewport; 82 kB png`
- * becomes `c:0:1 · 1280×720 px · viewport · 82 kB png`. NOTE:s and the file
- * fallback's path and reason stay in the expanded text (the summary just says
- * `saved to file`); a leading "Opened c:0:1." or resolution note is kept as-is.
- * Only the first line is summarized.
+ * Collapsed summary: `c:0:1 · viewport` — the window (from the `[id]` tag the
+ * host prefixes every result with) and what was captured (from the args). Pixel
+ * size, byte count, the ≥ 2 MB spill note and every other `;`-separated detail
+ * of the result text stay in the expanded body: they are for the model, not
+ * the reader. The one exception is the file fallback (no picture in the card):
+ * `· saved to file` says why there is nothing to see.
  */
-function summaryOf(text: string): string {
+function summaryOf(text: string, target: string): string {
   const line = text.split('\n')[0] ?? ''
-  const parts = line.split(';').map(part => part.trim()).filter(part => part !== '')
-  const kept = parts
-    .filter(part => !part.startsWith('NOTE:') && !part.startsWith('saved to ') && !part.startsWith('not shown inline'))
-    .map(part => part.replace(/^\[([^\]]+)\]/, '$1'))
-  if (parts.some(part => part.startsWith('saved to '))) kept.push('saved to file')
-  return kept.join(' · ')
+  const id = /\[([a-z]:\d+:\d+)\]/.exec(line)?.[1]
+  const parts = [id, target]
+  if (line.includes('; saved to ')) parts.push('saved to file')
+  return parts.filter((part): part is string => part !== undefined).join(' · ')
 }
 
 function firstLine(text: string, max = 120): string {
@@ -252,9 +251,12 @@ function Lightbox({ url, alt, caption, onClose }: { url: string, alt: string, ca
 
 // ---------------------------------------------------------------- the row
 
-const ROW_STYLE: CSSProperties = { fontSize: 13, lineHeight: '20px' }
-const SUMMARY_STYLE: CSSProperties = { opacity: 0.7, marginLeft: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
-const ERROR_SUMMARY_STYLE: CSSProperties = { ...SUMMARY_STYLE, opacity: 0.85, color: 'var(--dsw-alias-state-error-primary, #e5484d)' }
+// Type as the shipped ToolRow does (ToolRow.module.css `.summary`, DisclosureRow
+// `.title`): the secondary content size, which follows the Settings font-size
+// preference. A hardcoded 13px here rendered LARGER than the 11px title.
+const ROW_STYLE: CSSProperties = { fontSize: 'var(--dsh-content-font-size-secondary, 13px)', lineHeight: 'calc(24px + var(--dsh-content-font-delta, 0px))' }
+const SUMMARY_STYLE: CSSProperties = { flex: '1 1 auto', minWidth: 0, marginLeft: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 'inherit', lineHeight: 'inherit', color: 'var(--dsw-alias-label-tertiary)' }
+const ERROR_SUMMARY_STYLE: CSSProperties = { ...SUMMARY_STYLE, color: 'var(--dsw-alias-state-error-primary, #e5484d)' }
 const BODY_STYLE: CSSProperties = { padding: '6px 0 8px 22px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }
 const PRE_STYLE: CSSProperties = { margin: 0, alignSelf: 'stretch', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, lineHeight: '18px', maxHeight: 360, overflow: 'auto', opacity: 0.85 }
 
@@ -286,7 +288,7 @@ export function ScreenshotRow({ toolName, block, loadImage }: Props) {
   const summary = state === 'running'
     ? `capturing ${target}…`
     : state === 'ok'
-      ? (summaryOf(text) || target)
+      ? summaryOf(text, target)
       : state === 'stopped'
         ? 'interrupted'
         : (firstLine(text) || 'failed')

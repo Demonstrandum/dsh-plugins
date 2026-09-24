@@ -81,6 +81,10 @@ const settledOk = {
   call: { argsRaw },
   content: [{ type: 'image', attachment }, { type: 'text', text: '[s:8:0]; 780×1480 px; viewport; 82 kB png' }],
 }
+const settledSpilled = {
+  ...settledOk, call: { argsRaw: JSON.stringify({ windowId: 'c:0:4' }) },
+  content: [{ type: 'image', attachment }, { type: 'text', text: 'Opened c:0:4. [c:0:4]; 2560×1440 px; viewport; 2.2 MB png (≥ 2 MB: chrome-devtools-mcp wrote it to disk; read back by the plugin — format: "jpeg" or a uid crop gives a smaller capture)' }],
+}
 const settledFile = {
   ...settledOk,
   content: [{ type: 'text', text: '[c:0:1]; 2560×1440 px; viewport; 1.2 MB png; saved to /tmp/dsh-chrome-screenshot-1.png; not shown inline: the current model does not declare image input. View it with read_image' }],
@@ -121,7 +125,9 @@ test('settled capture: collapsed summary from the result text, image (not JSON) 
   const { mod } = loadBundle()
   const collapsed = render(mod.ScreenshotRow, { toolName: 'safari_get_screenshot', block: settledOk, callId: 'c1' })
   assert.match(collapsed, /Safari screenshot/)
-  assert.match(collapsed, /s:8:0 · 780×1480 px · viewport · 82 kB png/)
+  assert.match(collapsed, />s:8:0 · viewport</, 'summary = window · target only')
+  assert.doesNotMatch(collapsed, /82 kB|780×1480 px ·/, 'size and bytes stay out of the summary')
+  assert.match(collapsed, /font-size:var\(--dsh-content-font-size-secondary/, 'typed like the shipped title, not a hardcoded px')
   assert.match(collapsed, /data-expandable="true"/)
   assert.match(collapsed, /data-icon="globe"/, 'ok rows lead with the browser glyph')
   assert.doesNotMatch(collapsed, /<img/, 'collapsed row must not carry the image')
@@ -141,6 +147,13 @@ test('settled capture: collapsed summary from the result text, image (not JSON) 
   }
 })
 
+test('the ≥ 2 MB spill note and an "Opened" prefix never reach the summary', () => {
+  const { mod } = loadBundle()
+  const html = render(mod.ScreenshotRow, { toolName: 'chrome_get_screenshot', block: settledSpilled, callId: 'c1' })
+  assert.match(html, />c:0:4 · viewport</)
+  assert.doesNotMatch(html, /wrote it to disk|Opened c:0:4/)
+})
+
 test('file fallback (no inline image): text body, no img, still expandable', () => {
   const { mod } = loadBundle()
   const realRow = primitives.DisclosureRow
@@ -148,7 +161,7 @@ test('file fallback (no inline image): text body, no img, still expandable', () 
   try {
     const html = render(mod.ScreenshotRow, { toolName: 'chrome_get_screenshot', block: settledFile, callId: 'c1' })
     assert.match(html, /Chrome screenshot/)
-    assert.match(html, /c:0:1 · 2560×1440 px · viewport · 1.2 MB png · saved to file</, 'path and reason stay out of the summary')
+    assert.match(html, />c:0:1 · viewport · saved to file</, 'only the fallback adds a word to the summary')
     assert.doesNotMatch(html, /<img/)
     assert.match(html, /saved to \/tmp\/dsh-chrome-screenshot-1.png/)
   } finally {
