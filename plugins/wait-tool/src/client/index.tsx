@@ -158,13 +158,16 @@ const STYLESHEET = `
 .${CLS}-verdict[data-outcome='aborted'] { color: var(--dsw-alias-state-error-primary, #e5484d); }
 .${CLS}-verdict[data-outcome='interrupted'] { color: var(--dsw-alias-state-warn-primary, #d97706); }
 .${CLS}-buttons { display: inline-flex; flex: none; gap: 4px; }
-.${CLS}-button { appearance: none; height: 20px; padding: 0 8px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-l2, color-mix(in srgb, currentColor 20%, transparent)); background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
+.${CLS}-button { appearance: none; height: 20px; padding: 0 8px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-l2, color-mix(in srgb, currentColor 20%, transparent)); background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: var(--dsh-content-font-size-secondary, 12px); line-height: 18px; cursor: pointer; }
 .${CLS}-button:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent)); color: var(--dsw-alias-label-primary); }
 .${CLS}-button[data-danger]:hover:not(:disabled) { color: var(--dsw-alias-state-error-primary, #e5484d); border-color: var(--dsw-alias-state-error-primary, #e5484d); }
 .${CLS}-button:disabled { opacity: 0.5; cursor: default; }
 `
 
-const ROW_STYLE: CSSProperties = { fontSize: 13, lineHeight: '20px' }
+// Typed like the shipped ToolRow / DisclosureRow title: the secondary content
+// size follows the Settings font-size preference (a hardcoded 13px rendered
+// larger than an 11px title).
+const ROW_STYLE: CSSProperties = { fontSize: 'var(--dsh-content-font-size-secondary, 13px)', lineHeight: 'calc(24px + var(--dsh-content-font-delta, 0px))' }
 
 // ---------------------------------------------------------------- the row
 
