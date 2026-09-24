@@ -24,8 +24,15 @@ not "install".
 
 ## What the bundle is
 
+The app is **DSH Canary** — red whale (`#E5484D`, the same red as DSH
+Preview, distinct bundle id `io.github.taliesinb.dsh-app`), so it is never
+mistaken for a checkout-run DSH (stock black whale) in the Dock. `--name` and
+`--glyph-color` change both; the page's sidebar whale follows the icon colour
+through the wrapper's identity script, and the wordmark reads the app name
+unless a brand-kit profile is active (then the brand wins, by design).
+
 ```
-DSH.app/Contents/
+DSH Canary.app/Contents/
   MacOS/DSH                  the Swift wrapper (dock-app/Sources/*.swift) with EmbeddedServer.swift
   Info.plist                 bundle id io.github.taliesinb.dsh-app, LSMultipleInstancesProhibited
   Resources/
@@ -170,7 +177,10 @@ the misleading `create failed - Directory not empty` even for a 3-file folder
   else; the `web` profile is untouched). Remove those two afterwards if the
   test must leave no trace.
 - See the window: `kill -USR1 <wrapper pid>` writes a PNG beside the log
-  (`dock-app-integrated-titlebar.md`). Quit: `kill <pid>` (SIGTERM). Orphan
+  (`dock-app-integrated-titlebar.md`). **The window must be frontmost**:
+  WebKit does not paint an occluded/background window, and the snapshot is
+  then a uniform grey pane while the page's API calls keep flowing in the
+  log — `open <app>` (no `-n`) activates it first. Quit: `kill <pid>` (SIGTERM). Orphan
   test: `kill -9 <pid>` then `pgrep -f 'lib/bin.js app'`.
 - `osascript … quit app id` is denied from the agent shell (-10004).
 
