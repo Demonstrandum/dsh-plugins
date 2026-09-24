@@ -777,12 +777,12 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
 
   const suggestedName = useMemo(() => {
     if (probe === null) return ''
-    const workspaceName = pick === 'new'
+    // Same name as on the remote: the picked workspace's title, or the last
+    // path segment of a new directory. The server is visible from the group
+    // the row sits under, so it is not repeated in the name.
+    return pick === 'new'
       ? (path.trim().replace(/\/+$/, '').split('/').pop() ?? '')
       : (probe.workspaces.find(candidate => candidate.workspaceId === pick)?.title ?? '')
-    // The server label may carry `:port` / `/path` (localhost:3082, studio/dsh); a workspace name wants plain dashes.
-    const serverPart = probe.label.replace(/[:/]+/gu, '-').replace(/^-+|-+$/gu, '')
-    return workspaceName === '' ? '' : `${serverPart}-${workspaceName}`
   }, [probe, pick, path])
   useEffect(() => { if (!nameTouched) setName(suggestedName) }, [suggestedName, nameTouched])
 

@@ -439,7 +439,7 @@ export function apply(ctx, config) {
       id: generateId('rws'),
       serverId: server.id,
       remoteWorkspaceId: view.workspaceId,
-      title: String(args.title ?? '').trim() || `${server.label}-${view.title}`,
+      title: String(args.title ?? '').trim() || view.title,
       remotePath: view.path,
       createdAt: new Date().toISOString(),
       order: state.workspaces.reduce((max, candidate) => Math.max(max, candidate.order), -1) + 1,

@@ -135,7 +135,10 @@ host may serve several instances (`localhost:3082`, `studio/dsh`,
 `box.example.com:8443/dsh`). The user's own label (add-modal, rename) wins.
 Servers stored under the old derivation (bare first hostname label, e.g.
 `127`) are relabelled once on load. The add-modal's suggested workspace name
-uses the label with `:`/`/` turned into dashes (`studio-dsh-<workspace>`).
+(and the host's fallback when `addWorkspace` gets no title) is the remote
+workspace's own name — `Music` for `~/Music` — not prefixed with the server
+label (that was `studio-dsh-Music` before 2026-09-24; existing rows keep
+whatever title they were added with).
 
 ## Titles of framed sessions
 
