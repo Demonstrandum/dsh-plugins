@@ -218,13 +218,34 @@ workspace, Move/Copy — Rename session and Add remote already handled Enter in
 their inputs). The two screenshot Lightboxes and the QR popover have no default
 action; Escape already closed them.
 
+Two follow-ups from the first live round (same day). (1) The default
+button's ring was the browser's `outline: auto` (the shipped `Button` has no
+focus style at all) and WebKit clipped it at the bottom of the capsule; the
+hook now injects one `<style>` per document (`#dsh-dialog-keys-style`, shared
+by every plugin copy) giving `button[data-dialog-default]:focus-visible` the
+house ring, `2px solid var(--dsw-alias-state-business-primary)` at 2px
+offset, as the shipped toolbars draw it — renders whole in Safari. (2) Tab
+walked the sidebar's session rows *behind* the mask: the shipped Modal has no
+focus trap. The hook now owns Tab / Shift+Tab entirely (preventDefault, then
+focus the next / previous stop among the dialog's enabled, rendered
+focusables, wrapping). Owning the step matters: letting native Tab run and
+only catching the ends failed in Safari, whose default (Full Keyboard Access
+off, so also the WKWebView Dock app) skips buttons and jumped from the last
+`<input>` straight out to the composer.
+
 Verified on the preview with `import-sessions` (the only one of the four not
 pnpm-linked into the live profile, so its rebuild hot-swaps nothing live):
 focus lands on the card at the pick stage, Enter with the default disabled is
 a no-op, Enter from a ticked checkbox clicks *Import 1 session* exactly once
 (a capture-phase `click` probe with `stopImmediatePropagation` stood in for
 the real import), Shift+Enter nothing, Enter on the focused *Back* button
-clicks Back, Escape closes and the composer has the caret again.
+clicks Back, Escape closes and the composer has the caret again. Round two in
+Safari Technology Preview (WebKit): eight Tabs cycle Close × → … → Cancel →
+Close × without leaving the card, the ring on *Import 1 session* is a clean
+capsule (element screenshot), and on `/reboot` Tab cycles × → Cancel →
+Reboot now → ×. Safari's automation `type` inserts text rather than keying
+it, so the command popup never opened — open commands from the composer's
+"Add files or run commands" button instead.
 
 ## 7. Troubleshooting
 
