@@ -1036,6 +1036,11 @@ type MoveDestination =
   | { kind: 'local'; workspaceId: string; title: string; path: string }
   | { kind: 'remote'; workspace: RemoteWorkspace }
 
+/** A path for a menu's trailing detail: the account home (any host's) as `~`. */
+function shortPath(path: string): string {
+  return path.replace(/^(?:\/Users|\/home)\/[^/]+(?=\/|$)/u, '~')
+}
+
 function destinationKey(destination: MoveDestination): string {
   return destination.kind === 'local' ? `local:${destination.workspaceId}` : `remote:${destination.workspace.id}`
 }
@@ -1085,8 +1090,9 @@ export function MoveRemoteDialog({ model, localWorkspaces, useRuntime }: Face) {
       .filter(workspace => request.mode === 'copy' || request.source.local === true || workspace.id !== request.source.workspaceId)
       .map(workspace => ({ kind: 'remote', workspace }))
     if (request.source.local === true) return remotes
+    // Tree order mirrors the sidebar: this machine first, the remotes last.
     const locals: MoveDestination[] = localWorkspaces().map(view => ({ kind: 'local', workspaceId: view.workspaceId, title: view.title, path: view.path }))
-    return [...remotes, ...locals]
+    return [...locals, ...remotes]
   }, [localWorkspaces, request, snapshot])
   const chosen = destinations.find(candidate => destinationKey(candidate) === choice)
   const sourceWorkspace = request === undefined || request.source.local === true ? undefined : model.workspace(request.source.workspaceId)
@@ -1145,18 +1151,28 @@ export function MoveRemoteDialog({ model, localWorkspaces, useRuntime }: Face) {
     }
   }
 
+  // A two-level tree: one heading per machine ("This machine", then each
+  // remote by its label), its workspaces indented beneath with their paths.
   const menuItems: MenuEntry[] = []
   let lastGroup: string | undefined
   for (const destination of destinations) {
     const group = destination.kind === 'local' ? 'This machine' : (destination.workspace.server?.label ?? destination.workspace.serverId)
     if (group !== lastGroup) {
       if (lastGroup !== undefined) menuItems.push({ type: 'separator', id: `sep:${group}` })
+      menuItems.push({ type: 'label', id: `group:${group}`, text: group })
       lastGroup = group
     }
+    const title = destination.kind === 'local' ? destination.title : destination.workspace.title
+    const path = destination.kind === 'local' ? destination.path : destination.workspace.remotePath
     menuItems.push({
       id: destinationKey(destination),
-      label: destination.kind === 'local' ? `${destination.title} · ${group}` : `${destination.workspace.title} · ${group}`,
-      icon: destination.kind === 'local' ? <IconFolderClose16 /> : <IconGlobeOutline14 />,
+      label: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, paddingLeft: 12 }}>
+          {destination.kind === 'local' ? <IconFolderClose16 /> : <IconGlobeOutline14 />}
+          <span>{title}</span>
+        </span>
+      ),
+      ...(path === undefined ? {} : { detail: shortPath(path) }),
     })
   }
   const chosenLabel = chosen === undefined
@@ -1168,6 +1184,7 @@ export function MoveRemoteDialog({ model, localWorkspaces, useRuntime }: Face) {
       open={request !== undefined}
       onClose={() => { model.openMove(undefined) }}
       closeLabel="Close"
+      width={520}
       title={copying
         ? (request?.source.local === true ? 'Copy session to a remote' : 'Copy remote session')
         : (request?.source.local === true ? 'Move session to a remote' : 'Move remote session')}
@@ -1195,6 +1212,8 @@ export function MoveRemoteDialog({ model, localWorkspaces, useRuntime }: Face) {
             onClose={() => { setMenuOpen(false) }}
             items={menuItems.length === 0 ? [{ id: 'none', label: 'No destinations available', disabled: true }] : menuItems}
             onSelect={(id) => { setMenuOpen(false); if (id !== 'none') setChoice(id) }}
+            selectedId={choice}
+            matchAnchorWidth
             portal
             anchor={(
               <button
