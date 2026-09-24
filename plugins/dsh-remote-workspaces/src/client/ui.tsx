@@ -341,13 +341,14 @@ function SessionRow({ workspace, session, selected, busy, openRemoteSession, mod
   const [pending, setPending] = useState(false)
   const items: MenuEntry[] = [
     { id: 'rename', label: 'Rename' },
-    ...(session.placeholder === true ? [] : [{ id: 'move', label: 'Move to…' }]),
+    ...(session.placeholder === true ? [] : [{ id: 'move', label: 'Move to…' }, { id: 'copy', label: 'Copy to…' }]),
     { id: 'archive', label: 'Archive', danger: true },
   ]
   const onSelect = async (id: string): Promise<void> => {
     setMenuOpen(false)
     if (id === 'rename') { setRename(session.title); setRenameError(null); return }
     if (id === 'move') { model.openMove({ sessionId: session.id, title: session.title, source: { workspaceId: workspace.id } }); return }
+    if (id === 'copy') { model.openMove({ mode: 'copy', sessionId: session.id, title: session.title, source: { workspaceId: workspace.id } }); return }
     if (id === 'archive') {
       setPending(true)
       try { await model.archiveSession(workspace.id, session.id) } catch { /* the group shows the error */ } finally { setPending(false) }
@@ -1040,26 +1041,38 @@ function destinationKey(destination: MoveDestination): string {
 }
 
 /**
- * "Move to…" for a remote session (destinations: other workspaces of the same
- * remote, other remotes, local workspaces) or for a local session heading to
- * a remote (destinations: remotes only — local→local is the shell's own
- * dialog). Same-remote moves use the remote's `session.move`; everything else
- * is a cross-host transfer (export → import → archive the source copy). A
+ * "Move to…" / "Copy to…" for a remote session (destinations: other workspaces
+ * of the same remote, other remotes, local workspaces) or for a local session
+ * heading to a remote (destinations: remotes only — local→local is the shell's
+ * own dialog). Same-remote moves use the remote's `session.move`; everything
+ * else is a cross-host transfer (export → import → archive the source copy). A
  * `session/move-live` refusal reveals the stop-and-move option.
+ *
+ * A copy never disturbs the source: same-remote copies use the remote's
+ * `session.copy`, cross-host ones export → import in copy mode (fresh ids, no
+ * archiving). The source's own workspace is a valid copy destination. A
+ * `session/copy-live` refusal reveals the truncate option (drop the turn in
+ * progress, ticked by default) instead of stop-and-move.
  */
 export function MoveRemoteDialog({ model, localWorkspaces, useRuntime }: Face) {
   const request = useRuntime(state => state.moveRequest)
   const snapshot = useRuntime(state => state.snapshot)
+  const copying = request?.mode === 'copy'
   const [choice, setChoice] = useState<string | undefined>(undefined)
   const [stopLive, setStopLive] = useState(false)
+  const [truncate, setTruncate] = useState(true)
+  const [title, setTitle] = useState('')
   const [liveRefused, setLiveRefused] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [summary, setSummary] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   useEffect(() => {
-    setChoice(request?.destinationId)
+    // A copy defaults to the session's own workspace ("duplicate"); a move has no default.
+    setChoice(request?.destinationId ?? (request?.mode === 'copy' && request.source.local !== true ? `remote:${request.source.workspaceId}` : undefined))
     setStopLive(false)
+    setTruncate(true)
+    setTitle(request === undefined ? '' : `${request.title} (copy)`)
     setLiveRefused(false)
     setPending(false)
     setError(null)
@@ -1069,7 +1082,7 @@ export function MoveRemoteDialog({ model, localWorkspaces, useRuntime }: Face) {
   const destinations = useMemo((): MoveDestination[] => {
     if (request === undefined) return []
     const remotes: MoveDestination[] = (snapshot?.workspaces ?? [])
-      .filter(workspace => request.source.local === true || workspace.id !== request.source.workspaceId)
+      .filter(workspace => request.mode === 'copy' || request.source.local === true || workspace.id !== request.source.workspaceId)
       .map(workspace => ({ kind: 'remote', workspace }))
     if (request.source.local === true) return remotes
     const locals: MoveDestination[] = localWorkspaces().map(view => ({ kind: 'local', workspaceId: view.workspaceId, title: view.title, path: view.path }))
@@ -1078,14 +1091,38 @@ export function MoveRemoteDialog({ model, localWorkspaces, useRuntime }: Face) {
   const chosen = destinations.find(candidate => destinationKey(candidate) === choice)
   const sourceWorkspace = request === undefined || request.source.local === true ? undefined : model.workspace(request.source.workspaceId)
   const crossHost = chosen !== undefined && (chosen.kind === 'local' || sourceWorkspace === undefined || chosen.workspace.serverId !== sourceWorkspace.serverId)
-  const blocked = pending || chosen === undefined || summary !== null || (liveRefused && !stopLive)
+  const blocked = pending || chosen === undefined || summary !== null || (!copying && liveRefused && !stopLive)
 
   const confirm = async (): Promise<void> => {
     if (request === undefined || chosen === undefined || blocked) return
     setPending(true)
     setError(null)
     try {
-      if (!crossHost && chosen.kind === 'remote' && request.source.local !== true) {
+      if (copying) {
+        const trimmed = title.trim()
+        const options = {
+          ...(liveRefused ? { truncate } : {}),
+          ...(trimmed === '' || trimmed === request.title ? {} : { title: trimmed }),
+        }
+        let where: string
+        let truncated: boolean
+        if (!crossHost && chosen.kind === 'remote' && request.source.local !== true) {
+          const result = await model.copySession({ fromWorkspaceId: request.source.workspaceId, sessionId: request.sessionId, toWorkspaceId: chosen.workspace.id, ...options })
+          where = chosen.workspace.title
+          truncated = result.truncated
+        } else {
+          const result = await model.copyAcross({
+            sessionId: request.sessionId,
+            source: request.source.local === true ? { local: true } : { workspaceId: request.source.workspaceId },
+            destination: chosen.kind === 'local' ? { local: true, workspaceId: chosen.workspaceId } : { workspaceId: chosen.workspace.id },
+            ...options,
+          })
+          where = chosen.kind === 'local' ? `${chosen.title} (this machine)` : `${chosen.workspace.title} on ${chosen.workspace.server?.label ?? chosen.workspace.serverId}`
+          where += ` (${String(Math.round(result.bytes / 1024))} KB)`
+          truncated = result.truncated
+        }
+        setSummary(`Copied to ${where}; the original is untouched.${truncated ? ' The turn in progress was left out of the copy.' : ''}`)
+      } else if (!crossHost && chosen.kind === 'remote' && request.source.local !== true) {
         await model.moveSession({ fromWorkspaceId: request.source.workspaceId, sessionId: request.sessionId, toWorkspaceId: chosen.workspace.id, stopLive })
         setSummary(`Moved to ${chosen.workspace.title}.`)
       } else {
@@ -1101,7 +1138,7 @@ export function MoveRemoteDialog({ model, localWorkspaces, useRuntime }: Face) {
       }
     } catch (failure) {
       const code = (failure as { code?: string }).code
-      if (code === 'session/move-live') setLiveRefused(true)
+      if (code === (copying ? 'session/copy-live' : 'session/move-live')) setLiveRefused(true)
       else setError(failure instanceof Error ? failure.message : String(failure))
     } finally {
       setPending(false)
@@ -1131,18 +1168,26 @@ export function MoveRemoteDialog({ model, localWorkspaces, useRuntime }: Face) {
       open={request !== undefined}
       onClose={() => { model.openMove(undefined) }}
       closeLabel="Close"
-      title={request?.source.local === true ? 'Move session to a remote' : 'Move remote session'}
+      title={copying
+        ? (request?.source.local === true ? 'Copy session to a remote' : 'Copy remote session')
+        : (request?.source.local === true ? 'Move session to a remote' : 'Move remote session')}
       footer={(
         <>
           <Button variant="outline" disabled={pending} onClick={() => { model.openMove(undefined) }}>{summary === null ? 'Cancel' : 'Close'}</Button>
           {summary === null && (
-            <Button variant="primary" disabled={blocked} onClick={() => { void confirm() }}>{pending ? 'Moving…' : 'Move'}</Button>
+            <Button variant="primary" disabled={blocked} onClick={() => { void confirm() }}>
+              {copying ? (pending ? 'Copying…' : 'Copy') : (pending ? 'Moving…' : 'Move')}
+            </Button>
           )}
         </>
       )}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13 }}>
-        <div style={{ color: 'var(--dsw-alias-label-secondary)' }}>{request?.title}</div>
+        <div style={{ color: 'var(--dsw-alias-label-secondary)' }}>
+          {copying
+            ? `Copies “${request?.title ?? ''}” (with its subagent sessions) as a new session; the original is left as it is.`
+            : request?.title}
+        </div>
         <div style={S.field}>
           <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>Destination workspace</span>
           <Menu
@@ -1170,13 +1215,29 @@ export function MoveRemoteDialog({ model, localWorkspaces, useRuntime }: Face) {
             )}
           />
         </div>
+        {copying && (
+          <label style={S.field}>
+            <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>Title of the copy</span>
+            <Input value={title} disabled={pending || summary !== null} onChange={(event) => { setTitle(event.currentTarget.value) }} />
+          </label>
+        )}
         {crossHost && chosen !== undefined && summary === null && (
           <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', lineHeight: '17px' }}>
-            Different machine: the session log and its attachments are copied over and the original is archived here.
-            Files the agent worked on are not copied.
+            {copying
+              ? 'Different machine: the session log and its attachments are copied over. Files the agent worked on are not copied.'
+              : 'Different machine: the session log and its attachments are copied over and the original is archived here. Files the agent worked on are not copied.'}
           </div>
         )}
-        {liveRefused && (
+        {liveRefused && copying && (
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
+            <input type="checkbox" checked={truncate} disabled={pending} onChange={(event) => { setTruncate(event.currentTarget.checked) }} style={{ marginTop: 2 }} />
+            <span>
+              Copy only up to the last completed turn
+              <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>The session is running. The turn in progress (and the prompt that started it) is left out of the copy. Unticked, the copy includes everything recorded so far and marks that turn as interrupted.</div>
+            </span>
+          </label>
+        )}
+        {liveRefused && !copying && (
           <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
             <input type="checkbox" checked={stopLive} disabled={pending} onChange={(event) => { setStopLive(event.currentTarget.checked) }} style={{ marginTop: 2 }} />
             <span>

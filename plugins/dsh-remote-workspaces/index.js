@@ -557,12 +557,25 @@ export function apply(ctx, config) {
     if (response.status !== 200) throw new Error(`local export failed: HTTP ${String(response.status)} ${await response.text()}`)
     return Buffer.from(await response.arrayBuffer())
   }
+  /**
+   * Query string of an import: `mode=copy` (fresh ids, copy notice, optional
+   * `truncate` / `title`) when `copy` is given, else a move-style import.
+   */
+  const importQuery = (origin, copy) => {
+    const params = new URLSearchParams({ origin })
+    if (copy !== undefined) {
+      params.set('mode', 'copy')
+      if (copy.truncate === true) params.set('truncate', 'true')
+      if (typeof copy.title === 'string' && copy.title.trim() !== '') params.set('title', copy.title.trim())
+    }
+    return params.toString()
+  }
   /** Import one ZIP Buffer into a local workspace; returns the import result. */
-  const localImport = async (zip, destination, origin) => {
+  const localImport = async (zip, destination, origin, copy) => {
     const query = 'workspaceId' in destination
       ? `workspaceId=${encodeURIComponent(destination.workspaceId)}`
       : `cwd=${encodeURIComponent(destination.path)}`
-    const response = await localApi.fetch(new Request(`${LOCAL_ORIGIN}/api/session.import?${query}&origin=${encodeURIComponent(origin)}`, {
+    const response = await localApi.fetch(new Request(`${LOCAL_ORIGIN}/api/session.import?${query}&${importQuery(origin, copy)}`, {
       method: 'POST',
       headers: { 'content-type': 'application/zip' },
       body: zip,
@@ -580,9 +593,9 @@ export function apply(ctx, config) {
     return Buffer.concat(chunks)
   }
   /** Import one ZIP Buffer into a remote workspace. */
-  const remoteImport = async (egress, zip, remoteWorkspaceId, origin) => {
+  const remoteImport = async (egress, zip, remoteWorkspaceId, origin, copy) => {
     const response = await egress.fetchRaw('POST',
-      `/api/session.import?workspaceId=${encodeURIComponent(remoteWorkspaceId)}&origin=${encodeURIComponent(origin)}`,
+      `/api/session.import?workspaceId=${encodeURIComponent(remoteWorkspaceId)}&${importQuery(origin, copy)}`,
       { body: zip, headers: { 'content-type': 'application/zip' } })
     const chunks = []
     for await (const chunk of response) chunks.push(chunk)
@@ -685,6 +698,75 @@ export function apply(ctx, config) {
     return ok({ sessionId: imported.sessionId, imported: imported.imported, bytes: zip.byteLength })
   })
 
+  /**
+   * Copy a session between two workspaces of the same remote (the remote's
+   * own `session.copy`, which reads the source and leaves it running).
+   * Refusals pass through as-is: the UI answers `session/copy-live` by asking
+   * whether to drop the turn in progress (`truncate`).
+   */
+  const copySessionWithinRemote = (fromWorkspaceId, sessionId, toWorkspaceId, options = {}) => exclusive(async () => {
+    const from = workspaceOf(fromWorkspaceId)
+    const to = workspaceOf(toWorkspaceId)
+    if (from.serverId !== to.serverId) return fail('cross-remote', 'use sessions.copyAcross for copies between different hosts')
+    const egress = egressOf(from.serverId)
+    const result = await egress.call('session', 'copy', { request: {
+      sessionId: String(sessionId),
+      destination: { workspaceId: to.remoteWorkspaceId },
+      ...(options.truncate === undefined ? {} : { truncate: options.truncate === true }),
+      ...(typeof options.title === 'string' && options.title.trim() !== '' ? { title: options.title.trim() } : {}),
+    } })
+    if (!result.ok) return result
+    const polled = await pollWorkspace(to)
+    if (!polled.ok) return polled
+    return ok({ ...polled.value, sessionId: result.value.sessionId, truncated: result.value.truncated === true })
+  })
+
+  /**
+   * Copy a session across hosts: export at the source, import at the
+   * destination in `copy` mode (fresh ids, copy notice). Nothing at the
+   * source changes — no cancel, no archive. A source that is running is
+   * refused (`session/copy-live`) until `truncate` is decided; the export
+   * carries the log as recorded so far and the destination shapes it
+   * (drops the turn in progress, or closes it as interrupted).
+   */
+  const copySessionAcross = (spec) => exclusive(async () => {
+    const { sessionId } = spec
+    const source = spec.source
+    const destination = spec.destination
+    if (source.local === true && destination.local === true) return fail('bad-request', 'a local→local copy is session.copy, not a cross-host copy')
+    // 1. Source liveness — only to ask the truncate question once.
+    if (spec.truncate === undefined) {
+      let running = false
+      if (source.local === true) {
+        const listed = await localCall('session', 'list', { _request: {} })
+        const row = listed.ok ? (listed.value.items ?? []).find(item => item.sessionId === sessionId) : undefined
+        if (row === undefined) return fail('missing', `no local session "${String(sessionId)}"`)
+        running = row.running === true
+      } else {
+        running = await remoteSessionLive(egressOf(workspaceOf(source.workspaceId).serverId), sessionId)
+      }
+      if (running) {
+        return { ok: false, error: { code: 'session/copy-live', message: 'the session is running; decide whether the copy keeps the turn in progress (truncate)', details: { sessionId, blockers: [{ kind: 'turn' }] } } }
+      }
+    }
+    const copy = { truncate: spec.truncate === true, title: spec.title }
+    // 2. Export at the source (the log as recorded so far; a live source is flushed first).
+    const originLabel = source.local === true ? `${hostLabel()} (local)` : remoteLabel(workspaceOf(source.workspaceId).serverId)
+    const zip = source.local === true
+      ? await localExport(sessionId)
+      : await remoteExport(egressOf(workspaceOf(source.workspaceId).serverId), sessionId)
+    // 3. Import at the destination as a copy.
+    let imported
+    if (destination.local === true) {
+      imported = await localImport(zip, destination.workspaceId !== undefined ? { workspaceId: destination.workspaceId } : { path: destination.path }, originLabel, copy)
+    } else {
+      const to = workspaceOf(destination.workspaceId)
+      imported = await remoteImport(egressOf(to.serverId), zip, to.remoteWorkspaceId, originLabel, copy)
+      await pollWorkspace(to)
+    }
+    return ok({ sessionId: imported.sessionId, imported: imported.imported, truncated: imported.truncated === true, bytes: zip.byteLength })
+  })
+
   const dispatch = async (endpoint, payload) => {
     await boot
     const args = typeof payload === 'object' && payload !== null && typeof payload.args === 'object' && payload.args !== null ? payload.args : {}
@@ -704,6 +786,8 @@ export function apply(ctx, config) {
         case 'sessions.start': return startSession(args.workspaceId)
         case 'sessions.move': return moveSessionWithinRemote(args.fromWorkspaceId, args.sessionId, args.toWorkspaceId, args.stopLive)
         case 'sessions.transfer': return transferSession(args)
+        case 'sessions.copy': return copySessionWithinRemote(args.fromWorkspaceId, args.sessionId, args.toWorkspaceId, args)
+        case 'sessions.copyAcross': return copySessionAcross(args)
         default: return fail('unknown-endpoint', `unknown endpoint ${endpoint}`)
       }
     } catch (error) {

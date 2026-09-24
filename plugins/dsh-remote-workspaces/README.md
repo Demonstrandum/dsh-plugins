@@ -74,6 +74,27 @@ egress (`call` for JSON remotes, `fetchRaw` for the binary export/import
 routes). Not yet: dragging a local row onto a remote group (cross-tree DnD
 would need a shared dataTransfer type in the fork's rows).
 
+### Copying sessions (2026-09-24)
+
+Beside each Move item sits its non-destructive twin: **Copy to…** on remote
+rows, **Copy to remote…** on local rows, the same dialog in `copy` mode. A
+copy stores a *new* session (fresh ids, root and descendants alike) and never
+touches the source — no cancel, no archive, a running agent keeps running:
+
+| source → destination | mechanism |
+|---|---|
+| remote → any workspace of the same remote (its own included = duplicate) | the remote's `session.copy` (`sessions.copy`) |
+| remote → local, local → remote, remote A → remote B | `sessions.copyAcross`: export at the source, import at the destination with `mode=copy[&truncate=true][&title=…]`; nothing at the source changes |
+
+The dialog prefills the title as “<title> (copy)” (editable; unchanged =
+keep the source's). A running source is refused once with
+`session/copy-live`; the dialog then shows **Copy only up to the last
+completed turn** (ticked by default: the turn in progress and the prompt that
+started it are left out; unticked: everything recorded so far is kept and the
+turn is closed as interrupted) and the operator confirms again. Local↔local
+copies are the shell's own **Copy to…** (`session.copy`). Recipe:
+`recipes/copy-sessions.md`.
+
 ## Files
 
 | File | Role |

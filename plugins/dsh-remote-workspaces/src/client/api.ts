@@ -98,6 +98,27 @@ export interface RemoteApi {
   moveSession(input: { fromWorkspaceId: string; sessionId: string; toWorkspaceId: string; stopLive?: boolean }): Promise<RemoteWorkspace>
   /** Move a session across hosts: export at the source, import at the destination, archive the source copy. */
   transferSession(input: TransferRequest): Promise<TransferResult>
+  /** Copy a remote session into a workspace of the same remote (the remote's own `session.copy`); the source is untouched. */
+  copySession(input: { fromWorkspaceId: string; sessionId: string; toWorkspaceId: string; truncate?: boolean; title?: string }): Promise<{ workspace: RemoteWorkspace; sessionId: string; truncated: boolean }>
+  /** Copy a session across hosts: export at the source, import at the destination as a copy; nothing at the source changes. */
+  copyAcross(input: CopyRequest): Promise<CopyResult>
+}
+
+export interface CopyRequest {
+  sessionId: string
+  source: TransferEnd
+  destination: TransferEnd
+  /** Undecided until the host reports `session/copy-live`; then true drops the turn in progress, false keeps it as interrupted. */
+  truncate?: boolean
+  /** Title recorded on the copy; omitted keeps the source's. */
+  title?: string
+}
+
+export interface CopyResult {
+  sessionId: string
+  imported: { sessionId: string; exportedId: string; parentSessionId?: string }[]
+  truncated: boolean
+  bytes: number
 }
 
 /** One end of a cross-host transfer. */
@@ -141,5 +162,7 @@ export function createApi(rpc: ClientConnectionRpc): RemoteApi {
     startSession: workspaceId => call<{ sessionId: string; created: boolean }>('sessions.start', { workspaceId }),
     moveSession: input => call<{ workspace: RemoteWorkspace }>('sessions.move', input).then(workspaceOf),
     transferSession: input => call<TransferResult>('sessions.transfer', input as unknown as Record<string, unknown>),
+    copySession: input => call<{ workspace: RemoteWorkspace; sessionId: string; truncated: boolean }>('sessions.copy', input),
+    copyAcross: input => call<CopyResult>('sessions.copyAcross', input as unknown as Record<string, unknown>),
   }
 }

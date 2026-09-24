@@ -90,6 +90,8 @@ export function frameKey(selection: RemoteSelection): string {
 
 /** What the move dialog is deciding about. */
 export interface MoveRequest {
+  /** `move` (default) relocates the session; `copy` stores a new one and leaves the source alone. */
+  mode?: 'move' | 'copy'
   sessionId: string
   title: string
   /** Where the session lives now. */
@@ -372,6 +374,18 @@ export class RemoteWorkspacesModel {
       if (this.view.getSnapshot().selected?.sessionId === input.sessionId) this.clearSelection()
       await this.poll(input.source.workspaceId)
     }
+    if (input.destination.local !== true) await this.poll(input.destination.workspaceId)
+    return result
+  }
+
+  async copySession(input: Parameters<RemoteApi['copySession']>[0]): Promise<{ sessionId: string; truncated: boolean }> {
+    const result = await this.api.copySession(input)
+    this.putWorkspace(result.workspace)
+    return { sessionId: result.sessionId, truncated: result.truncated }
+  }
+
+  async copyAcross(input: Parameters<RemoteApi['copyAcross']>[0]): Promise<Awaited<ReturnType<RemoteApi['copyAcross']>>> {
+    const result = await this.api.copyAcross(input)
     if (input.destination.local !== true) await this.poll(input.destination.workspaceId)
     return result
   }

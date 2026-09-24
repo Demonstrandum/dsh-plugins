@@ -117,6 +117,15 @@ export function apply(ctx: Context): void {
       when: () => (model.runtime.getSnapshot().snapshot?.workspaces.length ?? 0) > 0,
       run: (target) => { model.openMove({ sessionId: target.sessionId, title: target.title, source: { local: true } }) },
     }), 'remote-workspaces: local session menu contribution')
+    // "Copy to remote…" beside it (the shell's "Copy to…" covers local destinations).
+    scoped.effect(() => scoped.uiWorkspace.contributeSessionMenu({
+      id: 'remote-workspaces.copy-to-remote',
+      label: 'Copy to remote…',
+      icon: <IconGlobeOutline14 />,
+      order: 11,
+      when: () => (model.runtime.getSnapshot().snapshot?.workspaces.length ?? 0) > 0,
+      run: (target) => { model.openMove({ mode: 'copy', sessionId: target.sessionId, title: target.title, source: { local: true } }) },
+    }), 'remote-workspaces: local session copy contribution')
   })
 
   // The "Remotes" section (its own header carries add + refresh-all; nothing

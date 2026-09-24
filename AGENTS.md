@@ -425,6 +425,15 @@ can reproduce or maintain it:
   as "nobody can answer". Same for approvals. Not a rebase regression; no
   fork fix by decision (drafted handover-across-reload approach recorded);
   just re-ask, and rebuild in the preview server instead.
+- `copy-sessions.md` — **Copy to…** beside every Move to… (fork `session.copy`
+  + `ui-workspace` dialog; plugin `sessions.copy` / `sessions.copyAcross`,
+  **Copy to remote…**): a new session with fresh ids from the source's durable
+  log and lineage, the source never touched (a running agent keeps running);
+  a mid-turn source is *truncated* rather than terminated — the whole turn in
+  progress dropped and its queued prompt cancelled, or kept and closed with the
+  interrupted-turn closers; "<title> (copy)" title, same workspace = Duplicate;
+  `storeSessionLogs` shared with the cross-host import (`mode=copy`), the
+  linked-plugin-build hot-swap trap, and the throwaway-home HTTP/Chrome trial.
 - `cloudflare-remote-control.md` — phone remote control via dsh-full-remote
   behind cloudflared: install + profile patch, the 反向代理 locale bug and its
   root cause, the `taliesinb/dsh-full-remote` fork (`~/github/dsh-full-remote`,

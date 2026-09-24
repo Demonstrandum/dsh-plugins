@@ -217,6 +217,20 @@ visible on first turn after resume, sandbox root in the runtime-context snapshot
   sessions into `~/github/tali-dash-plugins`.
 - Exercise the real tailnet path against the remote Mac (asleep at time of writing).
 
+## 5a. Copy to… (done 2026-09-24)
+
+The non-destructive twin of every Move item, on the same menus: fork
+`session.copy` (Session Controller `copy.ts`, storing through
+`session-log-export`'s `storeSessionLogs` — the same code the cross-host import
+uses, now with `mode=copy`), `CopySessionDialog` in `rows/MoveDialogs.tsx`, and
+the plugin's `sessions.copy` / `sessions.copyAcross` + **Copy to remote…**. A
+copy is a new session with fresh ids from the source's durable log and its
+lineage; the source is only read. Instead of stop-and-move, a running source
+gets the *truncate* question (`session/copy-live`): drop the whole turn in
+progress (its queued prompt cancelled) or keep it closed as interrupted. Same
+workspace allowed (= Duplicate), title "<title> (copy)". Recipe:
+`recipes/copy-sessions.md`.
+
 ## 6. Pointers
 
 - Mechanics + reference implementation notes: `workspace-moving-tools.md`.
