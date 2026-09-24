@@ -6,7 +6,7 @@
  *   dist/bundle/node/      tools/bundle/fetch-node.mjs  (official Node LTS build)
  *   dock-app/build/DSH     dsh-tailscale-remote's Swift wrapper (compiled here if stale)
  *
- *   node tools/bundle/build-app.mjs [--name DSH] [--port 3090] [--sign IDENTITY] [--no-dmg]
+ *   node tools/bundle/build-app.mjs [--name "DSH Canary"] [--glyph-color "#E5484D"] [--port 3090] [--sign IDENTITY] [--no-dmg]
  *                                   [--version X.Y.Z] [--out dist/bundle]
  *
  * Layout (Contents/Resources): node/ (bin/node only), dsh/ (package.json +
@@ -35,7 +35,11 @@ const args = process.argv.slice(2)
 const opt = (name, fallback) => { const i = args.indexOf(name); return i === -1 ? fallback : args[i + 1] }
 const OUT = resolve(opt('--out', join(REPO, 'dist', 'bundle')))
 const STAGE = join(OUT, 'stage')
-const NAME = opt('--name', 'DSH')
+// "DSH Canary" with the red whale: the bundled build is the pre-release channel
+// beside a checkout-run DSH (stock black) and DSH Preview (the same red, but
+// a different bundle id and Dock name, so the two never collide).
+const NAME = opt('--name', 'DSH Canary')
+const GLYPH = opt('--glyph-color', '#E5484D')
 const PORT = Number(opt('--port', '3090'))
 const SIGN = opt('--sign', '-')
 const DMG = !args.includes('--no-dmg')
@@ -127,7 +131,7 @@ async function main() {
   const resources = join(contents, 'Resources')
   log(`building ${app} (dsh ${ver.full}, node ${nodeInfo.version}, ${stagePkg.dshBundle.plugins.length} plugins)`)
 
-  const { executable, icns } = await dockApp.buildDockApp({ log })
+  const { executable, icns } = await dockApp.buildDockApp({ log, glyphColor: GLYPH })
 
   await rm(app, { recursive: true, force: true })
   await mkdir(join(contents, 'MacOS'), { recursive: true })
@@ -163,7 +167,7 @@ async function main() {
   const config = {
     name: NAME,
     url: `http://127.0.0.1:${PORT}/`,
-    glyphColor: null,
+    glyphColor: GLYPH,   // the page's sidebar whale follows the Dock icon (main.swift identityScript)
     embedded: {
       node: 'node/bin/node',
       dsh: 'dsh/node_modules/@deepseek-ai/dsh/lib/bin.js',
@@ -195,7 +199,7 @@ async function main() {
   log(`app ready: ${app} (${size}, ${inner.length} inner Mach-O files signed)`)
 
   if (DMG) {
-    const dmg = join(OUT, `${NAME}-${ver.full.replace(/\+/g, '-')}.dmg`)
+    const dmg = join(OUT, `${NAME.replace(/\s+/g, '-')}-${ver.full.replace(/\+/g, '-')}.dmg`)
     const staging = join(OUT, 'dmg-root')
     await rm(staging, { recursive: true, force: true })
     await rm(dmg, { force: true })
