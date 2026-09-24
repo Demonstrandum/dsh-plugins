@@ -57,14 +57,6 @@ const S = {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6,
     border: 'none', background: 'transparent', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', position: 'relative',
   } as CSSProperties,
-  // The small globe over the folder / add icon. No fill of its own: the icon
-  // underneath is masked out where the globe sits (see `knockout`), so the
-  // panel shows through — a solid disc cannot match the Dock app's translucent
-  // sidebar and read as a black blot on hovered buttons.
-  badge: {
-    position: 'absolute', right: 2, bottom: 2, width: 12, height: 12, borderRadius: 6, display: 'grid', placeItems: 'center',
-    background: 'transparent', color: 'var(--dsw-alias-state-business-primary)',
-  } as CSSProperties,
   // Mirrors WorkspaceBrowser.module.css .sectionHeader (36px, tertiary label) —
   // the "Workspaces" header this section sits under. No font-size: like the
   // shell's header it inherits the sidebar's 14px (rows are 13px).
@@ -167,22 +159,14 @@ function RowButton({ label, onClick, children, disabled }: { label: string; onCl
 }
 
 /**
- * A 16px icon box whose pixels inside the circle (`x`, `y`, radius `r`, icon
- * coordinates) are masked away — the hole a badge sits in, letting whatever is
- * behind the button (panel, hover fill) show through instead of a painted disc.
+ * Folder icon of a remote workspace row — the plain folder, like the local
+ * tree's (the "Remotes" section header already says where these live; the
+ * globe badge it used to carry went on 2026-09-24).
  */
-function knockout(x: number, y: number, r: number): CSSProperties {
-  const mask = `radial-gradient(circle at ${String(x)}px ${String(y)}px, transparent ${String(r)}px, #000 ${String(r + 0.5)}px)`
-  return { display: 'inline-flex', width: 16, height: 16, alignItems: 'center', justifyContent: 'center', WebkitMaskImage: mask, maskImage: mask }
-}
-
-/** Folder icon with the small "remote" globe badge — the row and button decoration. */
 function RemoteFolderIcon({ open, active }: { open: boolean; active?: boolean }) {
   return (
-    <span style={{ position: 'relative', display: 'inline-flex', width: 16, height: 16, alignItems: 'center', justifyContent: 'center', color: active ? 'var(--dsw-alias-state-business-primary)' : undefined }}>
-      {/* badge box: right -5, bottom -4, 11px → centre (15.5, 14.5) in icon coordinates */}
-      <span style={knockout(15.5, 14.5, 5.5)}>{open ? <IconFolderOpen16 size={16} /> : <IconFolderClose16 size={16} />}</span>
-      <span style={{ ...S.badge, right: -5, bottom: -4, width: 11, height: 11 }}><IconGlobeOutline14 size={9} /></span>
+    <span style={{ display: 'inline-flex', width: 16, height: 16, alignItems: 'center', justifyContent: 'center', color: active ? 'var(--dsw-alias-state-business-primary)' : undefined }}>
+      {open ? <IconFolderOpen16 size={16} /> : <IconFolderClose16 size={16} />}
     </span>
   )
 }
@@ -529,7 +513,7 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime, drag,
           drag.end()
         }}
       >
-        {/* Leading slot: the badged folder, swapped for the expand chevron on hover (local-tree pattern). */}
+        {/* Leading slot: the folder, swapped for the expand chevron on hover (local-tree pattern). */}
         <span style={{ ...S.slot, color: 'var(--dsw-alias-label-caption)' }}>
           {hover
             ? <span style={{ display: 'inline-flex', transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 150ms var(--ds-ease-in-out)' }}><IconTriangleRightFill14 /></span>
@@ -730,9 +714,7 @@ export function RemotesSection(props: PropsRuntime<'sidebar.workspaces.extra'> &
           <ViewOptions groupBy={groupBy} orderBy={orderBy} onGroupBy={mode => { model.setGroupBy(mode) }} onOrderBy={mode => { model.setOrderBy(mode) }} iconButtonStyle={S.iconButton} />
         )}
         <IconButton label="Add remote workspace" onClick={() => { model.setAddOpen(true) }}>
-          {/* 28px button, 16px icon at (6, 6); badge box right 2 / bottom 2 / 12px → centre (14, 14) in icon coordinates */}
-          <span style={knockout(14, 14, 6)}><IconProjectAddOutline16 size={16} /></span>
-          <span style={S.badge}><IconGlobeOutline14 size={9} /></span>
+          <IconProjectAddOutline16 size={16} />
         </IconButton>
       </div>
       {!collapsed && (

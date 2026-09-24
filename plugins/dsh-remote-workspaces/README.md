@@ -19,7 +19,8 @@ Design and status: `../../notes/remote-workspaces-plan.md`.
 - **Phase 3 (done):** persisted registry (`servers.probe`, `workspaces.add|poll|remove|
   rename|reorder`, `sessions.rename|archive|start|reorder`) and the browser half: a
   bottom-anchored **Remotes** section (fork seat `sidebar.workspaces.extra`; header =
-  label + refresh-all + badged add, nothing else) with one group per mirrored
+  label + refresh-all + add, nothing else; the globe badge on the add button and
+  the folders went 2026-09-24) with one group per mirrored
   workspace — cached rows + spinners, ↻ / … / + actions, drag-to-reorder groups and
   sessions within a group (local order layered over the remote's),
   add-remote modal (URL → probe → pick or new directory → name), keyed `main` panel

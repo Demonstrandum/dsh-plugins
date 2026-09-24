@@ -117,7 +117,7 @@ because the new slot types only exist there; repoint when the live checkout move
 
 Remote = worktree DSH on :3082 (`DSH_HOME=/tmp/dsh-embed-home`), local = worktree DSH on
 :3081 (`DSH_HOME=/tmp/dsh-local-home`, overlay above, no seed). In the local GUI: the
-badged add button → modal → URL `http://127.0.0.1:3082/` → **401 remedy** revealed the
+add button (globe-badged then; plain since 2026-09-24) → modal → URL `http://127.0.0.1:3082/` → **401 remedy** revealed the
 token field → remote launch token → step 2 listed the remote workspace → Done →
 group appeared expanded, first session framed; `+` reused the remote's blank session
 and framed its composer; a prompt ran there; `↻` showed the auto-titled row; rename
