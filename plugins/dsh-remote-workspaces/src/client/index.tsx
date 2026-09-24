@@ -15,10 +15,10 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/client'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
-import { createApi } from './api.ts'
+import { createApi, RemoteApiError, type StatusSnapshot } from './api.ts'
 import { PANEL_ID, RemoteWorkspacesModel, type RemoteSelection } from './store.ts'
 import type { IWorkspaces } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import { IconGlobeOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { DestinationEntry, DestinationGroup, DestinationRunResult } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { AddRemoteModal, FramePool, MoveRemoteDialog, RemoteSessionPanel, RemotesSection, type RemoteInjected } from './ui.tsx'
 
 /**
@@ -106,26 +106,61 @@ export function apply(ctx: Context): void {
     hooks: { view: model.view, runtime: model.runtime },
   })
 
-  // "Move to remote…" on every local session row (the shell's own "Move to…"
-  // covers local destinations); the shared dialog then lists the remotes.
+  // The shell's own Move to… / Copy to… dialogs on local session rows list
+  // our remotes as further destination groups (one per server, after "This
+  // machine"); a pick of one comes back to `run` as a cross-host transfer /
+  // copy. The groups observable follows the runtime snapshot; its value is
+  // memoized per snapshot so an unchanged snapshot yields the same reference.
   ctx.inject(['uiWorkspace'], (scoped) => {
-    scoped.effect(() => scoped.uiWorkspace.contributeSessionMenu({
-      id: 'remote-workspaces.move-to-remote',
-      label: 'Move to remote…',
-      icon: <IconGlobeOutline14 />,
+    let memo: { snapshot: StatusSnapshot | undefined; groups: readonly DestinationGroup[] } | undefined
+    const groupsOf = (): readonly DestinationGroup[] => {
+      const snapshot = model.runtime.getSnapshot().snapshot
+      if (memo !== undefined && memo.snapshot === snapshot) return memo.groups
+      const byServer = new Map<string, DestinationGroup & { entries: DestinationEntry[] }>()
+      for (const workspace of snapshot?.workspaces ?? []) {
+        const label = workspace.server?.label ?? workspace.serverId
+        let group = byServer.get(workspace.serverId)
+        if (group === undefined) {
+          group = { id: `server:${workspace.serverId}`, label, entries: [] }
+          byServer.set(workspace.serverId, group)
+        }
+        group.entries.push({ key: workspace.id, title: workspace.title, path: workspace.remotePath })
+      }
+      memo = { snapshot, groups: [...byServer.values()] }
+      return memo.groups
+    }
+    const failure = (error: unknown): DestinationRunResult => error instanceof RemoteApiError
+      ? { ok: false, code: error.code, message: error.message, details: error.details }
+      : { ok: false, code: 'remote-workspaces/failed', message: error instanceof Error ? error.message : String(error) }
+    scoped.effect(() => scoped.uiWorkspace.contributeDestinations({
+      id: 'remote-workspaces',
       order: 10,
-      when: () => (model.runtime.getSnapshot().snapshot?.workspaces.length ?? 0) > 0,
-      run: (target) => { model.openMove({ sessionId: target.sessionId, title: target.title, source: { local: true } }) },
-    }), 'remote-workspaces: local session menu contribution')
-    // "Copy to remote…" beside it (the shell's "Copy to…" covers local destinations).
-    scoped.effect(() => scoped.uiWorkspace.contributeSessionMenu({
-      id: 'remote-workspaces.copy-to-remote',
-      label: 'Copy to remote…',
-      icon: <IconGlobeOutline14 />,
-      order: 11,
-      when: () => (model.runtime.getSnapshot().snapshot?.workspaces.length ?? 0) > 0,
-      run: (target) => { model.openMove({ mode: 'copy', sessionId: target.sessionId, title: target.title, source: { local: true } }) },
-    }), 'remote-workspaces: local session copy contribution')
+      groups: { getSnapshot: groupsOf, subscribe: listener => model.runtime.subscribe(listener) },
+      run: async (request) => {
+        const destination = model.workspace(request.destinationKey)
+        if (destination === undefined) return { ok: false, code: 'remote-workspaces/unknown-workspace', message: 'that remote workspace is no longer mirrored' }
+        const where = `${destination.title} on ${destination.server?.label ?? destination.serverId}`
+        try {
+          if (request.action === 'move') {
+            const result = await model.transferSession({
+              sessionId: request.sessionId, source: { local: true }, destination: { workspaceId: destination.id },
+              ...(request.stopLive === undefined ? {} : { stopLive: request.stopLive }), notify: request.notify,
+            })
+            const renamed = result.sessionId === request.sessionId ? '' : ` It has a new id there (${result.sessionId.slice(0, 16)}…).`
+            return { ok: true, summary: `Moved to ${where} (${String(Math.round(result.bytes / 1024))} KB); the original is archived here.${renamed}` }
+          }
+          const result = await model.copyAcross({
+            sessionId: request.sessionId, source: { local: true }, destination: { workspaceId: destination.id },
+            ...(request.truncate === undefined ? {} : { truncate: request.truncate }),
+            ...(request.title === undefined ? {} : { title: request.title }),
+            notify: request.notify,
+          })
+          return { ok: true, summary: `Copied to ${where} (${String(Math.round(result.bytes / 1024))} KB); the original is untouched.${result.truncated ? ' The turn in progress was left out of the copy.' : ''}` }
+        } catch (error) {
+          return failure(error)
+        }
+      },
+    }), 'remote-workspaces: dialog destinations')
   })
 
   // The "Remotes" section (its own header carries add + refresh-all; nothing

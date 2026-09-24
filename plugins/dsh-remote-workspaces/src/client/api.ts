@@ -112,6 +112,8 @@ export interface CopyRequest {
   truncate?: boolean
   /** Title recorded on the copy; omitted keeps the source's. */
   title?: string
+  /** Append the copy notice at the destination (default true). */
+  notify?: boolean
 }
 
 export interface CopyResult {
@@ -131,6 +133,8 @@ export interface TransferRequest {
   source: TransferEnd
   destination: TransferEnd
   stopLive?: boolean
+  /** Append the relocation notice at the destination (default true). */
+  notify?: boolean
 }
 
 export interface TransferResult {

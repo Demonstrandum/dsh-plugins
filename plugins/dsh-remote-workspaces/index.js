@@ -561,8 +561,9 @@ export function apply(ctx, config) {
    * Query string of an import: `mode=copy` (fresh ids, copy notice, optional
    * `truncate` / `title`) when `copy` is given, else a move-style import.
    */
-  const importQuery = (origin, copy) => {
+  const importQuery = (origin, copy, notify) => {
     const params = new URLSearchParams({ origin })
+    if (notify === false) params.set('notify', 'false')
     if (copy !== undefined) {
       params.set('mode', 'copy')
       if (copy.truncate === true) params.set('truncate', 'true')
@@ -571,11 +572,11 @@ export function apply(ctx, config) {
     return params.toString()
   }
   /** Import one ZIP Buffer into a local workspace; returns the import result. */
-  const localImport = async (zip, destination, origin, copy) => {
+  const localImport = async (zip, destination, origin, copy, notify) => {
     const query = 'workspaceId' in destination
       ? `workspaceId=${encodeURIComponent(destination.workspaceId)}`
       : `cwd=${encodeURIComponent(destination.path)}`
-    const response = await localApi.fetch(new Request(`${LOCAL_ORIGIN}/api/session.import?${query}&${importQuery(origin, copy)}`, {
+    const response = await localApi.fetch(new Request(`${LOCAL_ORIGIN}/api/session.import?${query}&${importQuery(origin, copy, notify)}`, {
       method: 'POST',
       headers: { 'content-type': 'application/zip' },
       body: zip,
@@ -593,9 +594,9 @@ export function apply(ctx, config) {
     return Buffer.concat(chunks)
   }
   /** Import one ZIP Buffer into a remote workspace. */
-  const remoteImport = async (egress, zip, remoteWorkspaceId, origin, copy) => {
+  const remoteImport = async (egress, zip, remoteWorkspaceId, origin, copy, notify) => {
     const response = await egress.fetchRaw('POST',
-      `/api/session.import?workspaceId=${encodeURIComponent(remoteWorkspaceId)}&${importQuery(origin, copy)}`,
+      `/api/session.import?workspaceId=${encodeURIComponent(remoteWorkspaceId)}&${importQuery(origin, copy, notify)}`,
       { body: zip, headers: { 'content-type': 'application/zip' } })
     const chunks = []
     for await (const chunk of response) chunks.push(chunk)
@@ -681,10 +682,10 @@ export function apply(ctx, config) {
     // 3. Import at the destination.
     let imported
     if (destination.local === true) {
-      imported = await localImport(zip, destination.workspaceId !== undefined ? { workspaceId: destination.workspaceId } : { path: destination.path }, originLabel)
+      imported = await localImport(zip, destination.workspaceId !== undefined ? { workspaceId: destination.workspaceId } : { path: destination.path }, originLabel, undefined, spec.notify)
     } else {
       const to = workspaceOf(destination.workspaceId)
-      imported = await remoteImport(egressOf(to.serverId), zip, to.remoteWorkspaceId, originLabel)
+      imported = await remoteImport(egressOf(to.serverId), zip, to.remoteWorkspaceId, originLabel, undefined, spec.notify)
       await pollWorkspace(to)
     }
     // 4. Archive the source copy (tombstone); never delete.
@@ -758,10 +759,10 @@ export function apply(ctx, config) {
     // 3. Import at the destination as a copy.
     let imported
     if (destination.local === true) {
-      imported = await localImport(zip, destination.workspaceId !== undefined ? { workspaceId: destination.workspaceId } : { path: destination.path }, originLabel, copy)
+      imported = await localImport(zip, destination.workspaceId !== undefined ? { workspaceId: destination.workspaceId } : { path: destination.path }, originLabel, copy, spec.notify)
     } else {
       const to = workspaceOf(destination.workspaceId)
-      imported = await remoteImport(egressOf(to.serverId), zip, to.remoteWorkspaceId, originLabel, copy)
+      imported = await remoteImport(egressOf(to.serverId), zip, to.remoteWorkspaceId, originLabel, copy, spec.notify)
       await pollWorkspace(to)
     }
     return ok({ sessionId: imported.sessionId, imported: imported.imported, truncated: imported.truncated === true, bytes: zip.byteLength })

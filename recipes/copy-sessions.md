@@ -163,6 +163,45 @@ seeded, but the `session-persistence/stored` upsert carries no hints) — the
 same gap the import notes already record. Note the copied preview home now
 carries cloud providers (Haiku answered the test prompt, ~34K tokens).
 
+## 4a. One dialog for local rows: contributed destinations (2026-09-24, later the same day)
+
+The maintainer asked for the local rows' Move to… / Copy to… to list remote
+destinations too, tree-shaped (*This machine* first, remotes last, as in the
+sidebar). Done as a fork seam rather than a plugin-owned dialog:
+
+- **Fork** `ui-workspace`: `ctx.uiWorkspace.contributeDestinations({ id,
+  order?, groups, run })` (`navigation.ts`; registry + observable
+  `destinationContributions`, mirrored from `menuContributions`).
+  `WorkspacePickFlow` gained a tree mode (`externalGroups`, `localLabel`,
+  `selectedExternal`, `onPickExternal`): a `label` row per machine, rows
+  indented (`indented()` wraps icon + title; the Menu's `detail` carries the
+  path), contributed groups after the local list, the pinned "Add
+  workspace…" footer unchanged. `MoveDialogs.tsx` now works on a
+  `DialogDestination` (`local` | `external`), hands an external pick to the
+  contributor's `run`, and shows its `summary` before closing. The
+  contributor's answer is **structural** (`DestinationRunResult`), not a
+  `RemoteResult`: `RemoteFailure` requires a `RemoteError` instance with a
+  declared code, which an out-of-tree client plugin cannot construct (no
+  runtime imports of `@deepseek-ai/*` besides the platform modules). Locales
+  `move.destination.local/external`, `copy.destination.external`. Test:
+  "lists contributed destinations as a tree…" (refusal → truncate → summary).
+- **Plugin**: `index.tsx` replaces the two contributed menu items with one
+  `contributeDestinations` (groups derived from the runtime snapshot, one per
+  server, memoized per snapshot so `getSnapshot` is referentially stable;
+  `run` → `transferSession` / `copyAcross`, `RemoteApiError` → `{ ok: false,
+  code, message, details }`); `notify` now threads through to the import
+  (`importQuery(origin, copy, notify)`). Its own dialog stays for remote
+  sources and got the same tree (`e6e3ecb`).
+- Verified on the throwaway (self-mirror remote): local row → Copy to… →
+  picker shows *This machine* (6 rows, current checked) then `<remote>` (the throwaway mirroring itself)
+  (2 rows) then Add workspace…; copy to the remote answers "Copied to … (13
+  KB); the original is untouched."; Move to… the remote answers "Moved to …;
+  the original is archived here." Screenshot in the session workspace
+  (`consolidated-picker.png`).
+- Menu placement: with a tall list in a 900px-high window the popover shifts
+  up over the anchor to fit the viewport — the `Menu` primitive's behaviour,
+  not ours.
+
 ## 5. Semantics worth remembering
 
 - `truncate` matters only when the source log has an open turn; a cold

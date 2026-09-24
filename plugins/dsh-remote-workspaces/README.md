@@ -52,11 +52,16 @@ mode and last bridge failure (copy = URL). Persisted view state:
 
 ## Moving sessions across hosts
 
-Every remote session row's `…` menu has **Move to…**; every local session row
-gains **Move to remote…** (contributed through the fork's
-`ctx.uiWorkspace.contributeSessionMenu`). One dialog serves both, listing the
-other workspaces of the same remote, the other remotes, and (for a remote
-source) the local workspaces:
+Every remote session row's `…` menu has **Move to…** / **Copy to…** (this
+plugin's dialog, tree-shaped: *This machine* first, then each remote under its
+label). Local session rows keep the shell's own **Move to…** / **Copy to…**;
+since 2026-09-24 the plugin contributes its remotes to those dialogs through
+the fork's `ctx.uiWorkspace.contributeDestinations` (one group per server,
+listed after *This machine*) and carries out a pick of one in `run` — so a
+local session reaches a remote from the same dialog it reaches another local
+workspace, and there are no separate "…to remote…" menu items any more. The
+plugin's dialog lists the other workspaces of the same remote, the other
+remotes, and the local workspaces:
 
 | source → destination | mechanism |
 |---|---|
@@ -77,7 +82,8 @@ would need a shared dataTransfer type in the fork's rows).
 ### Copying sessions (2026-09-24)
 
 Beside each Move item sits its non-destructive twin: **Copy to…** on remote
-rows, **Copy to remote…** on local rows, the same dialog in `copy` mode. A
+rows (this plugin's dialog in `copy` mode) and, for local rows, the remotes
+listed inside the shell's own Copy to… dialog (see above). A
 copy stores a *new* session (fresh ids, root and descendants alike) and never
 touches the source — no cancel, no archive, a running agent keeps running:
 
