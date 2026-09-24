@@ -7,7 +7,9 @@ plugin owns the MCP forwarding itself — it holds private MCP SDK connections t
 Apple's Safari MCP server (`safaridriver --mcp`) and Google's
 `chrome-devtools-mcp`, and registers exactly the tools it wants. Nothing else
 reaches the model: no `mcp__server__tool` names, no raw server tools, no
-`dsh-mcp-client`. Host-only plugin, plain ESM JavaScript.
+`dsh-mcp-client`. Host half in plain ESM JavaScript; a small **browser half**
+(`src/client/index.tsx` → `lib/client.js`) renders the inline screenshots in
+the chat (see [Screenshots in the chat](#screenshots-in-the-chat)).
 
 ## Tools
 
@@ -178,6 +180,37 @@ Before this, the plugin echoed the server's success line as
 `chrome screenshot failed: Took a screenshot …` — the uninformative message
 seen in the tensatory session.
 
+### Screenshots in the chat
+
+Until 2026-09-24 expanding a `chrome_get_screenshot` / `safari_get_screenshot`
+card showed `{"type":"image","attachment":{"attachmentId":…}}` and no picture.
+The chat dispatches every tool card through the keyed `tool.call.toolview`
+slot; only `read_image` claims a key that renders images, and the generic card
+flattens non-text result blocks to JSON. The browser half registers that slot
+for the two inline-screenshot tools (`SCREENSHOT_TOOLS` in
+`src/client/index.tsx`): collapsed, the row is the tool's own result text as a
+summary (`Safari screenshot · s:8:0 · 780×1480 px · viewport · 82 kB png`);
+expanded, the capture at point size (device pixels ÷ 2 — the windows are
+retina), click for an in-page lightbox (fit ↔ 1:1, Escape closes; never
+`window.open`, which the Dock app's WKWebView loads into its only window),
+then the result text with its `NOTE:`s. The image is drawn with the
+session-authorized `loadImage` loader every toolview receives, because the
+shared `tool.call.images` gallery slot is `single` and owned by the
+`read_image` entry (same reasoning as `<private-plugin>`). Claiming a
+key suppresses the generic card for every shape of the tool, so the row also
+covers running, error, interrupted-turn and the file fallback (a model without
+image input gets `saved to <path>` — summary says `saved to file`).
+
+Build: `pnpm build` (esbuild, `build.mjs`; `pnpm watch` while editing;
+`pnpm typecheck`). `lib/` is gitignored: the bundle must exist when `dsh web`
+boots — a `dsh.client` package with a missing `lib/client.js` fails activation
+loudly, which `tools/install-plugins.sh` checks. Adding `dsh.client` to a
+package the live server already runs takes effect at the **next restart**
+(client-module metadata is cached per package until then); rebuilding
+`lib/client.js` afterwards hot-swaps the live GUI.
+`tests/client-row.test.mjs` loads the built bundle under a fake
+`window.__ModuleLoader__` and renders every shape.
+
 ## Failure reporting
 
 All curated tools share one wrapper (`explainFailure`, `FAILURE_HINTS` in
@@ -267,12 +300,14 @@ session's preset after `agent/created` and `recompose` keeps the same Agent
 
 Full config surface: top of `index.js`. Module code changes need a host
 restart (`dsh web` has module HMR disabled; only the patch file is
-live-reloaded).
+live-reloaded). The browser half needs `pnpm build` (or `pnpm watch`) before
+the server boots; a rebuilt `lib/client.js` hot-swaps a running GUI.
 
 ## Checks
 
 - `pnpm run check` — unit tests (`tests/`: environment remedies, the wait
-  engine) and the offline smoke: config, preflight messages, the 44
+  engine, the built chat row over every result shape — needs `pnpm build`
+  first) and the offline smoke: config, preflight messages, the 44
   registered tools per agent (child filter, disposal), window-id rules
   (numbering, most-recently-used default, lost-window bookkeeping,
   cross-session, browser mismatch), YouTube and geometry helpers, page-content

@@ -2,3 +2,4 @@
 allowBuilds:
   'chrome-devtools-mcp': true
   'sharp': true
+  'esbuild': true

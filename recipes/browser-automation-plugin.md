@@ -205,3 +205,78 @@ sections:["all","args"] tools:["chrome_*","safari_*"]`: does the
 `then` / `selector` show up in the args section, do the `pass windowId` and
 `does not belong` error groups vanish, and does `navigate → evaluate →
 screenshot` shorten.
+
+## Round four (2026-09-24): the screenshot card shows the picture
+
+Symptom: expanding a `chrome_get_screenshot` / `safari_get_screenshot` card in
+the chat showed `{"type":"image","attachment":{"attachmentId":"sha256:…"}}`
+as text and no image anywhere — even though the model saw the capture fine.
+
+Root cause (all in-tree, nothing wrong with the tool result):
+
+- The chat dispatches each tool card through the **keyed** slot
+  `tool.call.toolview` (`packages/client/ui-tool/src/client/contract/slots.ts`),
+  keyed by wire tool name. There is no "any tool that returns an image" path.
+- Only `read_image` claims a key that renders images
+  (`toolviews/read-image-row.tsx`). Every unclaimed tool falls to
+  `GenericToolCard`, which flattens non-text result blocks to JSON — the
+  in-tree test `ui-tool/tests/tool-row.client.spec.tsx` pins exactly that.
+- `browser-automation` was host-only, so nothing claimed those two keys.
+
+Fix: a browser half in the same package (`src/client/index.tsx` →
+`lib/client.js`, esbuild via `build.mjs` copied from `wait-tool`;
+`package.json` gains `exports["./client"]`, `dsh.client: { platform: web }`,
+`build`/`watch`/`typecheck` scripts and the `link:` client devDependencies).
+It registers `tool.call.toolview` for `chrome_get_screenshot` and
+`safari_get_screenshot` with one `ScreenshotRow`: collapsed = the tool's own
+result text as a `·`-joined summary; expanded = the image at device pixels ÷ 2
+through the `loadImage` loader every toolview receives, an in-page lightbox
+(fit ↔ 1:1; never `window.open` — the Dock app's WKWebView loads it into its
+only window), then the verbatim result text. The shared `tool.call.images`
+gallery slot is `single` and owned by the read_image entry (a second declarer
+throws at load), hence the own `<img>` — the same reasoning as
+`<private-plugin>`'s rows. Because claiming a key suppresses the
+generic card for every shape of that tool, the row covers running / ok /
+file fallback (`saved to <path>` when the model has no image input) / error /
+interrupted.
+
+Facts worth keeping:
+
+- **Takes effect at the next `dsh web` restart, not live**: client-module
+  package metadata — including the negative "not a client package" verdict —
+  is cached per Loader specifier until restart
+  (`docs/subsystems/client-modules.md`, "The scan"). That is also what made
+  it safe to build in the live-linked plugin directory. Afterwards a rebuilt
+  `lib/client.js` hot-swaps the live GUI (see
+  `client-bundle-rebuild-kills-pending-prompts.md`).
+- `lib/` is gitignored; a `dsh.client` package whose `lib/client.js` is
+  missing **fails activation loudly** at boot. `tools/install-plugins.sh`
+  refuses to install such a plugin, and the bootstrap builds plugins, but on a
+  machine that only pulls: `cd plugins/browser-automation && pnpm install &&
+  pnpm build` before restarting.
+- `pnpm install` in the plugin dir aborted with
+  `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`: its `node_modules` had been
+  created by pnpm's store **v10** and the machine now runs pnpm 11 (store
+  v11), so any install purges and reinstalls. `CI=true pnpm install
+  --no-frozen-lockfile` does it non-interactively (the flag because the
+  lockfile changed). The live host kept its loaded `sharp` /
+  `@modelcontextprotocol/sdk`; the chrome-devtools-mcp bin under
+  `node_modules` was missing for the ~2 s of the reinstall.
+- Verification without touching the live server: `tests/client-row.test.mjs`
+  loads the built bundle under a fake `window.__ModuleLoader__` with stub
+  primitives (React comes from the checkout through the linked
+  `ui-primitives` package), asserts the two registrations and renders every
+  shape; then a **throwaway home** — `/tmp/ba-home` holding a copy of one real
+  session's `session.v3.jsonl.zstd` plus the one attachment object it
+  references (`attachments/v1/objects/<2 hex>/<sha256>`; the store is
+  content-addressed, no index to copy) and a `settings.yaml` with just
+  `ui-onboarding.welcomeNoticeVersion`, an overlay inserting the plugin by
+  absolute path, `DSH_HOME=/tmp/ba-home node --import tsx/esm
+  apps/cli/src/bin.ts --profile web --patch /tmp/ba-overlay.yml --no-open
+  --port 3090` from the checkout. The index's `__DSH_BOOT__` graph listed
+  `tali-browser-automation/client.js`; in Chrome, the copied session's
+  "69 tool calls" fold expanded to 23 `Safari screenshot` rows, the first
+  opened to the real 390×740-pt image (blob URL from the session loader), and
+  the lightbox opened and closed on Escape. `Load earlier` had to be clicked
+  to the top first, and the settled turn's tool rows sit inside the
+  `N tool calls · M messages` fold button.

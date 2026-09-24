@@ -401,7 +401,13 @@ can reproduce or maintain it:
   the host-side wait engine (`waiting.mjs`; `wait` on evaluate / screenshot /
   navigate, `then` on navigate, selector/expression `*_wait_for`),
   `selector`/`text` targets for click/fill/hover, reopen-after-Chrome-restart
-  under the same window id, most-recently-used window default.
+  under the same window id, most-recently-used window default. "Round four"
+  (2026-09-24): the plugin's first **browser half** — a `tool.call.toolview`
+  row for `chrome_get_screenshot` / `safari_get_screenshot` so the chat card
+  shows the capture instead of the image block's JSON (keyed slot, single-owner
+  `tool.call.images`, own `<img>` via `loadImage`), effective at the next
+  restart; the pnpm store v10→v11 purge, and the throwaway-home + copied
+  session/attachment method for seeing a real recorded row.
 - `chat-title-plugin.md` — the agent as reviewer of the automatic chat title
   (`chat-title` plugin, host-only): a `rename_chat` tool over
   `ctx.sessionTitle.rename` in the titler's style (read from the
