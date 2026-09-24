@@ -2,7 +2,7 @@
 
 **Status (2026-09-23): milestone 1 done** — a self-hosting `DSH.app` that
 carries Node, the fork, and all 22 plugins, runs its own server, and ships in
-a ~280 MB DMG; ad-hoc signed. Milestones 2 (first-run dialog offering
+an 88 MB DMG (268 MB installed); ad-hoc signed. Milestones 2 (first-run dialog offering
 Tailscale / STP / Chrome / afm) and 3 (in-app update from GitHub Releases)
 are designed below but not built.
 
@@ -41,9 +41,9 @@ DSH.app/Contents/
 ```
 
 Build: `pnpm build-app` (`tools/build-app.sh` → the three scripts in
-`tools/bundle/`). ~1.5 min warm; the DMG step alone is ~5 min (ULMO/APFS).
-Result on 2026-09-23: `DSH.app` 797 MB on disk, `DSH-0.1.6-alpha.2-<sha>.dmg`
-280 MB, cold start to a served page ≈ 3–5 s.
+`tools/bundle/`). ~1.5 min warm; the DMG step alone is 1.5–5 min (ULMO/APFS).
+Result on 2026-09-23 after pruning: `DSH.app` 268 MB on disk,
+`DSH-0.1.6-alpha.2-<sha>.dmg` 88 MB, cold start to a served page ≈ 3–6 s.
 
 ### Runtime behaviour (`EmbeddedServer.swift`)
 
@@ -140,7 +140,8 @@ This is where the traps were.
 Reuses `dock-app.mjs`'s `buildDockApp()` (swiftc via xcrun; every file in
 `Sources/` is one module, so `EmbeddedServer.swift` just joins) and
 `infoPlist()`, then adds `LSMultipleInstancesProhibited`. Node addons,
-`bin/node`, `rg`, `spawn-helper` (219 Mach-O files) are signed individually
+`bin/node`, `rg`, `spawn-helper` (9 Mach-O files after pruning; 219 with the
+LibreOffice engine) are signed individually
 before the bundle — a deep signature over unsigned Mach-O files is rejected by
 the hardened runtime once a real identity is used. `--sign -` (default) is
 ad-hoc: `codesign --verify --deep --strict` passes, `spctl --assess` says
@@ -175,11 +176,27 @@ the misleading `create failed - Directory not empty` even for a 3-file folder
 
 ## Size
 
-797 MB installed / 280 MB DMG. The big items: `@deepseek-ai/libreoffice-kit-darwin-arm64`
-261 MB (office → PDF; a hard dependency of the web bundle, candidate for an
-on-demand download), node 116 MB, three.js 35 MB (wolfram Graphics3D), node-pty
-28 MB (contains other platforms' prebuilds — upstream's `runtime-file-policy.ts`
-strips them), OpenTelemetry 29 MB. Nothing was pruned yet.
+Unpruned: 797 MB installed / 280 MB DMG (the tree pnpm produces is 640 MB +
+node 116 MB). `build-app.mjs prune()` (skip with `--no-prune`) takes it to
+**268 MB / 88 MB**, measured per category before it was written:
+
+| Dropped | MB | Note |
+|---|---|---|
+| `@deepseek-ai/libreoffice-kit-darwin-arm64` | 259 | native Office → PDF engine; `--with-office` keeps it. `dsh-office-to-pdf` creates its converter lazily, so boot is unaffected and only an Office preview fails |
+| `*.map` | 46 | |
+| `*.ts` sources (not `.d.ts`) | 42 | vendored cordis/cosmokit ship `src/` beside `lib/`; zod/openai/anthropic ship theirs |
+| `*.d.ts`/`.d.mts`/`.d.cts` | 41 | |
+| three.js `examples/` + `src/` | 29 | the wolfram client bundle inlines its own copy |
+| node-pty other-platform prebuilds | 24 | win32-x64/arm64 12 MB each |
+| `strip -x` on `bin/node` | 24 | 121 → 97 MB; the stripped binary is SIGKILLed until re-signed, which the signing step does anyway |
+| duplicate `sharp` + libvips under `tali-browser-automation/node_modules` | 19 | the plugin pinned `0.35.3` while the fork resolved `^0.35.3` → `0.35.4`; pin relaxed to the range |
+| test dirs, `.github`, README/CHANGELOG-style `*.md`, `.tsbuildinfo` | ~15 | |
+
+**Not** dropped: `*.md` wholesale — `SKILL.md`, the cordis preset guides and
+chrome-devtools-mcp's 250 issue-description files are runtime data. What is
+left: node 93 MB, `@deepseek-ai/*` ~70 MB (web frontend dist 18 MB), the LLM
+SDKs (openai, anthropic, google/genai ~30 MB), OpenTelemetry 29 MB, node-pty
+4 MB. Compressing node further would need a custom build.
 
 ## Known gaps / next
 

@@ -415,8 +415,10 @@ can reproduce or maintain it:
   Swift wrapper rather than upstream's Electron shell; `pnpm build-app`
   (`tools/bundle/`: sha256-verified Node 24 LTS, `stage-dsh.mjs` packing all
   304 fork packages + the plugins of `plugins.txt` and installing with
-  pnpm-workspace.yaml overrides, `build-app.mjs` signing 219 Mach-O files
-  ad-hoc and running hdiutil); `EmbeddedServer.swift` (profile `app` created/
+  pnpm-workspace.yaml overrides, `build-app.mjs` pruning 455 MB — declarations,
+  maps, `.ts` sources, other-platform prebuilds, the 259 MB LibreOffice engine
+  unless `--with-office` — then signing ad-hoc and running hdiutil: 268 MB app,
+  88 MB DMG); `EmbeddedServer.swift` (profile `app` created/
   merged from the bundled template, `zsh -lc` spawn, token URL from stdout,
   SIGTERM → quit) and the `app-lifeline` plugin against orphaned servers; the
   traps — `pnpm deploy` drops `workspace:^` peers, pnpm 12 ignores
