@@ -90,8 +90,14 @@ async function main() {
       subjects || '- (no commits since the previous release)',
     ].join('\n')
   }
+  // The tag must point at the commit that was built, which `gh` only does with
+  // --target; and that commit must already be on the remote (the run is on
+  // whatever branch is checked out, not necessarily the default one).
+  const head = await sh('git', ['rev-parse', 'HEAD'])
+  const onRemote = await sh('git', ['branch', '-r', '--contains', head]).catch(() => '')
+  if (!onRemote && !DRY) throw new Error(`HEAD ${head.slice(0, 7)} is not on any remote branch; git push first so the release tag can point at it`)
   const title = `DSH Canary ${manifest.version}`
-  const ghArgs = ['release', 'create', tag, dmg, shaFile, '--repo', REPO, '--title', title, '--notes', notes, '--latest', ...(DRAFT ? ['--draft'] : [])]
+  const ghArgs = ['release', 'create', tag, dmg, shaFile, '--repo', REPO, '--target', head, '--title', title, '--notes', notes, '--latest', ...(DRAFT ? ['--draft'] : [])]
   if (DRY) {
     log(`dry run — would execute:\n  gh ${ghArgs.map(a => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')}`)
     return
