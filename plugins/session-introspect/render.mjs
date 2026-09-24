@@ -91,7 +91,7 @@ export function renderFind(value) {
     ]),
     details ? ['l', 'l', 'l', 'l', 'l', 'r', 'r', 'r', 'r', 'l', 'l'] : ['l', 'l', 'l', 'l', 'l'],
   )]
-  lines.push(`${value.total} session${value.total === 1 ? '' : 's'}${value.truncated ? `; ${value.truncated} more not shown — narrow with query/workspace/since or raise limit` : ''}.`)
+  lines.push(`${value.total} session${value.total === 1 ? '' : 's'}${value.remote ? ` on ${value.remote}` : ''}${value.truncated ? `; ${value.truncated} more not shown — narrow with query/workspace/since or raise limit` : ''}.`)
   if (value.hint) lines.push(value.hint)
   return lines.join('\n')
 }
@@ -99,7 +99,7 @@ export function renderFind(value) {
 // --------------------------------------------------------------- outline
 
 function sessionLine(s) {
-  const bits = [shortId(s.id), `${s.workspace}/${s.title ?? '(untitled)'}`]
+  const bits = [shortId(s.id), `${s.remote ? `${s.remote}:` : ''}${s.workspace}/${s.title ?? '(untitled)'}`]
   if (s.cwd) bits.push(`cwd ${s.cwd}`)
   if (s.model) bits.push(s.model)
   bits.push(`${s.events} events`, `${s.turns} turns`, `${s.calls} calls${s.errors ? ` (${s.errors} ✗)` : ''}`)
@@ -204,7 +204,7 @@ export function renderStats(value) {
   const one = s.sessions === 1 && value.sessions?.[0]
   const skipped = value.skipped?.length ? ` (${value.skipped.length} more skipped, see below)` : ''
   const scopeLabel = one ? `${shortId(one.id)} ${one.workspace}/${one.title ?? '(untitled)'}` : `${s.sessions} sessions read${skipped}${s.from ? `, created ${fmtTime(s.from)} → ${fmtTime(s.to)}` : ''}`
-  lines.push(`${scopeLabel} · ${s.calls} calls · ${s.errors} errors${s.tools?.length ? ` · tools ${s.tools.join(', ')}` : ''}`)
+  lines.push(`${value.remote ? `${value.remote}: ` : ''}${scopeLabel} · ${s.calls} calls · ${s.errors} errors${s.tools?.length ? ` · tools ${s.tools.join(', ')}` : ''}`)
   if (value.tools.length === 0) { lines.push('No tool calls matched.'); return lines.join('\n') }
   const withAvail = value.tools.some(t => t.available !== null && t.available !== undefined)
   const multi = s.sessions > 1
@@ -288,7 +288,7 @@ export function renderStats(value) {
 // ---------------------------------------------------------------- export
 
 export function renderExport(value) {
-  const lines = [`${value.rows.length} row${value.rows.length === 1 ? '' : 's'} (${value.kinds.join(', ')}) from ${value.sessions.length} session${value.sessions.length === 1 ? '' : 's'}${value.tools?.length ? ` · tools ${value.tools.join(', ')}` : ''}${value.truncated ? ` — truncated at limit ${value.limit}; use out_file or narrow` : ''}`]
+  const lines = [`${value.rows.length} row${value.rows.length === 1 ? '' : 's'} (${value.kinds.join(', ')}) from ${value.sessions.length} session${value.sessions.length === 1 ? '' : 's'}${value.remote ? ` on ${value.remote}` : ''}${value.tools?.length ? ` · tools ${value.tools.join(', ')}` : ''}${value.truncated ? ` — truncated at limit ${value.limit}; use out_file or narrow` : ''}`]
   for (const r of value.rows) {
     const where = `${shortId(r.session)} [${r.seq}]${r.turn !== null && r.turn !== undefined ? ` T${r.turn}` : ''}`
     if (r.kind === 'call') {
@@ -305,7 +305,7 @@ export function renderExport(value) {
 // ------------------------------------------------------------------ grep
 
 export function renderGrep(value) {
-  const lines = [`${value.hits.length} hit${value.hits.length === 1 ? '' : 's'} for /${value.pattern}/${value.flags ?? ''} in ${value.sessions.length} session${value.sessions.length === 1 ? '' : 's'}${value.truncated ? ` (showing first ${value.hits.length}; narrow or raise limit)` : ''}`]
+  const lines = [`${value.hits.length} hit${value.hits.length === 1 ? '' : 's'} for /${value.pattern}/${value.flags ?? ''} in ${value.sessions.length} session${value.sessions.length === 1 ? '' : 's'}${value.remote ? ` on ${value.remote}` : ''}${value.truncated ? ` (showing first ${value.hits.length}; narrow or raise limit)` : ''}`]
   const multi = value.sessions.length + (value.skipped?.length ?? 0) > 1
   let lastSession = null
   for (const h of value.hits) {

@@ -395,8 +395,8 @@ DSH facts the implementation depends on (verified in the checkout, 2026-09-16):
 - A client half (e.g. a right-click "inspect in new session" on the sidebar).
   The `@session` mention already gives users a picker; a follow-up could make
   its pick paste a `transcript_find`-ready id.
-- Cross-machine transcripts (remote workspaces) — out of scope until
-  `dsh-remote-workspaces` settles.
+- ~~Cross-machine transcripts (remote workspaces) — out of scope until
+  `dsh-remote-workspaces` settles.~~ Done in §2.8 without depending on it.
 
 ## 2.7 Round two: analysis-grade additions (2026-09-23)
 
@@ -427,6 +427,86 @@ Caveats: `split_at`/`since`/`until` bracket by session **creation** time, so
 a long-lived session straddling the date lands on one side whole. Host
 module edits need a `dsh web` restart to go live (a patch-row reload re-runs
 `apply` from Node's module cache).
+
+## 2.8 Round three: transcripts of another DSH instance (2026-09-24)
+
+Goal: `transcript_* remote:"studio/dsh/alice"` reads the sessions of a DSH
+instance on another tailnet machine — with **no configuration on either
+side**, and the plugin staying a single standalone package (no dependency on
+the fork, on `dsh-remote-workspaces`, or on `dsh-tailscale-remote` code).
+
+### 2.8.1 Survey: what a remote already exposes, and what was chosen
+
+The plugin's whole host dependency is three `ctx.sessionQuery` calls
+(`listSessions`, `readSession`, `readTitleSnapshots`); everything else is
+pure. Two ways to satisfy them from another machine:
+
+| option | mechanism | verdict |
+|---|---|---|
+| A — stock routes | `POST /api/session/list` (Typert envelope; items carry `updatedAt` but **no `createdAt`**, and cwd-less cold sessions are dropped) + `GET /api/session.export?sessionId=` (upstream, in the web profile; a streamed ZIP whose first entry `session.v3.jsonl` is exactly `readSession`'s data — followed by every referenced image, so a client must read the first entry and abort) | works against any DSH, nothing to install remotely; but approximate listing, a ZIP-streaming client, and attachments on the wire |
+| **B — the plugin serves itself** | `ctx.connection.fetch.register` of three exact GET routes under `/api/transcript/v1` (`capabilities`, `sessions`, `session?id=`) that serialize the plugin's own local source; the tool half consumes them | chosen: exact data (`createdAt`, `live`, titles), no attachments, gzip, an `api` handshake so plugin skew fails loudly; the price is “the plugin must be installed there”, which `install-plugins.sh` already guarantees on our instances |
+
+Addressing: no `remotes:` map and no `remoteSuffix` — the agent types what
+it would type into a browser. `studio` = machine `studio`, mount `/dsh`;
+`studio/dsh/alice` = the per-user instance on a shared machine (one Serve path per
+macOS user); `host.tail1234.ts.net/dsh`, `127.0.0.1:3082/dsh/a`, URLs verbatim.
+
+### 2.8.2 The four hops of `studio/dsh/alice`, verified
+
+| hop | fact | how it was established |
+|---|---|---|
+| `studio` → address | MagicDNS adds the tailnet search domain to the system resolver; Node's `dns.lookup` is `getaddrinfo`, so it resolves like `ping studio` | known behaviour; the plugin does not rely on it anyway (next row) |
+| **TLS** | Serve's Let's Encrypt cert names `studio.<MagicDNSSuffix>`; dialling `https://studio/` fails verification (`ERR_TLS_CERT_ALTNAME_INVALID`). So a bare label is turned into the FQDN from `tailscale status --json` (`Peer[*].HostName` / `DNSName`, `Self`, `MagicDNSSuffix`; CLI on `PATH`, else `/Applications/Tailscale.app/Contents/MacOS/Tailscale`; cached 60 s). This is the **one** thing that stopped “just the machine name” from working — and it needs no config, only the local daemon | inspected the JSON on this Mac (top-level `MagicDNSSuffix`, `Self.DNSName` with trailing dot, 20 peers with `HostName`/`DNSName`/`Online`); `dns.reverse` was rejected (Node's c-ares does not see macOS's scoped Tailscale resolver reliably); relaxing `checkServerIdentity` was not considered |
+| `/dsh/alice` → instance | the Serve mount; Serve strips it, so the routes are registered at `/api/transcript/v1/…` and requested at `<fqdn>/dsh/alice/api/transcript/v1/…` | `dsh-tailscale-remote` path-strip facts (`tailscale-remote-plugin.md`) |
+| **admission, host to host** | Serve on the remote identifies the *calling node's user* and injects `Tailscale-User-Login`; the remote's proxy admits allowlisted logins (`proxy.mjs identityOf`) and forwards with DSH's own session cookie it bootstraps from the launch token. The client therefore sends **no credentials** | measured 2026-09-24 from the laptop: `curl -sI https://<remote>.<suffix>/dsh/<user>/api/session.export?sessionId=nonexistent` → `HTTP/2 404` from DSH itself (`dsh-remote-workspaces` had listed exactly this path as “not yet exercised”) |
+
+Consequences spelled out in the errors: a **tagged** node carries no login
+(always 401); another user's instance (`studio/dsh/bob`) needs *that*
+instance's allowlist; a machine not on the tailnet lists the known ones.
+
+### 2.8.3 What was built
+
+- `source.mjs` — the `SessionSource` seam (`list`, `read`, `key`, `remote`,
+  `concurrency`): `createLocalSource(ctx)` = the old resolver's `sessionQuery`
+  + cheap-title code; `createRemoteSource(client)` = the same two calls over
+  HTTP. `serve.mjs` serializes the local source, so the wire shape *is*
+  `list()`'s shape and both machines run one code path.
+- `remote.mjs` — `parseRemoteSpec`, `createTailnet` (status JSON, cached),
+  `resolveRemote` (loopback → http, else https), `createRemoteClient`
+  (global `fetch`, 20 s timeout, `capabilities` probed once per remote,
+  specific messages for 401/403/404/3xx/non-JSON/api mismatch).
+- `resolve.mjs` — takes a source per call (`resolver.source(args.remote)`);
+  caches keyed `(source, id)`; `self`/omitted refused on a remote; `scope:
+  workspace` local-only; corpus reads run `source.concurrency` (4) wide on a
+  remote, 1 locally; remote listings cached 5 s.
+- `tools.mjs` — `remote` on all seven tools; `remote` in every canonical
+  value; labels `<remote>:<workspace>/<title>` (`sessionName`, `sessionLine`,
+  find/stats/grep/export headers).
+- `index.js` — `serve`, `remoteTimeoutMs`, `remoteConcurrency`,
+  `tailscaleBinary` config; routes registered inside `ctx.inject(['connection'])`
+  so headless compositions keep the tools.
+
+### 2.8.4 Verification
+
+`pnpm check`: 40 tests. New in `tests/remote.test.mjs`: spec parsing; FQDN
+resolution against a fake status JSON (case-insensitive `HostName`, DNS-label
+fallback, offline flag, unknown machine → known list, daemon missing/stopped);
+and a **loopback two-instance loop** — `apply()` on fake instance A
+(fixtures, one live session), its captured routes served by `node:http` under
+`/dsh/a` with the prefix stripped like Serve; instance B's tools with
+`remote: "127.0.0.1:<port>/dsh/a"` run find / outline / event / stats `*` /
+grep / export, labels and `remote` fields checked, same-id sessions on both
+instances kept apart by the per-source caches, `self` refused. Failure paths:
+no plugin (404 on `capabilities`), refusing remote (401 text), unreachable
+port, api mismatch; gzip only when accepted (Node's `fetch` inflates but keeps
+`Content-Encoding` — the client decides by the gzip magic bytes, which was the
+one bug the loop caught).
+
+Not yet measured: a real `dsh web` on both ends over the tailnet. The trial
+plan is the headless/throwaway-home method of §2.5a with this plugin on both
+instances, then `transcript_find remote:"<machine>/dsh/<user>"` from a session
+on one of them; the live web profile picks the change up at its next restart
+(host module).
 
 ## 3. Findings from the first corpus-wide run
 

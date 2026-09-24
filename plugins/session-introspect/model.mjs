@@ -134,7 +134,7 @@ function endedOf(reason) {
 /**
  * Build the normalized model of one session.
  * @param {{ session: any, events: any[] }} snapshot - `readSession()` result (header + complete raw log)
- * @param {{ live?: boolean, title?: string }} [meta] - facts the caller knows from the listing
+ * @param {{ live?: boolean, title?: string, remote?: string | null }} [meta] - facts the caller knows from the listing (`remote` = the instance the log came from, null/absent = local)
  */
 export function buildModel(snapshot, meta = {}) {
   const header = snapshot.session ?? {}
@@ -345,6 +345,7 @@ export function buildModel(snapshot, meta = {}) {
     title: title ?? null,
     createdAt: header.createdAt ?? null,
     live: meta.live === true,
+    remote: meta.remote ?? null,
     model,
     toolsAvailable: [...toolsAvailable.keys()].sort(),
     toolFirstSeen: Object.fromEntries(toolsAvailable),
@@ -381,6 +382,7 @@ export function sessionSummary(m) {
     cwd: m.cwd ?? null,
     createdAt: m.createdAt,
     live: m.live,
+    remote: m.remote ?? null,
     model: m.model?.model ?? null,
     provider: m.model?.provider ?? null,
     events: m.stats.events,
@@ -391,9 +393,9 @@ export function sessionSummary(m) {
   }
 }
 
-/** `workspace/title` label of a model or listing entry. */
+/** `workspace/title` label of a model or listing entry, prefixed `remote:` when the session lives on another instance. */
 export function sessionName(m) {
-  return `${m.workspace}/${m.title ?? '(untitled)'}`
+  return `${m.remote ? `${m.remote}:` : ''}${m.workspace}/${m.title ?? '(untitled)'}`
 }
 
 /**

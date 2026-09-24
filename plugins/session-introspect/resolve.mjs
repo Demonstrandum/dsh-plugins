@@ -1,5 +1,7 @@
 /**
- * resolve.mjs — session addressing and corpus access over `ctx.sessionQuery`.
+ * resolve.mjs — session addressing and corpus access over a `SessionSource`
+ * (source.mjs): the local instance's `ctx.sessionQuery`, or another DSH
+ * instance reached through remote.mjs when a tool is given `remote`.
  *
  * Accepted `session` spellings (one resolver for every tool):
  *   tensatory/interval-slider-proto   <workspace basename>/<title>   (exact → prefix → substring, case-insensitive)
@@ -7,100 +9,96 @@
  *   session-2b81 | 2b810855           id or id prefix
  *   @[label](dsh-session:…) | dsh-session:…   canonical mention (base64url id)
  *   latest:tensatory                  newest session of a workspace
- *   self | (omitted)                  the calling agent's own session
+ *   self | (omitted)                  the calling agent's own session (local only)
  *
- * Titles are read the cheap way first — the live projection registry for an
- * attached session, the persisted projection cache (storages/session_projcache)
- * for a cold one — and folded from the full log (`readTitleSnapshots`) only for
- * sessions no projection can answer. Nothing here touches ~/.dsh paths.
+ * `remote` spellings: see remote.mjs (`studio`, `studio/dsh/alice`, host:port, URL).
+ *
+ * Titles are read the cheap way first (the source does that); the snapshot
+ * cache keeps one decoded log per (source, id) for a while. Nothing here
+ * touches ~/.dsh paths.
  */
 
 import { buildModel, workspaceOf } from './model.mjs'
 import { IntrospectError } from './output.mjs'
+import { createRemoteClient, parseRemoteSpec, resolveRemote } from './remote.mjs'
+import { createRemoteSource } from './source.mjs'
 
 const TITLE_TTL_LIVE_MS = 15_000
 const TITLE_TTL_COLD_MS = 10 * 60_000
 const SNAPSHOT_TTL_LIVE_MS = 10_000
 const SNAPSHOT_TTL_COLD_MS = 5 * 60_000
+const LIST_TTL_REMOTE_MS = 5_000
 
 /**
- * @param {any} ctx - plugin Context with `sessionQuery`
- * @param {{ scope: 'all' | 'workspace', trace?: (line: object) => void }} options
+ * @param {object} deps
+ * @param {ReturnType<import('./source.mjs').createLocalSource>} deps.local
+ * @param {ReturnType<import('./remote.mjs').createTailnet>} [deps.tailnet] - MagicDNS lookup for bare machine names
+ * @param {{ scope: 'all' | 'workspace', remoteTimeoutMs?: number, remoteConcurrency?: number, fetch?: typeof fetch, trace?: (line: object) => void }} options
  */
-export function createResolver(ctx, options) {
+export function createResolver({ local, tailnet }, options) {
   const trace = options.trace ?? (() => {})
-  const titles = new Map() // id → { title, at, live }
-  const snapshots = new Map() // id → { snapshot, at, live }
+  const titles = new Map() // `${source.key}\0${id}` → { title, at, live }
+  const snapshots = new Map() // `${source.key}\0${id}` → { model, at, live }
+  const remotes = new Map() // remote key → source
+  const remoteLists = new Map() // remote key → { at, entries }
+  const k = (source, id) => `${source.key}\0${id}`
 
-  /** Cheap title: live projection → persisted projection cache → predecessor checkpoint. */
-  function cheapTitle(record) {
-    const id = record.header.id
-    try {
-      const sessions = ctx.get('sessions')
-      const projections = ctx.get('sessionProjections')
-      const attached = sessions?.get(id)
-      if (attached !== undefined && projections !== undefined) {
-        const t = projections.snapshot(attached, ['title'])?.values?.title
-        if (t) return t.title ?? (typeof t === 'string' ? t : undefined)
-      }
-      const cache = ctx.get('sessionProjectionCache')
-      if (cache !== undefined && record.header.isSeeded !== true) {
-        const snap = cache.cachedSnapshot(record.header, 0, ['title']) ?? cache.cachedPredecessorTitle?.(record.header, 0)
-        const t = snap?.values?.title
-        if (t) return t.title ?? (typeof t === 'string' ? t : undefined)
-      }
-    } catch (error) {
-      trace({ event: 'cheap-title-failed', id, error: String(error) })
+  /**
+   * The source a tool call addresses: the local instance, or the remote named
+   * by `remote` (resolved once per spelling; the client probes capabilities lazily).
+   * @param {unknown} remoteSpec
+   * @param {AbortSignal} [signal]
+   */
+  async function source(remoteSpec, signal) {
+    const parsed = parseRemoteSpec(remoteSpec)
+    if (parsed === null) return local
+    const target = await resolveRemote(parsed, tailnet ?? { resolveHost: () => { throw new IntrospectError(`remote "${String(remoteSpec)}": bare machine names need Tailscale; this composition has no tailnet lookup.`) } })
+    let src = remotes.get(target.key)
+    if (!src) {
+      const client = createRemoteClient(target, { timeoutMs: options.remoteTimeoutMs, fetch: options.fetch, trace })
+      src = createRemoteSource(client, { concurrency: options.remoteConcurrency })
+      remotes.set(target.key, src)
+      trace({ event: 'remote', key: target.key, baseUrl: target.baseUrl })
     }
-    return undefined
-  }
-
-  /** Titles for records, folding from the log only where needed. */
-  async function titlesFor(records, signal) {
-    const now = Date.now()
-    const out = new Map()
-    const missing = []
-    for (const record of records) {
-      const id = record.header.id
-      const cached = titles.get(id)
-      if (cached && now - cached.at < (cached.live ? TITLE_TTL_LIVE_MS : TITLE_TTL_COLD_MS)) { out.set(id, cached.title); continue }
-      const cheap = cheapTitle(record)
-      if (cheap !== undefined) { titles.set(id, { title: cheap, at: now, live: record.live }); out.set(id, cheap); continue }
-      missing.push(record)
-    }
-    if (missing.length > 0) {
-      trace({ event: 'title-fold', count: missing.length })
-      const results = await ctx.sessionQuery.readTitleSnapshots(missing.map(r => r.header.id), signal)
-      for (const result of results) {
-        const record = missing.find(r => r.header.id === result.sessionId)
-        const title = result.status === 'fulfilled' ? (result.value.title?.title ?? null) : null
-        titles.set(result.sessionId, { title, at: now, live: record?.live ?? false })
-        out.set(result.sessionId, title)
-      }
-    }
-    return out
+    signal?.throwIfAborted()
+    return src
   }
 
   /**
-   * Every visible session as `{ record, id, cwd, workspace, title, createdAt, live }`, newest first.
+   * Every visible session of a source as `{ record, id, cwd, workspace, title, createdAt, live, parent, depth, source, remote }`, newest first.
+   * @param {any} src
    * @param {{ callerCwd?: string }} [opts]
    */
-  async function listAll(opts = {}, signal) {
-    let records = await ctx.sessionQuery.listSessions(signal)
-    if (options.scope === 'workspace') {
-      records = records.filter(r => r.header.cwd !== undefined && r.header.cwd === opts.callerCwd)
+  async function listAll(src, opts = {}, signal) {
+    const now = Date.now()
+    let entries
+    if (src.remote !== null) {
+      const cached = remoteLists.get(src.key)
+      if (cached && now - cached.at < LIST_TTL_REMOTE_MS) entries = cached.entries
+      else { entries = await src.list(signal); remoteLists.set(src.key, { at: Date.now(), entries }) }
+    } else {
+      const known = (id) => {
+        const cached = titles.get(k(src, id))
+        return cached && now - cached.at < (cached.live ? TITLE_TTL_LIVE_MS : TITLE_TTL_COLD_MS) ? cached.title : undefined
+      }
+      entries = await src.list(signal, { known })
     }
-    const titleMap = await titlesFor(records, signal)
-    return records.map(record => ({
-      record,
-      id: record.header.id,
-      cwd: record.header.cwd,
-      workspace: workspaceOf(record.header.cwd),
-      title: titleMap.get(record.header.id) ?? null,
-      createdAt: record.header.createdAt,
-      live: record.live === true,
-      parent: record.header.parentSession ?? null,
-      depth: record.header.delegationDepth ?? 0,
+    if (options.scope === 'workspace' && src.remote === null) {
+      entries = entries.filter(e => e.cwd !== undefined && e.cwd === opts.callerCwd)
+    }
+    for (const e of entries) titles.set(k(src, e.id), { title: e.title ?? null, at: now, live: e.live })
+    return entries.map(e => ({
+      record: { header: e.header, live: e.live },
+      id: e.id,
+      cwd: e.cwd,
+      workspace: workspaceOf(e.cwd),
+      title: e.title ?? null,
+      createdAt: e.createdAt,
+      live: e.live === true,
+      parent: e.parent ?? null,
+      depth: e.depth ?? 0,
+      source: src,
+      remote: src.remote,
     })).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
   }
 
@@ -108,15 +106,17 @@ export function createResolver(ctx, options) {
   function callerCwd(exec) { return exec?.agent?.session?.header?.cwd }
 
   /**
-   * Resolve one `session` spec to a listing entry.
+   * Resolve one `session` spec to a listing entry of `src`.
    * @returns {Promise<Awaited<ReturnType<typeof listAll>>[number]>}
    */
-  async function resolve(spec, exec, signal) {
+  async function resolve(src, spec, exec, signal) {
     const raw = spec === undefined || spec === null ? '' : String(spec).trim()
-    const all = await listAll({ callerCwd: callerCwd(exec) }, signal)
+    const all = await listAll(src, { callerCwd: callerCwd(exec) }, signal)
     const byId = (id) => all.find(e => e.id === id)
+    const where = src.remote === null ? '' : ` on ${src.remote}`
 
     if (raw === '' || raw === 'self' || raw === 'me') {
+      if (src.remote !== null) throw new IntrospectError(`No calling session${where}: pass session explicitly (transcript_find remote:"${src.remote}" lists them).`)
       const id = callerId(exec)
       const me = id ? byId(id) : undefined
       if (!me) throw new IntrospectError('No calling session to inspect; pass session explicitly.')
@@ -128,7 +128,7 @@ export function createResolver(ctx, options) {
     if (mention) {
       const id = Buffer.from(mention[1], 'base64url').toString('utf8')
       const hit = byId(id)
-      if (!hit) throw new IntrospectError(`Mention refers to session "${id}", which is not visible.`)
+      if (!hit) throw new IntrospectError(`Mention refers to session "${id}", which is not visible${where}.`)
       return hit
     }
 
@@ -137,9 +137,9 @@ export function createResolver(ctx, options) {
     if (latest) {
       const ws = (latest[1] ?? '').trim().toLowerCase()
       const pool = ws === '' ? all : all.filter(e => e.workspace.toLowerCase() === ws)
-      const me = callerId(exec)
+      const me = src.remote === null ? callerId(exec) : undefined
       const pick = pool.find(e => e.id !== me) ?? pool[0]
-      if (!pick) throw new IntrospectError(`No sessions in workspace "${ws}".`, { hint: `Known workspaces: ${workspaces(all).join(', ')}.` })
+      if (!pick) throw new IntrospectError(`No sessions in workspace "${ws}"${where}.`, { hint: `Known workspaces: ${workspaces(all).join(', ')}.` })
       return pick
     }
 
@@ -157,7 +157,7 @@ export function createResolver(ctx, options) {
     const slash = raw.indexOf('/')
     if (slash > 0) { ws = raw.slice(0, slash).trim().toLowerCase(); titleQ = raw.slice(slash + 1).trim() }
     const pool = ws === null ? all : all.filter(e => e.workspace.toLowerCase() === ws)
-    if (ws !== null && pool.length === 0) throw new IntrospectError(`No workspace named "${ws}".`, { hint: `Known workspaces: ${workspaces(all).join(', ')}.` })
+    if (ws !== null && pool.length === 0) throw new IntrospectError(`No workspace named "${ws}"${where}.`, { hint: `Known workspaces: ${workspaces(all).join(', ')}.` })
     const q = titleQ.toLowerCase()
     const titled = pool.filter(e => e.title)
     const tiers = [
@@ -170,15 +170,15 @@ export function createResolver(ctx, options) {
       if (tier.length === 1) return tier[0]
       if (tier.length > 1) throw ambiguous(raw, tier)
     }
-    throw new IntrospectError(`No session matched "${raw}".`, { hint: `Use transcript_find to list sessions (workspaces: ${workspaces(pool.length ? pool : all).join(', ')}).` })
+    throw new IntrospectError(`No session matched "${raw}"${where}.`, { hint: `Use transcript_find${src.remote === null ? '' : ` remote:"${src.remote}"`} to list sessions (workspaces: ${workspaces(pool.length ? pool : all).join(', ')}).` })
   }
 
   /**
    * Resolve a `sessions` selector for corpus-wide tools: `"*"`, `"<ws>/*"`,
-   * one spec, or an array of specs. `since` filters by createdAt.
+   * one spec, or an array of specs. `since` / `until` filter by createdAt.
    */
-  async function select(selector, exec, { since, until } = {}, signal) {
-    const all = await listAll({ callerCwd: callerCwd(exec) }, signal)
+  async function select(src, selector, exec, { since, until } = {}, signal) {
+    const all = await listAll(src, { callerCwd: callerCwd(exec) }, signal)
     const sinceMs = parseSince(since)
     const untilMs = parseSince(until, 'until')
     if (sinceMs !== null && untilMs !== null && untilMs <= sinceMs) throw new IntrospectError(`until (${new Date(untilMs).toISOString()}) must be later than since (${new Date(sinceMs).toISOString()}).`)
@@ -193,54 +193,67 @@ export function createResolver(ctx, options) {
       if (wsGlob) {
         const ws = wsGlob[1].toLowerCase()
         const hits = all.filter(e => e.workspace.toLowerCase() === ws && inWindow(e))
-        if (hits.length === 0 && !all.some(e => e.workspace.toLowerCase() === ws)) throw new IntrospectError(`No workspace named "${ws}".`, { hint: `Known workspaces: ${workspaces(all).join(', ')}.` })
+        if (hits.length === 0 && !all.some(e => e.workspace.toLowerCase() === ws)) throw new IntrospectError(`No workspace named "${ws}"${src.remote === null ? '' : ` on ${src.remote}`}.`, { hint: `Known workspaces: ${workspaces(all).join(', ')}.` })
         for (const e of hits) out.set(e.id, e)
         continue
       }
-      const one = await resolve(s, exec, signal)
+      const one = await resolve(src, s, exec, signal)
       out.set(one.id, one)
     }
     return [...out.values()]
   }
 
-  /** Read (and normalize) one session, cached briefly. */
+  /** Read (and normalize) one session of its source, cached briefly. */
   async function model(entry, signal) {
     const now = Date.now()
-    const cached = snapshots.get(entry.id)
+    const key = k(entry.source, entry.id)
+    const cached = snapshots.get(key)
     if (cached && now - cached.at < (cached.live ? SNAPSHOT_TTL_LIVE_MS : SNAPSHOT_TTL_COLD_MS) && cached.live === entry.live) {
       return cached.model
     }
     signal?.throwIfAborted()
     const t0 = Date.now()
-    const snapshot = await ctx.sessionQuery.readSession(entry.id)
-    const m = buildModel(snapshot, { live: entry.live, title: entry.title ?? undefined })
-    if (m.title && m.title !== entry.title) titles.set(entry.id, { title: m.title, at: now, live: entry.live })
-    trace({ event: 'read', id: entry.id, events: snapshot.events?.length ?? 0, ms: Date.now() - t0 })
-    snapshots.set(entry.id, { model: m, at: now, live: entry.live })
+    const snapshot = await entry.source.read(entry.id, signal)
+    const m = buildModel(snapshot, { live: entry.live, title: entry.title ?? undefined, remote: entry.remote })
+    if (m.title && m.title !== entry.title) titles.set(key, { title: m.title, at: now, live: entry.live })
+    trace({ event: 'read', source: entry.source.key, id: entry.id, events: snapshot.events?.length ?? 0, ms: Date.now() - t0 })
+    snapshots.set(key, { model: m, at: now, live: entry.live })
     return m
   }
 
   /**
-   * Read many sessions for a corpus-wide tool: one unreadable log (a refused
-   * historical artifact, a torn frame) is reported, not fatal.
+   * Read many sessions for a corpus-wide tool (a remote source reads a few in
+   * parallel): one unreadable log (a refused historical artifact, a torn
+   * frame) is reported, not fatal. Results keep the entries' order.
    * @returns {Promise<{ models: any[], skipped: { id: string, workspace: string, title: string | null, error: string }[] }>}
    */
   async function models(entries, signal) {
-    const out = { models: [], skipped: [] }
-    for (const entry of entries) {
-      try {
-        out.models.push(await model(entry, signal))
-      } catch (error) {
-        if (entries.length === 1 || signal?.aborted) throw error
-        const message = error instanceof Error ? error.message : String(error)
-        trace({ event: 'read-failed', id: entry.id, error: message })
-        out.skipped.push({ id: entry.id, workspace: entry.workspace, title: entry.title, error: message.split('\n')[0].slice(0, 300) })
+    const results = new Array(entries.length)
+    const width = Math.max(1, entries[0]?.source.concurrency ?? 1)
+    let next = 0
+    let fatal
+    const worker = async () => {
+      while (next < entries.length && fatal === undefined) {
+        const i = next++
+        const entry = entries[i]
+        try {
+          results[i] = { model: await model(entry, signal) }
+        } catch (error) {
+          if (entries.length === 1 || signal?.aborted) { fatal = error; return }
+          const message = error instanceof Error ? error.message : String(error)
+          trace({ event: 'read-failed', id: entry.id, error: message })
+          results[i] = { skipped: { id: entry.id, workspace: entry.workspace, title: entry.title, error: message.split('\n')[0].slice(0, 300) } }
+        }
       }
     }
+    await Promise.all(Array.from({ length: Math.min(width, entries.length) }, worker))
+    if (fatal !== undefined) throw fatal
+    const out = { models: [], skipped: [] }
+    for (const r of results) { if (r?.model) out.models.push(r.model); else if (r?.skipped) out.skipped.push(r.skipped) }
     return out
   }
 
-  return { listAll, resolve, select, model, models, callerId, callerCwd }
+  return { source, local, listAll, resolve, select, model, models, callerId, callerCwd }
 }
 
 function workspaces(entries) {

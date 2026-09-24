@@ -15,9 +15,23 @@ export function fakeCtx({ snapshots, live = new Set(), titles = {}, cwds = {}, w
   const byId = (id) => snapshots.find(s => s.session.id === id)
   const calls = []
   const denied = (path) => Object.assign(new Error(`sandbox denied ${path}`), { code: 'FS_SANDBOX_DENIED' })
+  /** Exact Fetch routes a plugin registered through `ctx.connection.fetch` (path → route). */
+  const routes = new Map()
   const ctx = {
     calls,
+    routes,
     logger: { info() {}, warn() {} },
+    effect(fn) { const dispose = fn(); return () => { if (typeof dispose === 'function') dispose() } },
+    inject(_deps, cb) { cb(ctx) },
+    connection: {
+      fetch: {
+        register(route) {
+          if (routes.has(route.path)) throw new Error(`exact Fetch route ${route.path} is already registered`)
+          routes.set(route.path, route)
+          return async () => { routes.delete(route.path) }
+        },
+      },
+    },
     sessionQuery: {
       async listSessions() { calls.push('listSessions'); return records() },
       async readSession(id) {

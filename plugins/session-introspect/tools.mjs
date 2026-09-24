@@ -2,7 +2,8 @@
  * tools.mjs — the seven model-facing tools. Each returns one canonical JSON
  * value (or a `{ kind: 'file' }` handle when `out_file` is set); `output.render`
  * turns it into text / json / jsonl. Session access goes through the resolver
- * (resolve.mjs) and therefore through `ctx.sessionQuery` only.
+ * (resolve.mjs) over one source per call: the local `ctx.sessionQuery`, or —
+ * with `remote` — another DSH instance's transcript routes (remote.mjs).
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -20,6 +21,10 @@ const SESSIONS_PARAM = {
   type: 'array',
   items: { type: 'string' },
   description: 'Several sessions: session spellings, "<workspace>/*", or "*" for all. Overrides session.',
+}
+const REMOTE_PARAM = {
+  type: 'string',
+  description: 'Read sessions of another DSH instance over the tailnet instead of this one: a machine name ("studio" = its /dsh mount), "studio/dsh/alice" (an instance served under another path), host:port, or a URL. Needs the same plugin on that instance; admission is this machine\'s tailnet login. Omit for the local instance.',
 }
 const SINCE_PARAM = { type: 'string', description: 'Only sessions created at/after this ISO date/time or within a relative window like "7d", "12h" (applies to sessions/"*" selections).' }
 const UNTIL_PARAM = { type: 'string', description: 'Only sessions created before this ISO date/time (or "7d" = seven days ago). With since this brackets a cohort.' }
@@ -52,7 +57,7 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
   // ---------------------------------------------------------------- find
   const findSpec = {
     text: renderFind,
-    rows: (v) => ({ header: { query: v.query ?? null, total: v.total, truncated: v.truncated }, rows: v.sessions }),
+    rows: (v) => ({ header: { query: v.query ?? null, remote: v.remote ?? null, total: v.total, truncated: v.truncated }, rows: v.sessions }),
   }
   const find = defineTool({
     name: 'transcript_find',
@@ -64,12 +69,14 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       until: UNTIL_PARAM,
       details: { type: 'boolean', description: 'Read each listed session and add model, cwd, events, calls, errors and registered-tool count (one log read per session; the listing itself stays cheap without it).' },
       limit: { type: 'integer', description: `Maximum rows (default ${limits.findLimit}).` },
+      remote: REMOTE_PARAM,
       ...commonParameters,
     },
     output: output(findSpec),
     isConcurrencySafe: () => true,
     async execute(args, exec) {
-      const all = await resolver.listAll({ callerCwd: resolver.callerCwd(exec) }, exec.signal)
+      const src = await resolver.source(args.remote, exec.signal)
+      const all = await resolver.listAll(src, { callerCwd: resolver.callerCwd(exec) }, exec.signal)
       const sinceMs = parseSince(args.since)
       const untilMs = parseSince(args.until, 'until')
       const q = (args.query ?? '').trim().toLowerCase()
@@ -82,7 +89,7 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       const limit = Math.max(1, Math.floor(args.limit ?? limits.findLimit))
       const truncated = Math.max(0, total - limit)
       hits = hits.slice(0, limit)
-      const me = resolver.callerId(exec)
+      const me = src.remote === null ? resolver.callerId(exec) : undefined
       const sessions = hits.map(e => ({ id: e.id, workspace: e.workspace, title: e.title, cwd: e.cwd ?? null, createdAt: e.createdAt, live: e.live, depth: e.depth, parent: e.parent, self: e.id === me }))
       if (args.details === true) {
         const { models, skipped } = await resolver.models(hits, exec.signal)
@@ -96,6 +103,7 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       }
       const value = {
         query: args.query ?? null,
+        remote: src.remote,
         total,
         truncated,
         details: args.details === true,
@@ -119,12 +127,13 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       turns: { type: 'string', description: 'Only these turns, e.g. "4" or "3-6". Default: all.' },
       max_prompt_chars: { type: 'integer', description: 'Prompt excerpt length per turn (default 160).' },
       max_chars: { type: 'integer', description: `Inline size budget for the rendering (default ${limits.maxChars}); later turns are omitted with a continuation hint. Lifted by out_file.` },
+      remote: REMOTE_PARAM,
       ...commonParameters,
     },
     output: output(outlineSpec),
     isConcurrencySafe: () => true,
     async execute(args, exec) {
-      const entry = await resolver.resolve(args.session, exec, exec.signal)
+      const entry = await resolver.resolve(await resolver.source(args.remote, exec.signal), args.session, exec, exec.signal)
       const m = await resolver.model(entry, exec.signal)
       let turns = turnRows(m, { maxPromptChars: Math.max(20, args.max_prompt_chars ?? 160) })
       const range = parseTurnRange(args.turns)
@@ -160,12 +169,13 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       max_result_chars: { type: 'integer', description: `Excerpt length per text (default ${limits.maxResultChars}). Full text of one event: transcript_event.` },
       max_chars: { type: 'integer', description: `Inline size budget (default ${limits.maxChars}); later rows are omitted with a seq_from continuation hint. Lifted by out_file.` },
       raw: { type: 'boolean', description: 'Emit original event objects (json/jsonl only) instead of timeline rows.' },
+      remote: REMOTE_PARAM,
       ...commonParameters,
     },
     output: output(readSpec),
     isConcurrencySafe: () => true,
     async execute(args, exec) {
-      const entry = await resolver.resolve(args.session, exec, exec.signal)
+      const entry = await resolver.resolve(await resolver.source(args.remote, exec.signal), args.session, exec, exec.signal)
       const m = await resolver.model(entry, exec.signal)
       const fmt = normalizeFmt(args.fmt)
       const maxResult = maxResultCharsOf(args)
@@ -269,12 +279,14 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       top_errors: { type: 'integer', description: 'Error groups listed per tool (default 5).' },
       reactions: { type: 'integer', description: 'Agent reactions (reasoning/assistant text right after the failure) kept per error group (default 2; 0 disables).' },
       top_sequences: { type: 'integer', description: 'Bigrams/trigrams listed in the sequences section (default 15).' },
+      remote: REMOTE_PARAM,
       ...commonParameters,
     },
     output: output(statsSpec),
     isConcurrencySafe: () => true,
     async execute(args, exec) {
-      const entries = await resolver.select(args.sessions?.length ? args.sessions : args.session, exec, { since: args.since, until: args.until }, exec.signal)
+      const src = await resolver.source(args.remote, exec.signal)
+      const entries = await resolver.select(src, args.sessions?.length ? args.sessions : args.session, exec, { since: args.since, until: args.until }, exec.signal)
       const { models, skipped } = await resolver.models(entries, exec.signal)
       const sections = args.sections?.includes('all') ? SECTIONS : (args.sections ?? [])
       const value = toolStats(models, {
@@ -287,6 +299,7 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       })
       value.sessions = models.map(m => ({ id: m.id, workspace: m.workspace, title: m.title }))
       value.skipped = skipped
+      if (src.remote !== null) value.remote = src.remote
       return finish(exec, args, value, statsSpec)
     },
   })
@@ -311,6 +324,7 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       per_session_limit: { type: 'integer', description: 'Maximum hits per session, so one long session cannot crowd out the rest (default: unlimited).' },
       since: SINCE_PARAM,
       until: UNTIL_PARAM,
+      remote: REMOTE_PARAM,
       ...commonParameters,
     },
     output: output(grepSpec),
@@ -325,7 +339,8 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       const ctxChars = Math.max(20, args.context_chars ?? 160)
       const limit = Math.max(1, Math.floor(args.limit ?? limits.grepLimit))
       const perSession = args.per_session_limit ? Math.max(1, Math.floor(args.per_session_limit)) : Infinity
-      const entries = await resolver.select(args.sessions?.length ? args.sessions : args.session, exec, { since: args.since, until: args.until }, exec.signal)
+      const src = await resolver.source(args.remote, exec.signal)
+      const entries = await resolver.select(src, args.sessions?.length ? args.sessions : args.session, exec, { since: args.since, until: args.until }, exec.signal)
       const hits = []
       let truncated = false
       const sessions = []
@@ -363,7 +378,7 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
           if (++mine >= perSession) break
         }
       }
-      const value = { pattern, flags: flags.replace('g', ''), sessions, hits, truncated, skipped }
+      const value = { pattern, flags: flags.replace('g', ''), remote: src.remote ?? undefined, sessions, hits, truncated, skipped }
       return finish(exec, args, value, grepSpec)
     },
   })
@@ -379,13 +394,14 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       before: { type: 'integer', description: 'Summarize this many preceding events (0–20).' },
       after: { type: 'integer', description: 'Summarize this many following events (0–20).' },
       raw: { type: 'boolean', description: 'Keep binary payloads (base64) verbatim.' },
+      remote: REMOTE_PARAM,
       fmt: { type: 'string', enum: ['text', 'json'], description: 'text (default) or json.' },
       out_file: commonParameters.out_file,
     },
     output: output(eventSpec),
     isConcurrencySafe: () => true,
     async execute(args, exec) {
-      const entry = await resolver.resolve(args.session, exec, exec.signal)
+      const entry = await resolver.resolve(await resolver.source(args.remote, exec.signal), args.session, exec, exec.signal)
       const m = await resolver.model(entry, exec.signal)
       const idx = m.events.findIndex(e => e.seq === args.seq)
       if (idx < 0) throw new IntrospectError(`No event with seq ${args.seq} (log spans seq ${m.events[0]?.seq ?? '?'}–${m.events.at(-1)?.seq ?? '?'}).`)
@@ -423,6 +439,7 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       max_text_chars: { type: 'integer', description: 'Text kept per non-call row (default 2000).' },
       limit: { type: 'integer', description: 'Maximum rows (default 5000).' },
       max_chars: { type: 'integer', description: `Inline size budget when out_file is not given (default ${limits.maxChars}).` },
+      remote: REMOTE_PARAM,
       ...commonParameters,
     },
     output: output(exportSpec),
@@ -432,7 +449,8 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       const maxResult = Math.max(0, Math.floor(args.max_result_chars ?? 400))
       const maxText = Math.max(40, Math.floor(args.max_text_chars ?? 2000))
       const limit = Math.max(1, Math.floor(args.limit ?? 5000))
-      const entries = await resolver.select(args.sessions?.length ? args.sessions : args.session, exec, { since: args.since, until: args.until }, exec.signal)
+      const src = await resolver.source(args.remote, exec.signal)
+      const entries = await resolver.select(src, args.sessions?.length ? args.sessions : args.session, exec, { since: args.since, until: args.until }, exec.signal)
       const { models, skipped } = await resolver.models(entries, exec.signal)
       const rows = []
       let truncated = false
@@ -465,6 +483,7 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       const value = {
         kinds: [...kinds],
         tools: args.tools ?? null,
+        remote: src.remote ?? undefined,
         sessions: models.map(m => ({ id: m.id, workspace: m.workspace, title: m.title, toolsAvailable: m.toolsAvailable })),
         rows,
         limit,

@@ -2,7 +2,7 @@
   "name": "tali-session-introspect",
   "version": "0.1.0",
   "private": true,
-  "description": "DSH plugin: transcript_* tools that let an agent read other agents' session transcripts (find by workspace/title, per-turn outline, timeline render, per-tool error/latency stats, grep, raw events) over ctx.sessionQuery \u2014 never touching the zstd logs directly.",
+  "description": "DSH plugin: transcript_* tools that let an agent read other agents' session transcripts (find by workspace/title, per-turn outline, timeline render, per-tool error/latency stats, grep, raw events) over ctx.sessionQuery \u2014 never touching the zstd logs directly \u2014 locally or, with `remote`, on another DSH instance over the tailnet (the same plugin serves /api/transcript/v1 there).",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -16,6 +16,9 @@
     "render.mjs",
     "output.mjs",
     "resolve.mjs",
+    "remote.mjs",
+    "serve.mjs",
+    "source.mjs",
     "tools.mjs",
     "cordis.patch.yml",
     "docs/tools.md"
