@@ -1,10 +1,11 @@
 # The bundled macOS app: `DSH.app` in a DMG, nothing installed globally
 
-**Status (2026-09-23): milestone 1 done** — a self-hosting `DSH.app` that
-carries Node, the fork, and all 22 plugins, runs its own server, and ships in
-an 88 MB DMG (268 MB installed); ad-hoc signed. Milestones 2 (first-run dialog offering
-Tailscale / STP / Chrome / afm) and 3 (in-app update from GitHub Releases)
-are designed below but not built.
+**Status (2026-09-24): milestones 1 and 3 done** — a self-hosting `DSH
+Canary.app` that carries Node, the fork, and all 22 plugins, runs its own
+server, ships in a ~90 MB DMG (268 MB installed), ad-hoc signed, and
+**updates itself from GitHub Releases** (`pnpm release-app` publishes; the
+app checks on launch and every 6 h). Milestone 2 (first-run dialog offering
+Tailscale / STP / Chrome / afm) is designed at the end but not built.
 
 ## Why
 
@@ -208,6 +209,64 @@ left: node 93 MB, `@deepseek-ai/*` ~70 MB (web frontend dist 18 MB), the LLM
 SDKs (openai, anthropic, google/genai ~30 MB), OpenTelemetry 29 MB, node-pty
 4 MB. Compressing node further would need a custom build.
 
+## Updates (milestone 3)
+
+**Publishing** — `pnpm release-app [--dry-run] [--skip-pack] [--notes "…"] [--draft]`
+(`tools/bundle/release.mjs`, needs `gh auth login` with push rights):
+
+1. Build number `YYYYMMDDnn` (UTC; `nn` = 01 + the day's existing
+   `canary-YYYYMMDD*` tags) → `CFBundleVersion`; display version is the
+   calver `2026.9.24` / `2026.9.24.2` (`CFBundleShortVersionString`).
+2. `fetch-node` → `stage-dsh` → `build-app --build N --update-repo owner/name`.
+3. `<dmg>.sha256` in `shasum -a 256` format.
+4. `gh release create canary-N <dmg> <sha256> --latest --title "DSH Canary
+   <version>"`; notes default to the commit subjects since the previous
+   canary tag. Never a prerelease: GitHub's `releases/latest` (the feed) skips
+   prereleases and drafts.
+
+**In the app** — `Updater.swift`, configured by the `update` block of
+`dsh-dock-app.json` (`{ repo, intervalHours: 6, feed: null }`). Check 10 s
+after launch and every 6 h, plus **DSH Canary ▸ Check for Updates…**:
+`GET https://api.github.com/repos/<repo>/releases/latest` (unauthenticated:
+60 requests/h per IP is plenty; `User-Agent` is mandatory or GitHub answers
+403), build = integer after the last `-` of `tag_name`, compared with
+`CFBundleVersion` (a dev build has 0 and therefore always sees an update).
+Newer → alert with the release notes: **Install and Relaunch / Later / Skip
+This Version** (skip persists in UserDefaults `dsh.update.skipBuild`; a
+manual check ignores it). Install:
+
+1. Preflight: refuse when the bundle path contains `/AppTranslocation/` or
+   starts with `/Volumes/` (running off the DMG) or the parent directory is
+   not writable — the message says to move the app to Applications.
+2. Download the `.dmg` asset (progress window), fetch the sibling
+   `.dmg.sha256` asset, compare SHA-256 (CryptoKit); mismatch aborts.
+3. `hdiutil attach -nobrowse -readonly -noverify -mountpoint <tmp>`; `cp -R`
+   the `.app` from the image to a dot-prefixed sibling of the running bundle
+   (same volume → the final rename is atomic); `codesign --verify --deep` on
+   the copy; running bundle → Trash (`trashItem`, falls back to renaming it
+   `<Name> (old).app`); rename the copy into place; detach.
+4. Relaunch: `/bin/sh -c 'while kill -0 <pid>; do sleep .2; done; open <app>'`
+   then `NSApp.terminate` — the poll matters because
+   `LSMultipleInstancesProhibited` would refuse a second instance while the
+   old one is still quitting; `applicationWillTerminate` stops the embedded
+   server, the new copy starts its own.
+
+Why no quarantine problem without a Developer ID: the DMG is fetched by the
+app's own `URLSession` (no `LSFileQuarantineEnabled` in the plist), so neither
+it nor the copied bundle carries `com.apple.quarantine`, and Gatekeeper is
+not consulted on the relaunch. Only the *first* install (a browser-downloaded
+DMG) hits "right-click → Open".
+
+**Measured end to end (2026-09-24)** without a real release: app A built with
+`--build 2026092401 --update-feed http://127.0.0.1:8765/latest.json`, app B
+with `--build 2026092402` into a DMG, a hand-written `latest.json` in the
+GitHub release shape served with `python3 -m http.server` beside the DMG and
+its `.sha256`, and `defaults write io.github.taliesinb.dsh-app
+dsh.update.autoInstall -bool true` (the headless hook: install without the
+prompt). Launch A → 13 s later B was running from A's path, the server
+restarted, and B's own check reported "latest 2026092402; running
+2026092402". Delete the default afterwards (`defaults delete …`).
+
 ## Known gaps / next
 
 - **Milestone 2 — first-run dialog** inside DSH (a host+client plugin,
@@ -217,12 +276,10 @@ SDKs (openai, anthropic, google/genai ~30 MB), OpenTelemetry 29 MB, node-pty
   plugin's default proxy ports vs a dev instance on the same Mac; the relay
   LaunchAgent as an *opt-in* (boot-on-demand tailnet access), registered via
   `SMAppService`, not a Homebrew-installed node.
-- **Milestone 3 — updates**: poll `https://api.github.com/repos/<owner>/<repo>/releases/latest`
-  from the wrapper, compare with `dsh-app-release.json`, download the DMG
-  asset + verify its sha256 from the release body, mount, copy the app beside
-  the running one, swap, relaunch (Sparkle's `--options runtime` requirement
-  and appcast are avoided by hand-rolling). A downloaded bundle from the app's
-  own `URLSession` carries no quarantine flag, so the swap works unsigned.
+- Updater follow-ups: a GitHub Actions release job (the fork build on a
+  `macos-14` arm64 runner is ~15 min; `release.mjs` is written to run there
+  unchanged given `gh` auth); Developer ID signing + notarization in
+  `build-app.mjs --sign` (the swap itself needs neither); an x64 lane.
 - Multi-arch: only `darwin-arm64` is staged (`OTHER_PLATFORM` filter + the
   Node tarball); an x64 build needs the build to run on x64 or a lipo pass.
 - The `.pkg` idea was dropped: with everything inside the `.app` there is

@@ -81,6 +81,8 @@ struct DockConfig: Decodable {
     var glyphColor: String?
     /// Present in the bundled app (DSH.dmg): run the server from Contents/Resources (EmbeddedServer.swift).
     var embedded: EmbeddedSpec?
+    /// Present in the bundled app: check GitHub Releases for newer builds (Updater.swift).
+    var update: UpdateSpec?
 
     /// Product title the shipped client uses for the wordmark and `document.title`.
     static let genericProductTitle = "DSH Local Build"
@@ -103,7 +105,7 @@ struct DockConfig: Decodable {
            let config = try? JSONDecoder().decode(DockConfig.self, from: data) {
             return config
         }
-        return DockConfig(name: "DSH", url: "http://127.0.0.1:3080/", fallbackUrl: nil, tokenFile: nil, glyphColor: nil, embedded: nil)
+        return DockConfig(name: "DSH", url: "http://127.0.0.1:3080/", fallbackUrl: nil, tokenFile: nil, glyphColor: nil, embedded: nil, update: nil)
     }
 }
 
@@ -221,6 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var embedded: EmbeddedServer?
     var embeddedURL: URL?
     var embeddedRestarts = 0
+    var updater: Updater?
 
     /// Entry point: the announced embedded URL, else the configured one (a placeholder in embedded mode until the server speaks).
     var remoteURL: URL { embeddedURL ?? URL(string: config.url)! }
@@ -297,7 +300,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         } else {
             connect()
         }
+        if let spec = config.update {
+            let updater = Updater(spec: spec, appName: config.name, log: { [weak self] line in self?.appendLog(line) })
+            updater.schedule()
+            self.updater = updater
+        }
     }
+
+    @objc func checkForUpdates() { updater?.checkNow() }
 
     // MARK: embedded server
 
@@ -1113,8 +1123,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     @objc func showAbout() {
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: config.name,
-            .credits: NSAttributedString(string: "Thin WKWebView wrapper for the DSH Web GUI.\n\(config.url)"),
+            .credits: NSAttributedString(string: config.embedded == nil
+                ? "Thin WKWebView wrapper for the DSH Web GUI.\n\(config.url)"
+                : "Self-contained DSH: \(releaseSummary())"),
         ])
+    }
+
+    /// `dsh-app-release.json` written by build-app.mjs, as one line for the About panel.
+    func releaseSummary() -> String {
+        guard let url = Bundle.main.url(forResource: "dsh-app-release", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "(no release manifest)" }
+        let plugins = (json["plugins"] as? [[String: Any]])?.count ?? 0
+        return "build \(json["build"] ?? "?") · dsh \(json["dsh"] ?? "?") · node \(json["node"] ?? "?") · \(plugins) plugins"
     }
 
     func buildMenu() {
@@ -1124,6 +1145,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         main.addItem(appItem)
         let app = NSMenu()
         app.addItem(withTitle: "About \(config.name)", action: #selector(showAbout), keyEquivalent: "")
+        if config.update != nil {
+            app.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        }
         app.addItem(.separator())
         // The standard macOS chord. Safari cannot give ⌘, to a page (it is Safari's own Settings…);
         // here the menu bar is ours, so it drives the GUI's Settings panel instead.

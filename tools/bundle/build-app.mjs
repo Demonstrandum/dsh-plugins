@@ -6,7 +6,8 @@
  *   dist/bundle/node/      tools/bundle/fetch-node.mjs  (official Node LTS build)
  *   dock-app/build/DSH     dsh-tailscale-remote's Swift wrapper (compiled here if stale)
  *
- *   node tools/bundle/build-app.mjs [--name "DSH Canary"] [--glyph-color "#E5484D"] [--port 3090] [--sign IDENTITY] [--no-dmg]
+ *   node tools/bundle/build-app.mjs [--build N] [--name "DSH Canary"] [--glyph-color "#E5484D"] [--port 3090]
+ *                                   [--sign IDENTITY] [--update-repo owner/name] [--update-feed URL] [--no-dmg]
  *                                   [--version X.Y.Z] [--out dist/bundle]
  *
  * Layout (Contents/Resources): node/ (bin/node only), dsh/ (package.json +
@@ -46,19 +47,33 @@ const DMG = !args.includes('--no-dmg')
 const PRUNE = !args.includes('--no-prune')
 const WITH_OFFICE = args.includes('--with-office')
 const BUNDLE_ID = 'io.github.taliesinb.dsh-app'
+/** GitHub owner/repo whose Releases the app polls for updates (Updater.swift). */
+const REPO_SLUG = opt('--update-repo', 'taliesinb/dsh-plugins')
 
 const dockApp = await import(pathToFileURL(join(REPO, 'plugins', 'dsh-tailscale-remote', 'dock-app.mjs')).href)
 
 function log(msg) { process.stderr.write(`[build-app] ${msg}\n`) }
 const readJson = async p => JSON.parse(await readFile(p, 'utf8'))
 
+/**
+ * App identity: a BUILD number (integer, CFBundleVersion, what the updater
+ * compares — `--build 2026092401`, default 0 = "dev build, every release is
+ * newer") and a calver display version derived from it (`2026.9.24`, or
+ * `2026.9.24.2` for the day's second build; `--version` overrides). The fork's
+ * own version and the repo SHA go into the release manifest and
+ * CFBundleGetInfoString, not into the comparison.
+ */
 async function version() {
-  if (opt('--version')) return opt('--version')
+  const build = Number(opt('--build', '0'))
+  if (!Number.isSafeInteger(build) || build < 0) throw new Error(`--build must be a non-negative integer, got ${opt('--build')}`)
   const stage = await readJson(join(STAGE, 'package.json'))
-  // CFBundleShortVersionString wants digits and dots; the fork's prerelease tag and the
-  // repo's short SHA go into the marketing string only.
   const { stdout } = await execFileAsync('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPO })
-  return { short: stage.version.replace(/-.*$/, ''), full: `${stage.version}+${stdout.trim()}` }
+  let short = opt('--version')
+  if (!short) {
+    const m = /^(\d{4})(\d{2})(\d{2})(\d{2})$/.exec(String(build))
+    short = m ? `${Number(m[1])}.${Number(m[2])}.${Number(m[3])}${Number(m[4]) > 1 ? `.${Number(m[4])}` : ''}` : '0.0.0'
+  }
+  return { build, short, full: `${short} (build ${build}, dsh ${stage.version}, ${stdout.trim()})` }
 }
 
 /** Every Mach-O inside the resources that must carry a signature of its own. */
@@ -176,15 +191,18 @@ async function main() {
       profileTemplate: 'profile-template',
       dshHome: null,
     },
+    update: { repo: REPO_SLUG, intervalHours: 6, feed: opt('--update-feed') ?? null },
   }
   await writeFile(join(resources, 'dsh-dock-app.json'), JSON.stringify(config, null, 2) + '\n')
   await writeFile(join(resources, 'dsh-app-release.json'), JSON.stringify({
-    version: ver.full, dsh: stagePkg.version, node: nodeInfo.version, plugins: stagePkg.dshBundle.plugins, builtAt: new Date().toISOString(),
+    build: ver.build, version: ver.short, dsh: stagePkg.version, node: nodeInfo.version, plugins: stagePkg.dshBundle.plugins, builtAt: new Date().toISOString(),
   }, null, 2) + '\n')
 
   let plist = dockApp.infoPlist({ name: NAME, version: ver.short, bundleId: BUNDLE_ID })
+  plist = plist.replace(`<key>CFBundleVersion</key><string>${ver.short}</string>`, `<key>CFBundleVersion</key><string>${ver.build}</string>`)
   plist = plist.replace('<key>NSHighResolutionCapable</key>',
     `<key>LSMultipleInstancesProhibited</key><true/>\n  <key>CFBundleGetInfoString</key><string>${ver.full}</string>\n  <key>NSHighResolutionCapable</key>`)
+  if (!plist.includes(`<string>${ver.build}</string>`)) throw new Error('CFBundleVersion substitution failed; infoPlist() changed shape')
   await writeFile(join(contents, 'Info.plist'), plist)
   await writeFile(join(contents, 'PkgInfo'), 'APPL????')
 
@@ -199,7 +217,7 @@ async function main() {
   log(`app ready: ${app} (${size}, ${inner.length} inner Mach-O files signed)`)
 
   if (DMG) {
-    const dmg = join(OUT, `${NAME.replace(/\s+/g, '-')}-${ver.full.replace(/\+/g, '-')}.dmg`)
+    const dmg = join(OUT, `${NAME.replace(/\s+/g, '-')}-${ver.short}${ver.build ? `-${ver.build}` : ''}.dmg`)
     const staging = join(OUT, 'dmg-root')
     await rm(staging, { recursive: true, force: true })
     await rm(dmg, { force: true })
