@@ -95,7 +95,7 @@ async function serveRoutes(ctx, mount, { admit = () => true } = {}) {
 
 test('end to end: instance B reads instance A\'s sessions through the served routes', async (t) => {
   // A: two sessions, one live; the plugin applied for real (tools + routes).
-  const a = fakeCtx({ snapshots: [wae, self], live: new Set([self.session.id]), cwds: { [wae.session.id]: '/home/a/projects/widgets' } })
+  const a = fakeCtx({ snapshots: [wae, self], live: new Set([self.session.id]), running: new Set([self.session.id]), cwds: { [wae.session.id]: '/home/a/projects/widgets' } })
   a.tools = { register() {} }
   apply(a, Config({}))
   assert.deepEqual([...a.routes.keys()], ['/api/transcript/v1/capabilities', '/api/transcript/v1/sessions', '/api/transcript/v1/session'])
@@ -117,6 +117,14 @@ test('end to end: instance B reads instance A\'s sessions through the served rou
   assert.equal(found.total, 2)
   assert.ok(found.sessions.every(s => s.self === false), 'no session on a remote is "this session"')
   assert.equal(found.sessions.find(s => s.id === self.session.id).live, true)
+  assert.equal(found.sessions.find(s => s.id === self.session.id).running, true, 'running travels over the wire')
+  assert.equal(found.sessions.find(s => s.id === wae.session.id).running, false)
+  // the status view: only attached sessions, running ones marked
+  const active = await run('transcript_find', { active: true })
+  assert.deepEqual(active.sessions.map(s => s.id), [self.session.id])
+  assert.match(textOf(tool('transcript_find'), {}, active), /running\n1 active session on 127\.0\.0\.1:\d+\/dsh\/a \(1 running a turn\)/)
+  const none = await run('transcript_find', { active: true, workspace: 'widgets' })
+  assert.match(textOf(tool('transcript_find'), {}, none), /^.*\nNo active sessions on 127\.0\.0\.1/)
   assert.equal(found.sessions.find(s => s.id === wae.session.id).workspace, 'widgets')
   assert.match(textOf(tool('transcript_find'), {}, found), new RegExp(`2 sessions on ${remote.replace(/[.]/g, '\\.')}`))
   assert.equal(a.calls.filter(c => c === 'listSessions').length >= 1, true)

@@ -65,7 +65,7 @@ export function createResolver({ local, tailnet }, options) {
   }
 
   /**
-   * Every visible session of a source as `{ record, id, cwd, workspace, title, createdAt, live, parent, depth, source, remote }`, newest first.
+   * Every visible session of a source as `{ record, id, cwd, workspace, title, createdAt, live, running, parent, depth, source, remote }`, newest first.
    * @param {any} src
    * @param {{ callerCwd?: string }} [opts]
    */
@@ -95,6 +95,7 @@ export function createResolver({ local, tailnet }, options) {
       title: e.title ?? null,
       createdAt: e.createdAt,
       live: e.live === true,
+      running: e.running === true,
       parent: e.parent ?? null,
       depth: e.depth ?? 0,
       source: src,

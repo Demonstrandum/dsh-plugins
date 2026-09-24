@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, resolve as resolvePath } from 'node:path'
 
-export function fakeCtx({ snapshots, live = new Set(), titles = {}, cwds = {}, workspaceRoot, mode = 'workspace-write', unreadable = new Set() }) {
+export function fakeCtx({ snapshots, live = new Set(), running = new Set(), titles = {}, cwds = {}, workspaceRoot, mode = 'workspace-write', unreadable = new Set() }) {
   const records = () => snapshots.map(s => ({
     header: { ...s.session, ...cwds[s.session.id] ? { cwd: cwds[s.session.id] } : {} },
     live: live.has(s.session.id),
@@ -54,6 +54,7 @@ export function fakeCtx({ snapshots, live = new Set(), titles = {}, cwds = {}, w
     get(name) {
       if (name === 'fs') return fs
       if (name === 'sandboxPolicy') return { resolve: () => ({ mode, workspaceRoot }) }
+      if (name === 'agents') return { get: (id) => live.has(id) ? { status: running.has(id) ? 'running' : 'idle' } : undefined }
       return undefined
     },
   }

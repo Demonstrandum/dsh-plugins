@@ -6,7 +6,8 @@
  *     key: 'local' | '<remote spec>',      // used in cache keys and output labels
  *     remote: null | '<remote spec>',      // null for the local instance
  *     concurrency: number,                 // parallel reads a corpus tool may issue
- *     list(signal)     → [{ id, header, cwd, createdAt, live, title, parent, depth }]   (titles resolved, cheap first)
+ *     list(signal)     → [{ id, header, cwd, createdAt, live, running, title, parent, depth }]   (titles resolved, cheap first;
+ *                          live = an agent is attached, running = its turn is in progress right now)
  *     read(id, signal) → { session: header, events: [...] }                             (= ctx.sessionQuery.readSession)
  *   }
  *
@@ -58,12 +59,14 @@ export function createLocalSource(ctx, options = {}) {
      */
     async list(signal, opts = {}) {
       const records = await ctx.sessionQuery.listSessions(signal)
+      const agents = ctx.get('agents') // the same fact DSH's own session list reports as `running`
       const entries = records.map(record => ({
         id: record.header.id,
         header: record.header,
         cwd: record.header.cwd,
         createdAt: record.header.createdAt,
         live: record.live === true,
+        running: record.live === true && agents?.get(record.header.id)?.status === 'running',
         title: undefined,
         parent: record.header.parentSession ?? null,
         depth: record.header.delegationDepth ?? 0,
@@ -120,6 +123,7 @@ export function createRemoteSource(client, options = {}) {
         cwd: s.cwd ?? s.header?.cwd,
         createdAt: s.createdAt ?? s.header?.createdAt,
         live: s.live === true,
+        running: s.running === true,
         title: s.title ?? null,
         parent: s.parent ?? null,
         depth: s.depth ?? 0,

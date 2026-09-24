@@ -8,7 +8,7 @@ Every tool takes `remote` to read another DSH instance's sessions over the tailn
 
 ## `transcript_find`
 
-List or look up DSH sessions (any workspace) by title, workspace, id or age, so another agent's transcript can be inspected with the other transcript_* tools. Returns id, workspace/title, creation time and whether the session is live. Costs no log reads unless details:true (then also model, cwd, event/call/error counts and the number of registered tools per session).
+List or look up DSH sessions (any workspace) by title, workspace, id or age, so another agent's transcript can be inspected with the other transcript_* tools. Returns id, workspace/title, creation time and whether the session is live (an agent is attached) and running (a turn is in progress now); active:true is the status view of the local instance or, with remote, of another one. Costs no log reads unless details:true (then also model, cwd, event/call/error counts and the number of registered tools per session).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -16,13 +16,14 @@ List or look up DSH sessions (any workspace) by title, workspace, id or age, so 
 | `workspace` | string | no | Only this workspace (basename of the working directory, e.g. "tensatory"). |
 | `since` | string | no | Only sessions created at/after this ISO date/time or within a relative window like "7d", "12h" (applies to sessions/"*" selections). |
 | `until` | string | no | Only sessions created before this ISO date/time (or "7d" = seven days ago). With since this brackets a cohort. |
+| `active` | boolean | no | Only sessions an agent is attached to right now (live); running ones are marked. The "what is going on there" view. |
 | `details` | boolean | no | Read each listed session and add model, cwd, events, calls, errors and registered-tool count (one log read per session; the listing itself stays cheap without it). |
 | `limit` | integer | no | Maximum rows (default 20). |
 | `remote` | string | no | Read sessions of another DSH instance over the tailnet instead of this one: a machine name ("studio" = its /dsh mount), "studio/dsh/alice" (an instance served under another path), host:port, or a URL. Needs the same plugin on that instance; admission is this machine's tailnet login. Omit for the local instance. |
 | `fmt` | "text" \| "json" \| "jsonl" | no | text (default, compact) \| json (whole canonical object) \| jsonl (header object, then one object per row). |
 | `out_file` | string | no | Write the complete rendering (size limits lifted) to this file (relative to the session cwd; same sandbox rules as the write tool) and reply with a summary + 5-line head instead. |
 
-**Returns:** `{ query, remote, total, truncated, sessions[{ id, workspace, title, cwd, createdAt, live, depth, parent, self }], hint? }` rendered as an `id  workspace/title  created  live` table (`remote` is null for the local instance)
+**Returns:** `{ query, remote, active, total, truncated, sessions[{ id, workspace, title, cwd, createdAt, live, running, depth, parent, self }], hint? }` rendered as an `id  workspace/title  created  live` table whose live column reads `running` / `yes` / `no` (`remote` is null for the local instance)
 
 With `out_file` the canonical value is instead the handle `{ kind: "file", path, lines, bytes, fmt, preview[] }`, rendered as `wrote N lines, X KB (fmt=…) to <path>` plus a 5-line head preview.
 

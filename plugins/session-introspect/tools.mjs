@@ -61,12 +61,13 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
   }
   const find = defineTool({
     name: 'transcript_find',
-    description: 'List or look up DSH sessions (any workspace) by title, workspace, id or age, so another agent\'s transcript can be inspected with the other transcript_* tools. Returns id, workspace/title, creation time and whether the session is live. Costs no log reads unless details:true (then also model, cwd, event/call/error counts and the number of registered tools per session).',
+    description: 'List or look up DSH sessions (any workspace) by title, workspace, id or age, so another agent\'s transcript can be inspected with the other transcript_* tools. Returns id, workspace/title, creation time and whether the session is live (an agent is attached) and running (a turn is in progress now); active:true is the status view of the local instance or, with remote, of another one. Costs no log reads unless details:true (then also model, cwd, event/call/error counts and the number of registered tools per session).',
     parameters: {
       query: { type: 'string', description: 'Case-insensitive substring over "workspace/title" and id (e.g. "tensatory", "slider", "2b81"). Omit to list everything.' },
       workspace: { type: 'string', description: 'Only this workspace (basename of the working directory, e.g. "tensatory").' },
       since: SINCE_PARAM,
       until: UNTIL_PARAM,
+      active: { type: 'boolean', description: 'Only sessions an agent is attached to right now (live); running ones are marked. The "what is going on there" view.' },
       details: { type: 'boolean', description: 'Read each listed session and add model, cwd, events, calls, errors and registered-tool count (one log read per session; the listing itself stays cheap without it).' },
       limit: { type: 'integer', description: `Maximum rows (default ${limits.findLimit}).` },
       remote: REMOTE_PARAM,
@@ -82,6 +83,7 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       const q = (args.query ?? '').trim().toLowerCase()
       const ws = (args.workspace ?? '').trim().toLowerCase()
       let hits = all.filter(e => (ws === '' || e.workspace.toLowerCase() === ws)
+        && (args.active !== true || e.live)
         && (sinceMs === null || (e.createdAt ?? 0) >= sinceMs)
         && (untilMs === null || (e.createdAt ?? 0) < untilMs)
         && (q === '' || `${e.workspace}/${e.title ?? ''}`.toLowerCase().includes(q) || e.id.toLowerCase().includes(q)))
@@ -90,7 +92,7 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       const truncated = Math.max(0, total - limit)
       hits = hits.slice(0, limit)
       const me = src.remote === null ? resolver.callerId(exec) : undefined
-      const sessions = hits.map(e => ({ id: e.id, workspace: e.workspace, title: e.title, cwd: e.cwd ?? null, createdAt: e.createdAt, live: e.live, depth: e.depth, parent: e.parent, self: e.id === me }))
+      const sessions = hits.map(e => ({ id: e.id, workspace: e.workspace, title: e.title, cwd: e.cwd ?? null, createdAt: e.createdAt, live: e.live, running: e.running, depth: e.depth, parent: e.parent, self: e.id === me }))
       if (args.details === true) {
         const { models, skipped } = await resolver.models(hits, exec.signal)
         const byId = new Map(models.map(m => [m.id, m]))
@@ -104,6 +106,7 @@ export function createTools({ ctx, resolver, limits, trace = () => {} }) {
       const value = {
         query: args.query ?? null,
         remote: src.remote,
+        active: args.active === true,
         total,
         truncated,
         details: args.details === true,

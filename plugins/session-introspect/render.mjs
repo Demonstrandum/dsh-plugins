@@ -75,7 +75,7 @@ function imagesText(images) {
 
 export function renderFind(value) {
   const rows = value.sessions
-  if (rows.length === 0) return `No sessions matched${value.query ? ` "${value.query}"` : ''}.${value.hint ? ` ${value.hint}` : ''}`
+  if (rows.length === 0) return `No ${value.active ? 'active ' : ''}sessions${value.query ? ` matched "${value.query}"` : ''}${value.remote ? ` on ${value.remote}` : ''}.${value.hint ? ` ${value.hint}` : ''}`
   const details = value.details === true
   const lines = [table(
     details
@@ -85,13 +85,13 @@ export function renderFind(value) {
       shortId(s.id),
       `${s.depth ? '↳ ' : ''}${s.workspace}/${s.title ?? '(untitled)'}`,
       fmtTime(s.createdAt),
-      s.live ? 'yes' : 'no',
+      s.running ? 'running' : s.live ? 'yes' : 'no',
       ...details ? [s.model ?? (s.readError ? '(unreadable)' : '?'), s.events ?? '', s.calls ?? '', s.errors ?? '', s.toolsAvailable ?? '', s.cwd ?? ''] : [],
       s.self ? '(this session)' : s.depth ? `subagent depth ${s.depth}` : '',
     ]),
     details ? ['l', 'l', 'l', 'l', 'l', 'r', 'r', 'r', 'r', 'l', 'l'] : ['l', 'l', 'l', 'l', 'l'],
   )]
-  lines.push(`${value.total} session${value.total === 1 ? '' : 's'}${value.remote ? ` on ${value.remote}` : ''}${value.truncated ? `; ${value.truncated} more not shown — narrow with query/workspace/since or raise limit` : ''}.`)
+  lines.push(`${value.total} ${value.active ? 'active ' : ''}session${value.total === 1 ? '' : 's'}${value.remote ? ` on ${value.remote}` : ''}${rows.some(s => s.running) ? ` (${rows.filter(s => s.running).length} running a turn)` : ''}${value.truncated ? `; ${value.truncated} more not shown — narrow with query/workspace/since or raise limit` : ''}.`)
   if (value.hint) lines.push(value.hint)
   return lines.join('\n')
 }

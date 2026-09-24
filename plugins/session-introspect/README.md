@@ -27,7 +27,7 @@ Generated reference (parameters, canonical values): [`docs/tools.md`](docs/tools
 
 | Tool | Purpose |
 |---|---|
-| `transcript_find` | sessions by query / workspace / age (`since`/`until`) — no log reads; `details: true` adds model, cwd, events/calls/errors and registered-tool count |
+| `transcript_find` | sessions by query / workspace / age (`since`/`until`) — no log reads; the `live` column reads `running` (a turn is in progress) / `yes` (an agent is attached) / `no`; **`active: true` is the status view** (only attached sessions — local, or on a remote with `remote`); `details: true` adds model, cwd, events/calls/errors and registered-tool count |
 | `transcript_outline` | per-turn TOC: seq range, duration, steps, tool counts (✗ per tool), tokens, how the turn ended, prompt |
 | `transcript_read` | timeline of a turn / seq range: `USER`, `ASSISTANT`, `CALL`, `RESULT ✓/✗ latency code excerpt`, images as `<image W×H type size>`; filters `tools`, `errors_only` (keeps the reasoning right after each failure), `include` (`injections` shows the system prompt too); `raw: true` for original events |
 | `transcript_tool_stats` | per tool: calls, errors, err%, **used/avail** (sessions that called it / sessions where it was registered), p50/p90 latency, normalized top errors each with the agent's **reactions** (reasoning/assistant text right after the failure), what the agent did next; opt-in `sections`: `before_error`, `sequences` (bigrams/trigrams), `runs` (same-tool streaks), `duplicates` (identical-args repeats), `args` (parameter shapes); `split_at` compares before/after a date; over one session, a workspace (`"tensatory/*"`) or everything (`"*"`) |
