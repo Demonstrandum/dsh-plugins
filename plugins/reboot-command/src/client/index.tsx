@@ -88,13 +88,18 @@ function blockerLabel(blocker: Blocker): string {
   }
 }
 
-/** What a SIGTERM means here, from the relay facts; `quit` is the dangerous case. */
+/**
+ * What a SIGTERM means here, from the relay facts; `quit` is the dangerous
+ * case. Plain words: whether the server comes back up on its own. `unknown`
+ * covers a server whose tailscale-remote predates the relay face (no
+ * `tailscaleRemoteRelay` service to ask) — a relay may well be running.
+ */
 function relayVerdict(relay: Relay): { kind: 'restart' | 'quit' | 'unknown', text: string } {
-  if (!relay.known) return { kind: 'unknown', text: 'No relay plugin is loaded on this server, so nothing here knows what supervises it: DSH comes back only if something outside restarts it.' }
-  if (relay.configured === false) return { kind: 'quit', text: 'No relay is configured in front of this DSH (publishPort 0): this would QUIT DSH, and it will not come back by itself.' }
-  if (relay.error !== undefined) return { kind: 'unknown', text: `Could not read the relay LaunchAgent (${relay.error}); whether DSH comes back is not known.` }
-  if (relay.loaded !== true) return { kind: 'quit', text: `The relay LaunchAgent${relay.label === undefined ? '' : ` ${relay.label}`} is not loaded: this would QUIT DSH, and it will not come back by itself.` }
-  return { kind: 'restart', text: `The relay is in front (LaunchAgent pid ${String(relay.pid ?? '?')}): DSH comes back on the next connection and this page reloads through “Starting DSH…”.` }
+  if (!relay.known) return { kind: 'unknown', text: 'Relay status unknown from here (this server predates the relay check); the server may not come back up automatically — proceed with caution.' }
+  if (relay.configured === false) return { kind: 'quit', text: 'No relay configured; the server will not come back up automatically — proceed with caution.' }
+  if (relay.error !== undefined) return { kind: 'unknown', text: `Relay status unknown (${relay.error}); the server may not come back up automatically — proceed with caution.` }
+  if (relay.loaded !== true) return { kind: 'quit', text: 'Relay not running; the server will not come back up automatically — proceed with caution.' }
+  return { kind: 'restart', text: 'Relay running: the server comes back up on the next connection and this page reloads.' }
 }
 
 const small = { fontSize: 12, opacity: 0.75 } as const

@@ -119,24 +119,25 @@ export function apply(ctx) {
       const parsed = parseArgs(rawInput)
       if (typeof parsed === 'object') return { kind: 'error', text: parsed.error }
       const relay = await relayFacts()
+      // One plain clause on what happens after the SIGTERM (the dialog says
+      // the same in its banner); mirrors relayVerdict in the client half.
       const relayNote = relay.known === false
-        ? 'Whether DSH comes back depends on what supervises it (no relay plugin loaded).'
+        ? 'Relay status unknown from here; the server may not come back up automatically.'
         : relay.configured === false
-          ? 'No relay is configured: this is a QUIT, DSH will not come back by itself.'
+          ? 'No relay configured; the server will not come back up automatically.'
           : relay.loaded === true
-            ? 'The relay is in front: DSH comes back on the next connection.'
-            : 'The relay LaunchAgent is NOT loaded: this is a QUIT, DSH will not come back by itself.'
+            ? 'Relay running: the server comes back up on the next connection.'
+            : 'Relay not running; the server will not come back up automatically.'
       switch (parsed) {
         case 'status': {
+          // A read-only query: the transcript keeps one line, not a report
+          // (live detail belongs to the dialog the bare form opens).
           const status = controller.status()
-          const lines = [
-            status.busy.length === 0 ? 'No session has work in flight.' : `${String(status.busy.length)} session${status.busy.length === 1 ? ' has' : 's have'} work in flight:`,
-            ...status.busy.map(row => `  - ${row.sessionId}${row.sessionId === agent.id ? ' (this session)' : ''}: ${describeBlockers(row.blockers)}`),
-            status.armed === undefined ? 'No reboot is armed.' : `A when-idle reboot is armed (since ${new Date(status.armed.since).toLocaleTimeString()}).`,
-            relayNote,
-            'Usage: /reboot now · /reboot if-idle · /reboot wait · /reboot cancel',
-          ]
-          return { kind: 'success', text: lines.join('\n') }
+          const busy = status.busy.length === 0
+            ? 'nothing in flight'
+            : `${String(status.busy.length)} session${status.busy.length === 1 ? '' : 's'} busy (${status.busy.map(row => describeBlockers(row.blockers)).join('; ')})`
+          const armed = status.armed === undefined ? 'no reboot armed' : `a when-idle reboot is armed since ${new Date(status.armed.since).toLocaleTimeString()}`
+          return { kind: 'success', text: `Reboot status: ${busy}, ${armed}. ${relayNote}` }
         }
         case 'now': {
           const outcome = controller.rebootNow(agent.id)

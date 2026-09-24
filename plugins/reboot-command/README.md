@@ -6,14 +6,31 @@ with the confirmation, the interruption list and the "wait until idle" option
 that pane does not have.
 
 ```
-/reboot            → the dialog (bare invocation; also from the / menu)
+/reboot            → the dialog (bare invocation; also from the / menu; since
+                     2026-09-24 also `/reboot ` + Enter with nothing after — the
+                     fork's ui-commands routes an empty-argument claim to the
+                     decoration instead of executing the host command)
 /reboot now        → interrupt whatever is running and reboot
 /reboot if-idle    → reboot only if nothing is in flight right now, else say why not
 /reboot wait       → arm: reboot once every session is idle for 2 s
 /reboot cancel     → drop an armed reboot
-/reboot status     → one-line status as a command card (same as bare on a
-                     client without the browser half)
+/reboot status     → one line as a command card ("Reboot status: nothing in
+                     flight, no reboot armed. Relay running: …"); same as bare
+                     on a client without the browser half
 ```
+
+Transcript hygiene: every executed host command leaves a `command/run` +
+`command/done` pair, rendered as a card — so a command's result text should
+say **what it did** in one line, never a live-state report or usage text
+(the dialog owns live state). Until 2026-09-24 the status form printed a
+four-line report ending in "Usage: …", which read as gibberish once the
+moment had passed (and rode along into copies of the session). The relay
+clause on every form is now plain: "Relay running: the server comes back up
+on the next connection." / "Relay not running; the server will not come back
+up automatically." / "Relay status unknown from here; …" — the last one is
+what a `dsh web` started before `dsh-tailscale-remote` grew the
+`tailscaleRemoteRelay` service reports (the plugin cannot ask; a relay may
+well be running), and it goes away on that server's next restart.
 
 Whether a reboot is a **restart** or a **quit** depends on what fronts the
 process: with the always-on relay of `dsh-tailscale-remote` the next
