@@ -37,7 +37,7 @@ function fakeRemote(token) {
     if (url.pathname === '/dsh/go') {
       res.writeHead(302, { location: `http://127.0.0.1:${String(server.address().port)}/dsh/target?x=1` }); res.end(); return
     }
-    if (url.pathname.startsWith('/dsh/api/')) {
+    if (url.pathname.startsWith('/dsh/api/') || url.pathname.startsWith('/dsh/remote-workspaces/')) {
       let body = ''
       req.on('data', chunk => { body += chunk })
       req.on('end', () => {
@@ -183,6 +183,18 @@ describe('createEgress against a fake remote', () => {
     assert.equal(egress.status().bridged, true)
     const exchanges = remote.seen.filter(entry => entry.path === '/dsh/' && entry.method === 'GET').length
     assert.equal(exchanges, 2, 'one re-exchange after the 401')
+  })
+
+  it('reaches the peer plugin\'s control channel with the same envelope (callControl)', async () => {
+    const result = await egress.callControl('fs.inspect', { path: '~/x' })
+    assert.deepEqual(result, { ok: true, value: { echo: { path: '~/x' }, method: 'fs.inspect' } })
+    assert.ok(remote.seen.some(entry => entry.method === 'POST' && entry.path === '/dsh/remote-workspaces/fs.inspect'))
+  })
+
+  it('reports a remote without the plugin (HTML 404) as bad-response, not as a crash', async () => {
+    const result = await egress.callControl('../nope', {})
+    assert.equal(result.ok, false)
+    assert.equal(result.error.code, 'remote-workspaces/bad-response')
   })
 
   it('pipes a WebSocket upgrade both ways', async () => {

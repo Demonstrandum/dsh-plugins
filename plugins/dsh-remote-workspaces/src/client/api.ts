@@ -76,6 +76,22 @@ export interface ProbeResult {
   workspaces: { workspaceId: string; path: string; title: string; sessionCount: number; mirrored: boolean }[]
 }
 
+/** What the remote's own plugin reports about a typed path there (`fs.inspect`). */
+export interface PathInfo {
+  /** The remote account's home directory (`~`). */
+  home: string
+  /** The typed path, `~` expanded and normalized. */
+  resolved: string
+  kind: 'directory' | 'file' | 'missing'
+  /** A missing path can be made (`mkdir -p`): its nearest existing ancestor is a directory. */
+  creatable: boolean
+  /** The nearest existing ancestor when it is a file (why `creatable` is false). */
+  blocker?: string
+  /** Completion candidates: child directories of the typed directory whose names start with the typed last segment. */
+  entries: { name: string; path: string }[]
+  truncated: boolean
+}
+
 export class RemoteApiError extends Error {
   constructor(readonly code: string, message: string, readonly details?: unknown) {
     super(message)
@@ -85,7 +101,10 @@ export class RemoteApiError extends Error {
 export interface RemoteApi {
   status(): Promise<StatusSnapshot>
   probeServer(url: string, token?: string): Promise<ProbeResult>
-  addWorkspace(input: { url: string; token?: string; label?: string; remoteWorkspaceId?: string; remotePath?: string; title?: string }): Promise<RemoteWorkspace>
+  /** Ask the remote about a path there; rejects with code `remote-workspaces/fs-unavailable` when its plugin cannot answer. */
+  inspectPath(url: string, token: string | undefined, path: string): Promise<PathInfo>
+  /** `create`: make `remotePath` on the remote first when it does not exist. */
+  addWorkspace(input: { url: string; token?: string; label?: string; remoteWorkspaceId?: string; remotePath?: string; create?: boolean; title?: string }): Promise<RemoteWorkspace>
   pollWorkspace(id: string): Promise<RemoteWorkspace>
   removeWorkspace(id: string): Promise<StatusSnapshot>
   renameWorkspace(id: string, title: string): Promise<StatusSnapshot>
@@ -155,6 +174,7 @@ export function createApi(rpc: ClientConnectionRpc): RemoteApi {
   return {
     status: () => call<StatusSnapshot>('status'),
     probeServer: (url, token) => call<ProbeResult>('servers.probe', { url, token }),
+    inspectPath: (url, token, path) => call<PathInfo>('servers.inspectPath', { url, token, path }),
     addWorkspace: input => call<{ workspace: RemoteWorkspace }>('workspaces.add', input).then(workspaceOf),
     pollWorkspace: id => call<{ workspace: RemoteWorkspace }>('workspaces.poll', { id }).then(workspaceOf),
     removeWorkspace: id => call<StatusSnapshot>('workspaces.remove', { id }),

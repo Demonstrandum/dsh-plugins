@@ -320,11 +320,23 @@ export function createEgress(spec) {
    * @param {Record<string, unknown>} args named by the method's parameters (`{ request: {...} }`)
    * @returns {Promise<{ ok: true, value: unknown } | { ok: false, error: { code: string, message: string, details?: unknown } }>}
    */
-  const call = async (namespace, method, args, { retry = true } = {}) => {
+  const call = (namespace, method, args, options) => post(`/api/${namespace}/${method}`, `${namespace}/${method}`, args, options)
+
+  /**
+   * Call one endpoint of the peer's own `dsh-remote-workspaces` control channel
+   * (`POST <remote>/remote-workspaces/<endpoint>`, same envelope as `call`).
+   * A remote without the plugin answers its 404 page (`bad-response`); one
+   * with an older plugin answers `remote-workspaces/unknown-endpoint`.
+   * @param {string} endpoint e.g. `fs.inspect`
+   * @param {Record<string, unknown>} args
+   */
+  const callControl = (endpoint, args, options) => post(`/remote-workspaces/${endpoint}`, endpoint, args, options)
+
+  const post = async (path, method, args, { retry = true } = {}) => {
     await ready()
     const rpcId = crypto.randomUUID()
     const body = Buffer.from(JSON.stringify({
-      type: 'client-request', rpcId, method: `${namespace}/${method}`, payload: { args },
+      type: 'client-request', rpcId, method, payload: { args },
     }), 'utf8')
     const outcome = await new Promise((resolve, reject) => {
       const headers = {
@@ -339,7 +351,7 @@ export function createEgress(spec) {
         hostname: remote.hostname,
         port: remote.port,
         method: 'POST',
-        path: `${remote.basePath}/api/${namespace}/${method}`,
+        path: `${remote.basePath}${path}`,
         headers,
         timeout: CALL_TIMEOUT_MS,
       }, (response) => {
@@ -363,7 +375,7 @@ export function createEgress(spec) {
     if (outcome.status === 401) {
       if (retry && (spec.token?.() ?? '') !== '') {
         await exchange()
-        return call(namespace, method, args, { retry: false })
+        return post(path, method, args, { retry: false })
       }
       lastFailure = { at: Date.now(), status: 401, message: 'remote refused this host (401)' }
       return { ok: false, error: { code: 'remote-workspaces/unauthorized', message: 'the remote DSH did not accept this host: add this machine\'s tailnet login to its allowed users, or provide its token', details: { status: 401 } } }
@@ -431,6 +443,7 @@ export function createEgress(spec) {
     handleRequest,
     handleUpgrade,
     call,
+    callControl,
     fetchRaw,
     /** Force the token exchange now (probe). */
     exchange,

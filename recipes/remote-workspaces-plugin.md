@@ -59,7 +59,12 @@ must too (for the seats). zh README pairs were not translated.
   only; the embedded shell opens exactly that one socket), both gated by
   `ctx.connection.requestRejection` so the proxy is not an open relay. Control
   channel `/remote-workspaces` (Connection envelope): `status`, `servers.probe`,
-  `workspaces.add|poll|remove|rename`, `sessions.rename|archive|start`, `probe`.
+  `servers.inspectPath`, `workspaces.add|poll|remove|rename`,
+  `sessions.rename|archive|start`, `probe`, and — served *for peers* — `fs.inspect`,
+  `fs.mkdir` (see "The add-remote modal" in the plugin README, 2026-09-24: short
+  server names such as `user@host` resolved with the MagicDNS suffix, and the
+  "New workspace" path field with live existence verdicts, `~` resolved on the
+  remote, Tab completion, and `mkdir -p` on Done for a missing directory).
 - `egress.mjs` — auth bridge (tailnet identity, or token → cookie via `GET ?token=`,
   re-exchanged on 401 / 6 h), header rewriting (Host/Origin → remote, browser
   cookies dropped, `x-forwarded-*` dropped, `Set-Cookie` dropped, `Location` mapped
@@ -147,6 +152,8 @@ HTTPS in identity mode (no tailnet peer was running DSH).
 |---|---|
 | Modal: "the remote DSH did not accept this host" | Remote 401: your tailnet login is not on its allowed list (identity mode) — add it in the remote's Tailscale-remote panel, or paste its token |
 | Modal: "the remote DSH lacks workspace.list" | Remote is not on `feat/embed-session` |
+| Modal, New workspace: gray "This remote cannot check paths…" | The remote runs no `dsh-remote-workspaces` (or one from before 2026-09-24), **or this GUI's own host still runs the older plugin** (host edits need a `dsh web` restart / `/reboot`). Fallback: an absolute directory that already exists there |
+| Modal: `https://studio/…` fails TLS / "unreachable" for a short name | No MagicDNS suffix could be found (`tailscale status --json` unavailable and no known `*.ts.net` server) — type the FQDN once; it is then known |
 | Frame shows the remote's full GUI with a sidebar | Remote lacks `?embed` support (branch), or the URL lost the query — the mount must be `/remote/<id>/` with the slash (the plugin 301s the slash-less form and keeps the query) |
 | Frame shows 401 page | Local browser cookie missing (opened without the token URL once) — the egress is gated by the local session too |
 | Session row title empty | Remote session has no title yet; `↻` after its first turn |

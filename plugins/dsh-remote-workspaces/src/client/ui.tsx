@@ -21,8 +21,9 @@ import {
 import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, ReactNode } from 'react'
-import type { ProbeResult, RemoteApi, RemoteWorkspace, ServerInfo } from './api.ts'
+import type { CSSProperties, KeyboardEvent, ReactNode } from 'react'
+import { RemoteApiError } from './api.ts'
+import type { PathInfo, ProbeResult, RemoteApi, RemoteWorkspace, ServerInfo } from './api.ts'
 import { FLAT_POLL_INTERVAL_MS, frameKey, PANEL_ID, type RemoteSelection, type RemoteWorkspacesModel, type RuntimeState, type ViewState } from './store.ts'
 import { byServer, flatten, orderSessions, orderWorkspaces, relativeLabel, ServerHover, SessionHover, ViewOptions, WorkspaceHover } from './view.tsx'
 
@@ -753,6 +754,24 @@ export function RemotesSection(props: PropsRuntime<'sidebar.workspaces.extra'> &
 
 type Step = 'server' | 'workspace'
 
+/** Result of asking the remote about the typed path, tagged with the text it answers for (stale answers never enable Done). */
+interface Inspected { path: string; info: PathInfo }
+type PathState = 'checking' | 'ready' | 'unavailable' | 'error'
+const INSPECT_DEBOUNCE_MS = 120
+const MAX_SUGGESTION_ROWS = 8
+
+/** Longest common prefix of the candidate names (shell Tab on an ambiguous prefix). */
+function commonPrefix(names: string[]): string {
+  if (names.length === 0) return ''
+  let prefix = names[0] ?? ''
+  for (const name of names) {
+    let i = 0
+    while (i < prefix.length && i < name.length && prefix[i]!.toLowerCase() === name[i]!.toLowerCase()) i++
+    prefix = prefix.slice(0, i)
+  }
+  return prefix
+}
+
 export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Face) {
   const open = useRuntime(state => state.addOpen)
   const lastUrl = useRuntime(state => state.snapshot?.lastServerUrl)
@@ -764,26 +783,59 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
   const [probe, setProbe] = useState<ProbeResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pick, setPick] = useState<string | 'new'>('new')
-  const [path, setPath] = useState('')
+  const [path, setPath] = useState('~/')
+  const [inspected, setInspected] = useState<Inspected | null>(null)
+  const [pathState, setPathState] = useState<PathState>('checking')
+  const [pathError, setPathError] = useState<string | null>(null)
+  const [highlight, setHighlight] = useState(-1)
   const [name, setName] = useState('')
   const [nameTouched, setNameTouched] = useState(false)
   const [adding, setAdding] = useState(false)
+  const inspectSeq = useRef(0)
 
   useEffect(() => {
     if (!open) return
-    setStep('server'); setProbe(null); setError(null); setPick('new'); setPath(''); setName(''); setNameTouched(false); setToken(''); setShowToken(false)
+    setStep('server'); setProbe(null); setError(null); setPick('new'); setPath('~/'); setInspected(null); setPathState('checking'); setPathError(null); setHighlight(-1)
+    setName(''); setNameTouched(false); setToken(''); setShowToken(false)
     setUrl(lastUrl ?? '')
   }, [open, lastUrl])
+
+  // The answer for the current text, or null while it is still on its way.
+  const current = inspected !== null && inspected.path === path ? inspected.info : null
+
+  // Ask the remote about the typed path as it is typed (debounced; late
+  // answers for older text are dropped). The remote's own plugin resolves
+  // `~`, reports existence and lists completion candidates.
+  useEffect(() => {
+    if (!open || step !== 'workspace' || pick !== 'new' || probe === null || pathState === 'unavailable') return
+    if (inspected !== null && inspected.path === path) return
+    const seq = ++inspectSeq.current
+    const timer = setTimeout(() => {
+      api.inspectPath(probe.url, token.trim() === '' ? undefined : token.trim(), path).then((info) => {
+        if (seq !== inspectSeq.current) return
+        setInspected({ path, info }); setPathState('ready'); setPathError(null)
+      }, (failure: unknown) => {
+        if (seq !== inspectSeq.current) return
+        // `unknown-endpoint` is this GUI's own host still running a plugin from before `servers.inspectPath` (restart pending).
+        if (failure instanceof RemoteApiError && (failure.code === 'remote-workspaces/fs-unavailable' || failure.code === 'remote-workspaces/unknown-endpoint')) { setPathState('unavailable'); return }
+        setPathState('error'); setPathError(failure instanceof Error ? failure.message : String(failure))
+      })
+    }, INSPECT_DEBOUNCE_MS)
+    return () => { clearTimeout(timer) }
+  }, [open, step, pick, probe, path, token, api, inspected, pathState])
 
   const suggestedName = useMemo(() => {
     if (probe === null) return ''
     // Same name as on the remote: the picked workspace's title, or the last
     // path segment of a new directory. The server is visible from the group
     // the row sits under, so it is not repeated in the name.
-    return pick === 'new'
-      ? (path.trim().replace(/\/+$/, '').split('/').pop() ?? '')
-      : (probe.workspaces.find(candidate => candidate.workspaceId === pick)?.title ?? '')
-  }, [probe, pick, path])
+    if (pick !== 'new') return probe.workspaces.find(candidate => candidate.workspaceId === pick)?.title ?? ''
+    const resolved = current?.resolved ?? path.trim()
+    const existing = current === null ? undefined : probe.workspaces.find(candidate => candidate.path === current.resolved)
+    if (existing !== undefined) return existing.title
+    const tail = resolved.replace(/\/+$/, '').split('/').pop() ?? ''
+    return tail === '~' ? '' : tail
+  }, [probe, pick, path, current])
   useEffect(() => { if (!nameTouched) setName(suggestedName) }, [suggestedName, nameTouched])
 
   const runProbe = useCallback(async () => {
@@ -792,6 +844,8 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
       const result = await api.probeServer(url.trim(), token.trim() === '' ? undefined : token.trim())
       setProbe(result)
       setPick(result.workspaces.find(workspace => !workspace.mirrored)?.workspaceId ?? 'new')
+      // A different remote answers for its own filesystem: forget the last one's verdicts.
+      setInspected(null); setPathState('checking'); setPathError(null); setHighlight(-1)
       setStep('workspace')
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : String(failure)
@@ -799,6 +853,53 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
       if (/unauthorized|401|accept this host/i.test(message)) setShowToken(true)
     } finally { setProbing(false) }
   }, [api, url, token])
+
+  // --- the "New workspace" path: verdict, completion -------------------------
+
+  /** Show a remote path the way the operator is typing (`~/…` while the field starts with `~`). */
+  const display = useCallback((absolute: string): string => {
+    const home = current?.home
+    if (home !== undefined && path.startsWith('~') && (absolute === home || absolute.startsWith(`${home}/`))) return `~${absolute.slice(home.length)}`
+    return absolute
+  }, [current, path])
+  const suggestions = current?.entries ?? []
+  const accept = useCallback((entry: { name: string; path: string }) => {
+    setPath(`${display(entry.path)}/`); setHighlight(-1)
+  }, [display])
+  /** Tab: one candidate (or a highlighted one) completes with a slash; several complete to their common prefix, shell style. */
+  const completeTab = useCallback(() => {
+    if (current === null || suggestions.length === 0) return
+    if (highlight >= 0 || suggestions.length === 1) { accept(suggestions[Math.max(highlight, 0)]!); return }
+    const typed = path.endsWith('/') ? '' : (path.split('/').pop() ?? '')
+    const prefix = commonPrefix(suggestions.map(entry => entry.name))
+    if (prefix.length > typed.length) {
+      const dir = path.endsWith('/') ? path : path.slice(0, path.length - typed.length)
+      setPath(`${dir}${prefix}`)
+    } else {
+      setHighlight(0)
+    }
+  }, [current, suggestions, highlight, path, accept])
+
+  const existingWorkspace = current === null || probe === null ? undefined : probe.workspaces.find(candidate => candidate.path === current.resolved)
+  const trivial = current !== null && (current.resolved === current.home || current.resolved === '/')
+  /** The verdict line under the field: colour + text; `ok` gates Done. */
+  const verdict = useMemo((): { text: string; tone: 'muted' | 'warn' | 'error'; ok: boolean } | null => {
+    if (pathState === 'unavailable') {
+      return { tone: 'muted', ok: path.trim().startsWith('/'), text: 'This remote cannot check paths (its dsh-remote-workspaces plugin is missing or older): type an absolute directory that already exists there.' }
+    }
+    if (pathState === 'error') return { tone: 'error', ok: false, text: pathError ?? 'cannot check the path' }
+    if (current === null) return path.trim() === '' ? { tone: 'muted', ok: false, text: 'Type a directory path' } : null
+    if (trivial) return { tone: 'muted', ok: false, text: 'Choose a directory inside it (for example ~/projects/thing)' }
+    if (existingWorkspace !== undefined) {
+      return existingWorkspace.mirrored
+        ? { tone: 'muted', ok: false, text: `Already in this sidebar as “${existingWorkspace.title}”` }
+        : { tone: 'muted', ok: true, text: `Already a workspace on the remote (“${existingWorkspace.title}”) — it will be added as is` }
+    }
+    if (current.kind === 'directory') return { tone: 'muted', ok: true, text: 'Directory exists' }
+    if (current.kind === 'file') return { tone: 'error', ok: false, text: 'Not a directory' }
+    if (!current.creatable) return { tone: 'error', ok: false, text: `Cannot create it: ${current.blocker ?? 'an ancestor'} is a file` }
+    return { tone: 'warn', ok: true, text: 'Directory will be created' }
+  }, [pathState, pathError, current, path, trivial, existingWorkspace])
 
   const done = useCallback(async () => {
     if (probe === null) return
@@ -808,7 +909,9 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
         url: probe.url,
         ...(token.trim() === '' ? {} : { token: token.trim() }),
         label: probe.label,
-        ...(pick === 'new' ? { remotePath: path.trim() } : { remoteWorkspaceId: pick }),
+        ...(pick === 'new'
+          ? { remotePath: current?.resolved ?? path.trim(), create: current?.kind === 'missing' }
+          : { remoteWorkspaceId: pick }),
         title: name.trim(),
       })
       model.setAddOpen(false)
@@ -817,11 +920,26 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure))
     } finally { setAdding(false) }
-  }, [probe, token, pick, path, name, model, openRemoteSession])
+  }, [probe, token, pick, path, current, name, model, openRemoteSession])
 
   const canProbe = url.trim() !== '' && !probing
   const pickMirrored = probe?.workspaces.find(workspace => workspace.workspaceId === pick)?.mirrored === true
-  const canDone = probe !== null && !adding && !pickMirrored && name.trim() !== '' && (pick !== 'new' || path.trim().startsWith('/'))
+  const canDone = probe !== null && !adding && !pickMirrored && name.trim() !== '' && (pick !== 'new' || verdict?.ok === true)
+
+  const onPathKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === 'Tab' && !event.shiftKey && suggestions.length > 0) { event.preventDefault(); completeTab(); return }
+    if (event.key === 'ArrowDown' && suggestions.length > 0) { event.preventDefault(); setHighlight(index => Math.min(index + 1, Math.min(suggestions.length, MAX_SUGGESTION_ROWS) - 1)); return }
+    if (event.key === 'ArrowUp' && suggestions.length > 0) { event.preventDefault(); setHighlight(index => Math.max(index - 1, -1)); return }
+    if (event.key === 'Escape' && highlight >= 0) { event.preventDefault(); event.stopPropagation(); setHighlight(-1); return }
+    if (event.key === 'Enter') {
+      if (highlight >= 0 && suggestions[highlight] !== undefined) { event.preventDefault(); accept(suggestions[highlight]!); return }
+      if (canDone) void done()
+    }
+  }
+
+  const verdictColor = verdict?.tone === 'warn'
+    ? 'var(--dsw-alias-state-warn-primary)'
+    : verdict?.tone === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-tertiary)'
 
   return (
     <Modal
@@ -847,10 +965,13 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
         <div>
           <div style={S.field}>
             <span style={S.label}>Remote DSH server</span>
-            <Input value={url} placeholder="https://robotics-vm.example.ts.net/dsh/" spellCheck={false} autoCapitalize="off" autoFocus
+            <Input value={url} placeholder="user@host · host/dsh/user · https://host.example.ts.net/dsh/" spellCheck={false} autoCapitalize="off" autoFocus
               onChange={(event) => { setUrl(event.currentTarget.value); setError(null) }}
               onKeyDown={(event) => { if (event.key === 'Enter' && canProbe) void runProbe() }} />
-            <span style={S.caption}>The URL its Tailscale remote publishes (keep the trailing slash). Your tailnet login is used to sign in; a token is only needed when it is not on that server&apos;s allowed list.</span>
+            <span style={S.caption}>
+              A full URL, or a short form: <code>host/dsh/user</code>, <code>user@host</code> (a tailnet short name gets its MagicDNS suffix), <code>localhost:3082</code>.
+              Your tailnet login is used to sign in; a token is only needed when it is not on that server&apos;s allowed list.
+            </span>
           </div>
           {showToken
             ? (
@@ -868,7 +989,7 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
       {step === 'workspace' && probe !== null && (
         <div>
           <div style={{ ...S.caption, marginBottom: 12 }}>
-            Connected to <b>{probe.hostname}</b> in {probe.elapsedMs} ms ({probe.mode === 'identity' ? 'tailnet identity' : 'token'}) · {probe.workspaces.length} workspace{probe.workspaces.length === 1 ? '' : 's'}
+            Connected to <b>{probe.hostname}</b> in {probe.elapsedMs} ms
           </div>
           <div style={S.field}>
             <span style={S.label}>Workspace on the remote</span>
@@ -896,16 +1017,43 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
               ))}
               <div role="radio" aria-checked={pick === 'new'} style={{ ...S.option, background: pick === 'new' ? HOVER : 'transparent' }} onClick={() => { setPick('new') }}>
                 <IconPlusOutline16 size={16} />
-                <span>New workspace from a directory on the remote…</span>
+                <span>New workspace</span>
               </div>
             </div>
           </div>
           {pick === 'new' && (
             <div style={S.field}>
-              <span style={S.label}>Absolute directory on {probe.hostname}</span>
-              <Input value={path} placeholder="/home/tali/projects/thing" spellCheck={false} autoCapitalize="off" autoFocus
-                onChange={(event) => { setPath(event.currentTarget.value); setError(null) }} />
-              <span style={S.caption}>Must already exist there; it becomes an ordinary workspace on the remote.</span>
+              <span style={S.label}>New workspace on remote</span>
+              <Input value={path} placeholder="~/projects/thing" spellCheck={false} autoCapitalize="off" autoComplete="off" autoFocus
+                aria-autocomplete="list" aria-expanded={suggestions.length > 0}
+                onChange={(event) => { setPath(event.currentTarget.value); setHighlight(-1); setError(null) }}
+                onKeyDown={onPathKeyDown} />
+              {suggestions.length > 0 && (
+                <div role="listbox" style={{ ...S.list, maxHeight: 8 * 30 + 8, gap: 0 }}>
+                  {suggestions.slice(0, MAX_SUGGESTION_ROWS).map((entry, index) => (
+                    <div key={entry.path} role="option" aria-selected={index === highlight}
+                      style={{ ...S.option, padding: '4px 8px', fontSize: 12, background: index === highlight ? HOVER : 'transparent' }}
+                      onMouseDown={(event) => { event.preventDefault() }}
+                      onClick={() => { accept(entry) }}
+                      onMouseEnter={() => { setHighlight(index) }}>
+                      <IconFolderClose16 size={14} />
+                      <span style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.name}<span style={S.muted}>/</span></span>
+                    </div>
+                  ))}
+                  {(suggestions.length > MAX_SUGGESTION_ROWS || current?.truncated === true) && (
+                    <div style={{ ...S.muted, fontSize: 11, padding: '4px 8px' }}>
+                      {suggestions.length > MAX_SUGGESTION_ROWS ? `+${suggestions.length - MAX_SUGGESTION_ROWS}${current?.truncated === true ? '+' : ''} more — keep typing` : 'more — keep typing'}
+                    </div>
+                  )}
+                </div>
+              )}
+              <span style={{ ...S.caption, color: verdictColor, display: 'flex', alignItems: 'center', gap: 6, minHeight: 17 }}>
+                {verdict === null ? <><Spinner size={12} /> Checking…</> : verdict.text}
+                {verdict !== null && current !== null && !trivial && verdict.tone !== 'error' && (
+                  <span style={{ ...S.muted, marginLeft: 'auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }} title={current.resolved}>{current.resolved}</span>
+                )}
+              </span>
+              <span style={S.caption}>Tab completes, ↑↓ pick a suggestion. <code>~</code> is the home directory on the remote.</span>
             </div>
           )}
           <div style={S.field}>

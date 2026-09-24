@@ -23,6 +23,7 @@
 import os from 'node:os'
 import Schema from '@deepseek-ai/schemastery'
 import { createEgress, friendlyRemoteName, parseRemoteUrl } from './egress.mjs'
+import { createMagicDnsSuffixSource, inspectPath, makeDirectory, normalizeRemoteInput, suffixFromKnownUrls } from './resolve.mjs'
 import { defaultStateFile, generateId, loadState, normalizeState, routeIdFor, saveState } from './state.mjs'
 
 export const name = 'remote-workspaces'
@@ -269,6 +270,39 @@ export function apply(ctx, config) {
     ...(item.projections?.values?.permissions === undefined ? {} : { permissions: item.projections.values.permissions }),
   })
 
+  /**
+   * What the operator typed (`user@studio`, `studio/dsh/user`, `localhost:3082`,
+   * a full URL) as a canonical URL — see resolve.mjs. Dot-less hosts get the
+   * tailnet's MagicDNS suffix (CLI, else the suffix of a known server).
+   */
+  const magicDnsSuffix = createMagicDnsSuffixSource()
+  const normalizeInput = text => normalizeRemoteInput(text, {
+    magicDnsSuffix: async () => (await magicDnsSuffix()) ?? suffixFromKnownUrls(servers().map(server => server.url)),
+  })
+
+  /**
+   * Egress for a URL that may not be registered yet (the modal's probe and
+   * path-completion calls): a known server's mount when the URL is known and
+   * no different token is offered, else a transient egress kept for a while
+   * so the token exchange happens once per modal, not once per keystroke.
+   */
+  const transientEgresses = new Map()
+  const TRANSIENT_TTL_MS = 10 * 60 * 1000
+  const egressForUrl = (remoteUrl, offeredToken) => {
+    const known = servers().find(server => parseRemoteUrl(server.url).url === remoteUrl)
+    if (known !== undefined && (offeredToken === undefined || offeredToken === known.token)) return { egress: egressOf(known.id), known }
+    const key = `${remoteUrl}\n${offeredToken ?? ''}`
+    const now = Date.now()
+    for (const [candidate, entry] of transientEgresses) if (now - entry.at > TRANSIENT_TTL_MS) transientEgresses.delete(candidate)
+    let entry = transientEgresses.get(key)
+    if (entry === undefined) {
+      entry = { egress: createEgress({ id: 'probe', url: remoteUrl, localBase: `${prefix}/probe`, token: () => offeredToken ?? known?.token, log, warn }), at: now }
+      transientEgresses.set(key, entry)
+    }
+    entry.at = now
+    return { egress: entry.egress, known }
+  }
+
   /** Confirm the remote accepts this host: exchange the token if any, then list its sessions. */
   const probe = async (serverId) => {
     const entry = mounted.get(String(serverId ?? ''))
@@ -301,15 +335,12 @@ export function apply(ctx, config) {
   const probeServer = async (url, token) => {
     let remote
     try {
-      remote = parseRemoteUrl(String(url ?? ''))
+      remote = parseRemoteUrl(await normalizeInput(url))
     } catch (error) {
       return fail('bad-url', String(error?.message ?? error))
     }
-    const known = servers().find(server => parseRemoteUrl(server.url).url === remote.url)
     const offeredToken = typeof token === 'string' && token !== '' ? token : undefined
-    const egress = known !== undefined && (offeredToken === undefined || offeredToken === known.token)
-      ? egressOf(known.id)
-      : createEgress({ id: 'probe', url: remote.url, localBase: `${prefix}/probe`, token: () => offeredToken ?? known?.token, log, warn })
+    const { egress, known } = egressForUrl(remote.url, offeredToken)
     const started = Date.now()
     try {
       await egress.exchange()
@@ -339,9 +370,32 @@ export function apply(ctx, config) {
     })
   }
 
+  /**
+   * Ask the remote's own dsh-remote-workspaces about a path on it (`~`
+   * resolved there, existence, completion candidates) — the "New workspace"
+   * field's live status. A remote without the plugin, or with one predating
+   * `fs.inspect`, answers `fs-unavailable`; the modal then falls back to
+   * "absolute path, must exist".
+   */
+  const inspectRemotePath = async (url, token, path) => {
+    let remote
+    try {
+      remote = parseRemoteUrl(await normalizeInput(url))
+    } catch (error) {
+      return fail('bad-url', String(error?.message ?? error))
+    }
+    const offeredToken = typeof token === 'string' && token !== '' ? token : undefined
+    const { egress } = egressForUrl(remote.url, offeredToken)
+    const result = await egress.callControl('fs.inspect', { path: String(path ?? '') })
+    if (!result.ok && (result.error?.code === 'remote-workspaces/unknown-endpoint' || result.error?.code === 'remote-workspaces/bad-response')) {
+      return fail('fs-unavailable', 'the remote DSH cannot inspect paths (its dsh-remote-workspaces plugin is missing or older)', { error: result.error })
+    }
+    return result
+  }
+
   /** Find or register the server for a URL; a token offered here becomes the stored one. */
   const ensureServer = async (url, token, label) => {
-    const remote = parseRemoteUrl(String(url))
+    const remote = parseRemoteUrl(await normalizeInput(url))
     const offeredToken = typeof token === 'string' && token !== '' ? token : undefined
     let server = state.servers.find(candidate => parseRemoteUrl(candidate.url).url === remote.url)
     const seeded = [...seeds.values()].find(candidate => parseRemoteUrl(candidate.url).url === remote.url)
@@ -420,7 +474,20 @@ export function apply(ctx, config) {
     let view
     try {
       if (typeof args.remotePath === 'string' && args.remotePath.trim() !== '') {
-        view = must(await egress.call('workspace', 'create', { request: { path: args.remotePath.trim() } }), 'workspace.create').workspace
+        let target = args.remotePath.trim()
+        // `~` is the remote account's home and a missing directory is made
+        // there (`create`), both through the remote's own plugin; a remote
+        // without it takes only an existing absolute path, as before.
+        if (target.startsWith('~') || args.create === true) {
+          const inspected = await egress.callControl('fs.inspect', { path: target })
+          if (!inspected.ok) return fail('remote', `cannot resolve "${target}" on ${server.label}: ${inspected.error?.message ?? inspected.error?.code ?? 'failed'}`)
+          target = inspected.value.resolved
+          if (inspected.value.kind === 'missing') {
+            if (args.create !== true) return fail('remote', `${target} does not exist on ${server.label}`)
+            must(await egress.callControl('fs.mkdir', { path: target }), 'fs.mkdir')
+          }
+        }
+        view = must(await egress.call('workspace', 'create', { request: { path: target } }), 'workspace.create').workspace
       } else {
         const baseline = must(await egress.call('workspace', 'list', {}), 'workspace.list')
         view = (baseline.items ?? []).find(candidate => candidate.workspaceId === String(args.remoteWorkspaceId ?? ''))
@@ -776,6 +843,10 @@ export function apply(ctx, config) {
         case 'status': return ok(snapshot())
         case 'probe': return probe(args.serverId)
         case 'servers.probe': return probeServer(args.url, args.token)
+        case 'servers.inspectPath': return inspectRemotePath(args.url, args.token, args.path)
+        // Served for peers (their add-remote modal asks about paths HERE):
+        case 'fs.inspect': return ok(await inspectPath(args.path))
+        case 'fs.mkdir': return ok(await makeDirectory(args.path))
         case 'workspaces.add': return addWorkspace(args)
         case 'workspaces.poll': return exclusive(() => pollWorkspace(workspaceOf(args.id)))
         case 'workspaces.remove': return removeWorkspace(args.id)

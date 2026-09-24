@@ -28,7 +28,64 @@ Design and status: `../../notes/remote-workspaces-plan.md`.
   `../../recipes/remote-workspaces-plugin.md`.
 - **Not yet exercised:** a real `dsh-tailscale-remote` upstream over HTTPS in
   identity mode. **Later:** title sync without ↻ (postMessage from the embed),
-  interleaving remote groups with local ones, remote workspace path browsing.
+  interleaving remote groups with local ones. Remote path browsing arrived 2026-09-24
+  as the add-modal's completing path field (below).
+
+## The add-remote modal (2026-09-24)
+
+**Step 1 — server.** The field takes a full URL or a short form; the host
+normalizes it (`resolve.mjs` `normalizeRemoteInput`, called by `servers.probe`
+and `workspaces.add`, so the canonical form is what gets stored):
+
+| typed | becomes |
+|---|---|
+| `user@host` | `https://host.<magic-dns-suffix>/dsh/user/` (one DSH per account on a shared machine) |
+| `host/dsh/user`, `host` | `https://host.<magic-dns-suffix>/…/` |
+| `host.example.ts.net/dsh/user` | `https://` added |
+| `localhost:3082/x`, `127.0.0.1:3082`, `[::1]:3080`, any IPv4 literal | `http://` added (no certificate can name these) |
+| `https://…` | kept; a dot-less host still gets the suffix; trailing slash added |
+
+The suffix comes from `tailscale status --json` (`MagicDNSSuffix`, cached 5 min;
+the CLI is looked up on PATH and in the macOS app bundle), else from the
+`*.ts.net` hostname of any known server, else the host stays bare. It is
+needed because the Serve certificate names the FQDN — `https://studio/` fails TLS.
+
+**Step 2 — workspace.** "Connected to *host* in *N* ms", the remote's
+workspaces (mirrored ones grayed) and **New workspace**. Picking it shows a
+path field that starts at `~/` and talks to the remote *while you type*: every
+keystroke (120 ms debounce) asks the local host `servers.inspectPath`, which
+goes through the egress to the **remote's own dsh-remote-workspaces**
+control channel (`POST <remote>/remote-workspaces/fs.inspect` — `callControl`
+in egress.mjs, the same envelope as the `/api` calls). The remote answers for
+its filesystem: `~` expanded against *its* home, `kind` (directory / file /
+missing), `creatable` (nearest existing ancestor is a directory), and the
+completion candidates — child directories of the typed directory whose names
+start with the typed last segment (hidden ones only when the segment starts
+with `.`, symlinks to directories included, files never; 40 max). Under the
+field: **Tab** completes (one candidate → with a slash; several → their common
+prefix, then the first; a highlighted one → that one), ↑↓ highlight, Enter on
+a highlighted row accepts it, click works too. The verdict line is gray
+**Directory exists** / orange **Directory will be created** / red *Not a
+directory* or *Cannot create it: … is a file*; the resolved absolute path
+sits at its right. `~/` and `/` themselves are not accepted (Done stays
+disabled). A path that already is a workspace on the remote is added as that
+workspace (grayed when this sidebar already mirrors it). Done sends the
+*resolved* path with `create: true` when it is missing: the host asks the
+remote to `fs.mkdir` (`mkdir -p`) before `workspace.create`, which itself
+requires an existing directory.
+
+A remote **without** this plugin (or with one from before 2026-09-24) answers
+its 404 page / `unknown-endpoint`; the local host maps both to
+`remote-workspaces/fs-unavailable` and the field falls back to the old rule
+(gray note; an absolute path that already exists; no completion, no `~`).
+The same fallback shows while the *local* host still runs the older plugin
+(host module edits need a `dsh web` restart).
+
+Security: `fs.inspect` / `fs.mkdir` are served on this host's control channel
+for peers and are gated like everything else (`connection.requestRejection`:
+admitted browser session / tailnet identity). They list directory names
+anywhere on the filesystem — no more than the shipped browse directory
+picker does for any admitted client, and far less than the agent it can run.
 
 ## View options and hover cards
 
@@ -106,7 +163,8 @@ copies are the shell's own **Copy to…** (`session.copy`). Recipe:
 | File | Role |
 |---|---|
 | `index.js` | Plugin entry: mounts `/remote/<id>` (prefix route) + `/remote/<id>/api/remote.mux` (upgrade route) per server, gated by DSH's own browser-session check; control channel. |
-| `egress.mjs` | One remote: URL facts, token exchange, header rewriting, request/upgrade forwarding, `call(ns, method, args)`. |
+| `egress.mjs` | One remote: URL facts, token exchange, header rewriting, request/upgrade forwarding, `call(ns, method, args)` (`/api`), `callControl(endpoint, args)` (the peer plugin's `/remote-workspaces`). |
+| `resolve.mjs` | Add-modal helpers: `normalizeRemoteInput` (short forms → URL, MagicDNS suffix), `inspectPath` / `makeDirectory` (the `fs.*` endpoints served for peers). |
 | `state.mjs` | `$DSH_HOME/remote-workspaces.json` (0600): servers + mirrored workspaces with cached sessions. |
 | `src/client/{api,store}.ts`, `ui.tsx`, `index.tsx` | Browser half (built to `lib/client.js` by `build.mjs`): control-channel API, persisted view + runtime stores, components, slot registrations. |
 
@@ -214,4 +272,8 @@ instance.
 ## Tests
 
 `node --test tests/*.test.mjs` — fake remote with token exchange, header rewriting,
-Location mapping, 401 re-exchange, WebSocket echo, unreachable remote, identity mode.
+Location mapping, 401 re-exchange, WebSocket echo, unreachable remote, identity mode,
+`callControl`; `resolve.test.mjs` (input normalization, `inspectPath` over a temp
+home); `peer.test.mjs` (two plugin instances on two http servers: local
+`servers.inspectPath` → egress → remote `fs.inspect`; `workspaces.add` with
+`create` making the directory on the remote; a plugin-less remote → `fs-unavailable`).
