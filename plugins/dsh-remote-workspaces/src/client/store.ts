@@ -28,6 +28,8 @@ export interface ViewState {
   serverExpanded?: Record<string, boolean>
   groupBy?: RemoteGroupBy
   orderBy?: RemoteOrderBy
+  /** The whole Remotes section folded to its header (only offered once it has entries). */
+  collapsed?: boolean
   selected?: RemoteSelection
   /** Whether the remote panel (not a local Conversation) was the last thing shown; restored on reload. */
   remoteActive?: boolean
@@ -337,6 +339,10 @@ export class RemoteWorkspacesModel {
 
   setGroupBy(groupBy: RemoteGroupBy): void {
     this.view.update((d) => { d.groupBy = groupBy })
+  }
+
+  setCollapsed(collapsed: boolean): void {
+    this.view.update((d) => { d.collapsed = collapsed })
   }
 
   setOrderBy(orderBy: RemoteOrderBy): void {

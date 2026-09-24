@@ -15,8 +15,8 @@
  *                      hidden frame keeps its WebSocket until the TTL sweep.
  */
 import {
-  Button, IconEllipsisOutline16, IconFolderClose16, IconFolderOpen16, IconGlobeOutline14, IconLoadingOutline16,
-  IconPlusOutline16, IconProjectAddOutline16, IconRefreshOutline16, IconTriangleRightFill14, Input, Menu, Modal, Tooltip,
+  Button, IconChevronDownOutline14, IconChevronUpOutline14, IconEllipsisOutline16, IconFolderClose16, IconFolderOpen16, IconGlobeOutline14,
+  IconLoadingOutline16, IconPlusOutline16, IconProjectAddOutline16, IconRefreshOutline16, IconTriangleRightFill14, Input, Menu, Modal, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
@@ -56,15 +56,20 @@ const S = {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6,
     border: 'none', background: 'transparent', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', position: 'relative',
   } as CSSProperties,
+  // The small globe over the folder / add icon. No fill of its own: the icon
+  // underneath is masked out where the globe sits (see `knockout`), so the
+  // panel shows through — a solid disc cannot match the Dock app's translucent
+  // sidebar and read as a black blot on hovered buttons.
   badge: {
     position: 'absolute', right: 2, bottom: 2, width: 12, height: 12, borderRadius: 6, display: 'grid', placeItems: 'center',
-    background: 'var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base))', color: 'var(--dsw-alias-state-business-primary)',
+    background: 'transparent', color: 'var(--dsw-alias-state-business-primary)',
   } as CSSProperties,
   // Mirrors WorkspaceBrowser.module.css .sectionHeader (36px, tertiary label) —
-  // the "Workspaces" header this section sits under.
+  // the "Workspaces" header this section sits under. No font-size: like the
+  // shell's header it inherits the sidebar's 14px (rows are 13px).
   sectionHeader: {
     flex: 'none', display: 'flex', alignItems: 'center', gap: 4, height: 36, paddingLeft: 4, marginBottom: 4,
-    boxSizing: 'border-box', color: 'var(--dsw-alias-label-tertiary)', fontSize: 13,
+    boxSizing: 'border-box', color: 'var(--dsw-alias-label-tertiary)',
   } as CSSProperties,
   sectionLabel: { flex: 'none', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', lineHeight: '20px' } as CSSProperties,
   group: {} as CSSProperties,
@@ -112,23 +117,32 @@ function Spinner({ size = 14 }: { size?: number }) {
   )
 }
 
-function IconButton({ label, onClick, children, disabled }: { label: string; onClick: (event: React.MouseEvent) => void; children: ReactNode; disabled?: boolean }) {
+/**
+ * 28px header button. `label` is the accessible name; it is also the hover
+ * tooltip unless `tooltip` is false. `clearHoverOnClick` is for a button whose
+ * click relayouts it away from the pointer (the fold toggle: the header jumps
+ * up or down by the list's height) — no mouseleave fires for an element that
+ * moves out from under a still pointer, so the highlight would stick.
+ */
+function IconButton({ label, onClick, children, disabled, tooltip = true, clearHoverOnClick = false }: {
+  label: string; onClick: (event: React.MouseEvent) => void; children: ReactNode; disabled?: boolean; tooltip?: boolean; clearHoverOnClick?: boolean
+}) {
   const [hover, setHover] = useState(false)
-  return (
-    <Tooltip label={label} delayMs={500}>
-      <button
-        type="button"
-        aria-label={label}
-        disabled={disabled}
-        style={{ ...S.iconButton, background: hover && !disabled ? HOVER : 'transparent', opacity: disabled ? 0.5 : 1 }}
-        onMouseEnter={() => { setHover(true) }}
-        onMouseLeave={() => { setHover(false) }}
-        onClick={(event) => { event.stopPropagation(); onClick(event) }}
-      >
-        {children}
-      </button>
-    </Tooltip>
+  const button = (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      style={{ ...S.iconButton, background: hover && !disabled ? HOVER : 'transparent', opacity: disabled ? 0.5 : 1 }}
+      onMouseEnter={() => { setHover(true) }}
+      onMouseMove={() => { if (!hover) setHover(true) }}
+      onMouseLeave={() => { setHover(false) }}
+      onClick={(event) => { event.stopPropagation(); if (clearHoverOnClick) setHover(false); onClick(event) }}
+    >
+      {children}
+    </button>
   )
+  return tooltip ? <Tooltip label={label} delayMs={500}>{button}</Tooltip> : button
 }
 
 /** 16px row action button, like the local tree's `.iconButton`. */
@@ -151,11 +165,22 @@ function RowButton({ label, onClick, children, disabled }: { label: string; onCl
   )
 }
 
+/**
+ * A 16px icon box whose pixels inside the circle (`x`, `y`, radius `r`, icon
+ * coordinates) are masked away — the hole a badge sits in, letting whatever is
+ * behind the button (panel, hover fill) show through instead of a painted disc.
+ */
+function knockout(x: number, y: number, r: number): CSSProperties {
+  const mask = `radial-gradient(circle at ${String(x)}px ${String(y)}px, transparent ${String(r)}px, #000 ${String(r + 0.5)}px)`
+  return { display: 'inline-flex', width: 16, height: 16, alignItems: 'center', justifyContent: 'center', WebkitMaskImage: mask, maskImage: mask }
+}
+
 /** Folder icon with the small "remote" globe badge — the row and button decoration. */
 function RemoteFolderIcon({ open, active }: { open: boolean; active?: boolean }) {
   return (
     <span style={{ position: 'relative', display: 'inline-flex', width: 16, height: 16, alignItems: 'center', justifyContent: 'center', color: active ? 'var(--dsw-alias-state-business-primary)' : undefined }}>
-      {open ? <IconFolderOpen16 size={16} /> : <IconFolderClose16 size={16} />}
+      {/* badge box: right -5, bottom -4, 11px → centre (15.5, 14.5) in icon coordinates */}
+      <span style={knockout(15.5, 14.5, 5.5)}>{open ? <IconFolderOpen16 size={16} /> : <IconFolderClose16 size={16} />}</span>
       <span style={{ ...S.badge, right: -5, bottom: -4, width: 11, height: 11 }}><IconGlobeOutline14 size={9} /></span>
     </span>
   )
@@ -609,10 +634,18 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime, drag,
   )
 }
 
+/** Number of mirrored workspaces from which the section offers its fold chevron. */
+const COLLAPSIBLE_FROM = 1
+
 /**
  * The "Remotes" section: anchored at the bottom of the list area (the local
  * tree above it flexes), growing upward to at most half the area, with its own
- * scroll. Header: label, refresh-all, add — nothing else.
+ * scroll. Three shapes:
+ *   - no remotes: just the label and the add button, an empty body (no hint,
+ *     no refresh / view options — there is nothing for them to act on);
+ *   - with entries: label, then a fold chevron (v — the section grows upward),
+ *     refresh-all, view options, add; the label toggles too;
+ *   - folded: label, chevron (^), add; the list is not rendered.
  */
 export function RemotesSection(props: PropsRuntime<'sidebar.workspaces.extra'> & Face) {
   const { useRuntime, useView, model } = props
@@ -623,6 +656,11 @@ export function RemotesSection(props: PropsRuntime<'sidebar.workspaces.extra'> &
   const anyPolling = useRuntime(state => state.polling.length > 0)
   const groupBy = useView(state => state.groupBy ?? 'workspace')
   const orderBy = useView(state => state.orderBy ?? 'manual')
+  const collapsedPref = useView(state => state.collapsed === true)
+  const count = workspaces?.length ?? 0
+  const collapsible = count >= COLLAPSIBLE_FROM
+  const collapsed = collapsible && collapsedPref
+  const empty = count === 0
   useEffect(() => { if (!loaded) void model.refresh() }, [loaded, model])
   // A clock for the relative labels (the local tree re-renders on its own
   // ticks; one minute is the coarsest unit we show).
@@ -635,11 +673,11 @@ export function RemotesSection(props: PropsRuntime<'sidebar.workspaces.extra'> &
   // be current: poll them all on entry and then periodically while the view
   // is up (the Workspace view only polls what is expanded).
   useEffect(() => {
-    if (groupBy === 'workspace' || (workspaces?.length ?? 0) === 0) return
+    if (groupBy === 'workspace' || collapsed || (workspaces?.length ?? 0) === 0) return
     model.pollAll()
     const timer = setInterval(() => { model.pollAll() }, FLAT_POLL_INTERVAL_MS)
     return () => { clearInterval(timer) }
-  }, [groupBy, model, workspaces?.length])
+  }, [collapsed, groupBy, model, workspaces?.length])
 
   const [item, setItem] = useState<DragItem | null>(null)
   const [over, setOver] = useState<{ key: string; half: DropHalf } | null>(null)
@@ -662,29 +700,49 @@ export function RemotesSection(props: PropsRuntime<'sidebar.workspaces.extra'> &
         paddingRight: 'calc(var(--dsh-session-list-scrollbar-width, 8px) + var(--dsh-session-list-scrollbar-offset, 2px) + 2px)',
       }}
     >
+      {/* Open section: a hairline separates it from the local list scrolling away above it
+          (same token as the shell's sidebar/centre seam). It sits in the content box, so it
+          stops at the scrollbar gutter — the same 12px inset the sidebar leaves on the left.
+          Folded or empty, the bare header needs none. */}
+      {!empty && !collapsed && <div style={{ flex: 'none', height: 0, borderTop: '0.5px solid var(--dsw-alias-border-l3)', marginBottom: 2 }} />}
       <div style={{ ...S.sectionHeader, ...NO_SELECT }}>
-        <span style={S.sectionLabel}>Remotes</span>
+        <span
+          style={{ ...S.sectionLabel, cursor: collapsible ? 'pointer' : 'default' }}
+          onClick={collapsible ? () => { model.setCollapsed(!collapsed) } : undefined}
+        >
+          Remotes
+        </span>
         <span style={{ flex: '1 1 auto' }} />
-        <IconButton label="Refresh all remotes" disabled={anyPolling || (workspaces?.length ?? 0) === 0} onClick={() => { model.pollAll() }}>
-          {anyPolling ? <Spinner /> : <IconRefreshOutline16 size={16} />}
-        </IconButton>
-        <ViewOptions groupBy={groupBy} orderBy={orderBy} onGroupBy={mode => { model.setGroupBy(mode) }} onOrderBy={mode => { model.setOrderBy(mode) }} iconButtonStyle={S.iconButton} />
+        {collapsible && (
+          <IconButton label={collapsed ? 'Show remotes' : 'Hide remotes'} tooltip={false} clearHoverOnClick onClick={() => { model.setCollapsed(!collapsed) }}>
+            {/* The section sits at the bottom and grows upward: ^ opens it, v folds it down. */}
+            {collapsed ? <IconChevronUpOutline14 size={14} /> : <IconChevronDownOutline14 size={14} />}
+          </IconButton>
+        )}
+        {!empty && !collapsed && (
+          <IconButton label="Refresh all remotes" disabled={anyPolling} onClick={() => { model.pollAll() }}>
+            {anyPolling ? <Spinner /> : <IconRefreshOutline16 size={16} />}
+          </IconButton>
+        )}
+        {!empty && !collapsed && (
+          <ViewOptions groupBy={groupBy} orderBy={orderBy} onGroupBy={mode => { model.setGroupBy(mode) }} onOrderBy={mode => { model.setOrderBy(mode) }} iconButtonStyle={S.iconButton} />
+        )}
         <IconButton label="Add remote workspace" onClick={() => { model.setAddOpen(true) }}>
-          <IconProjectAddOutline16 size={16} />
+          {/* 28px button, 16px icon at (6, 6); badge box right 2 / bottom 2 / 12px → centre (14, 14) in icon coordinates */}
+          <span style={knockout(14, 14, 6)}><IconProjectAddOutline16 size={16} /></span>
           <span style={S.badge}><IconGlobeOutline14 size={9} /></span>
         </IconButton>
       </div>
-      <div style={{ minHeight: 0, overflowY: 'auto', paddingBottom: 8 }} onDragOver={(event) => { if (item !== null) event.preventDefault() }}>
-        {loadError !== undefined && <div style={{ ...S.error, padding: '2px 8px' }}>Remote workspaces: {loadError}</div>}
-        {loaded && loadError === undefined && (workspaces?.length ?? 0) === 0 && (
-          <div style={{ ...S.hint, padding: '2px 8px' }}>No remote workspaces yet.</div>
-        )}
-        {groupBy === 'workspace' && ordered.map(workspace => <Group key={workspace.id} workspace={workspace} drag={drag} groupOrder={groupOrder} now={now} {...props} />)}
-        {groupBy === 'server' && byServer(ordered).map(group => (
-          <ServerGroup key={group.serverId} group={group} server={servers?.find(server => server.id === group.serverId)} drag={drag} groupOrder={groupOrder} now={now} {...props} />
-        ))}
-        {groupBy === 'flat' && <FlatList workspaces={ordered} drag={drag} now={now} {...props} />}
-      </div>
+      {!collapsed && (
+        <div style={{ minHeight: 0, overflowY: 'auto', paddingBottom: empty ? 0 : 8 }} onDragOver={(event) => { if (item !== null) event.preventDefault() }}>
+          {loadError !== undefined && <div style={{ ...S.error, padding: '2px 8px' }}>Remote workspaces: {loadError}</div>}
+          {groupBy === 'workspace' && ordered.map(workspace => <Group key={workspace.id} workspace={workspace} drag={drag} groupOrder={groupOrder} now={now} {...props} />)}
+          {groupBy === 'server' && byServer(ordered).map(group => (
+            <ServerGroup key={group.serverId} group={group} server={servers?.find(server => server.id === group.serverId)} drag={drag} groupOrder={groupOrder} now={now} {...props} />
+          ))}
+          {groupBy === 'flat' && <FlatList workspaces={ordered} drag={drag} now={now} {...props} />}
+        </div>
+      )}
     </div>
   )
 }
