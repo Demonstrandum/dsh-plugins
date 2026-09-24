@@ -16,7 +16,8 @@
  *   - the control channel `POST /reboot-command/<endpoint>` the browser half
  *     polls for the modal it hangs on the BARE `/reboot` (a ui-commands
  *     decoration): `status` (busy sessions, armed state, relay facts), `now`,
- *     `wait`, `cancel`.
+ *     `if-idle` (reboot only when nothing is in flight, else `ok: false` with
+ *     the busy list — the endpoint a redeploy script asks), `wait`, `cancel`.
  *
  * "Busy" = the same blockers the Host names when it refuses to move a live
  * session (a running turn, running background jobs, loaded subagents), plus
@@ -112,8 +113,8 @@ export function apply(ctx) {
   // ---- the host slash command ---------------------------------------------------
   ctx.effect(() => ctx.commands.register({
     name: 'reboot',
-    description: 'Restart this DSH server: bare = status, "now" = interrupt busy sessions, "wait" = once every session is idle, "cancel"',
-    input: { hint: 'now | wait | cancel' },
+    description: 'Restart this DSH server: bare = status, "now" = interrupt busy sessions, "if-idle" = only if nothing is in flight, "wait" = once every session is idle, "cancel"',
+    input: { hint: 'now | if-idle | wait | cancel' },
     handler: async ({ agent, rawInput }) => {
       const parsed = parseArgs(rawInput)
       if (typeof parsed === 'object') return { kind: 'error', text: parsed.error }
@@ -133,12 +134,16 @@ export function apply(ctx) {
             ...status.busy.map(row => `  - ${row.sessionId}${row.sessionId === agent.id ? ' (this session)' : ''}: ${describeBlockers(row.blockers)}`),
             status.armed === undefined ? 'No reboot is armed.' : `A when-idle reboot is armed (since ${new Date(status.armed.since).toLocaleTimeString()}).`,
             relayNote,
-            'Usage: /reboot now · /reboot wait · /reboot cancel',
+            'Usage: /reboot now · /reboot if-idle · /reboot wait · /reboot cancel',
           ]
           return { kind: 'success', text: lines.join('\n') }
         }
         case 'now': {
           const outcome = controller.rebootNow(agent.id)
+          return outcome.ok ? { kind: 'success', text: `${outcome.message} ${relayNote}` } : { kind: 'error', text: outcome.message }
+        }
+        case 'if-idle': {
+          const outcome = controller.rebootIfIdle(agent.id)
           return outcome.ok ? { kind: 'success', text: `${outcome.message} ${relayNote}` } : { kind: 'error', text: outcome.message }
         }
         case 'wait': {
@@ -157,7 +162,7 @@ export function apply(ctx) {
 
   // ---- control channel for the browser half --------------------------------------
   const ok = value => ({ ok: true, value })
-  const fail = (code, message) => ({ ok: false, error: { code: `reboot-command/${code}`, message, details: {} } })
+  const fail = (code, message, details = {}) => ({ ok: false, error: { code: `reboot-command/${code}`, message, details } })
   const dispatch = async (endpoint, args) => {
     const by = typeof args.sessionId === 'string' ? args.sessionId : undefined
     switch (endpoint) {
@@ -165,6 +170,12 @@ export function apply(ctx) {
       case 'now': {
         const outcome = controller.rebootNow(by)
         return outcome.ok ? ok({ ...outcome, ...(await snapshot()) }) : fail('now', outcome.message)
+      }
+      case 'if-idle': {
+        // Administrative: a redeploy asks every server this; a busy one answers
+        // ok:false with the blockers in details.busy and is left alone.
+        const outcome = controller.rebootIfIdle(by)
+        return outcome.ok ? ok({ ...outcome, ...(await snapshot()) }) : fail('busy', outcome.message, { busy: outcome.busy, ...(await snapshot()) })
       }
       case 'wait': {
         const outcome = controller.rebootWhenIdle(by)

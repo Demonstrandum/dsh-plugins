@@ -6,9 +6,12 @@
  *                         the same three blockers the Host's own session-move
  *                         refusal names (`session/move-live`, move.ts
  *                         `blockersOf`) plus queued follow-ups.
- *   RebootController    — `now` / `when-idle` / `cancel`; when armed it
+ *   RebootController    — `now` / `if-idle` / `when-idle` / `cancel`; when armed it
  *                         re-evaluates on a timer and fires once the busy
- *                         list has been empty for `idleGraceMs`.
+ *                         list has been empty for `idleGraceMs`. `if-idle` is
+ *                         the administrative form: fire only when nothing is
+ *                         in flight, otherwise refuse and name the blockers
+ *                         (what a redeploy script asks each server).
  */
 
 /** @typedef {{ kind: 'turn' } | { kind: 'queue', count: number } | { kind: 'jobs', labels: string[] } | { kind: 'subagents', count: number, running: number }} Blocker */
@@ -114,6 +117,25 @@ export class RebootController {
     return { ok: true, message: busy.length === 0 ? 'Rebooting DSH now.' : `Rebooting DSH now, interrupting ${String(busy.length)} session${busy.length === 1 ? '' : 's'}.`, interrupted: busy }
   }
 
+  /**
+   * Reboot only if no session has work in flight right now; otherwise do
+   * nothing and say why. Never arms, never interrupts.
+   * @returns {{ ok: true, message: string, busy: [] } | { ok: false, message: string, busy: BusySession[] }}
+   */
+  rebootIfIdle(by) {
+    if (this.fired) return { ok: false, message: 'a reboot is already under way', busy: [] }
+    const busy = this.deps.busy()
+    if (busy.length > 0) {
+      return { ok: false, message: `Not rebooting: ${String(busy.length)} session${busy.length === 1 ? ' has' : 's have'} work in flight (${busy.map(row => `${row.sessionId}: ${describeBlockers(row.blockers)}`).join('; ')}).`, busy }
+    }
+    this.disarm()
+    this.fired = true
+    this.deps.log(`reboot-command: idle — rebooting now${by === undefined ? '' : ` (requested from session ${by})`}`)
+    this.notify()
+    this.deps.fire('if-idle')
+    return { ok: true, message: 'Every session is idle — rebooting DSH now.', busy: [] }
+  }
+
   /** Reboot as soon as no session has work in flight (fires at once when idle already). */
   rebootWhenIdle(by) {
     if (this.fired) return { ok: false, message: 'a reboot is already under way' }
@@ -177,15 +199,16 @@ export class RebootController {
 /**
  * Parse the free text after `/reboot`.
  * @param {string} rawInput
- * @returns {'now' | 'wait' | 'cancel' | 'status' | { error: string }}
+ * @returns {'now' | 'if-idle' | 'wait' | 'cancel' | 'status' | { error: string }}
  */
 export function parseArgs(rawInput) {
   const word = rawInput.trim().toLowerCase()
   switch (word) {
     case '': case 'status': return 'status'
     case 'now': case 'force': return 'now'
+    case 'if-idle': case 'safe': case 'if-safe': return 'if-idle'
     case 'wait': case 'idle': case 'when-idle': return 'wait'
     case 'cancel': case 'abort': return 'cancel'
-    default: return { error: `unknown argument "${rawInput.trim()}" — use /reboot now, /reboot wait, /reboot cancel or bare /reboot for status` }
+    default: return { error: `unknown argument "${rawInput.trim()}" — use /reboot now, /reboot if-idle, /reboot wait, /reboot cancel or bare /reboot for status` }
   }
 }

@@ -131,3 +131,22 @@ test('listeners hear arming, cancelling and firing', () => {
   assert.equal(count, 4)
   stop()
 })
+
+test('rebootIfIdle: refuses with the blockers while busy, fires once idle, never arms', () => {
+  const busy = { value: [{ sessionId: 'a', blockers: [{ kind: 'turn' }] }, { sessionId: 'b', blockers: [{ kind: 'jobs', labels: ['build'] }] }] }
+  const { controller, fired, hasTimer } = controllerWith(busy)
+  const refused = controller.rebootIfIdle('me')
+  assert.equal(refused.ok, false)
+  assert.match(refused.message, /Not rebooting: 2 sessions have work in flight \(a: a turn is running; b: 1 background job \(build\)\)/)
+  assert.equal(refused.busy.length, 2)
+  assert.deepEqual(fired, [])
+  assert.equal(hasTimer(), false, 'if-idle never arms a timer')
+  assert.equal(controller.status().armed, undefined)
+  busy.value = []
+  const done = controller.rebootIfIdle('me')
+  assert.equal(done.ok, true)
+  assert.deepEqual(fired, ['if-idle'])
+  assert.equal(controller.rebootIfIdle().ok, false, 'already under way')
+  assert.equal(parseArgs('if-idle'), 'if-idle')
+  assert.equal(parseArgs('safe'), 'if-idle')
+})

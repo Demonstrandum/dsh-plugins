@@ -8,6 +8,7 @@ that pane does not have.
 ```
 /reboot            → the dialog (bare invocation; also from the / menu)
 /reboot now        → interrupt whatever is running and reboot
+/reboot if-idle    → reboot only if nothing is in flight right now, else say why not
 /reboot wait       → arm: reboot once every session is idle for 2 s
 /reboot cancel     → drop an armed reboot
 /reboot status     → one-line status as a command card (same as bare on a
@@ -59,13 +60,26 @@ installed, reloads too; the two are idempotent.
 | File | Half | Role |
 |---|---|---|
 | `reboot.mjs` | host, no Cordis | `busySessions()`, `describeBlockers()`, `parseArgs()`, `RebootController` (arm / cancel / now; 1 s poll + 2 s idle grace) — unit-tested in `tests/` |
-| `index.js` | host | `ctx.commands.register('reboot')`; control channel `POST /reboot-command/{status,now,wait,cancel}` behind DSH's request gate; `agent/status` → re-evaluate; optional `ctx.inject(['tailscaleRemoteRelay'])` for the relay facts (5 s cache — `launchctl print` per poll would be wasteful) |
+| `index.js` | host | `ctx.commands.register('reboot')`; control channel `POST /reboot-command/{status,now,if-idle,wait,cancel}` behind DSH's request gate; `agent/status` → re-evaluate; optional `ctx.inject(['tailscaleRemoteRelay'])` for the relay facts (5 s cache — `launchctl print` per poll would be wasteful) |
 | `src/client/index.tsx` | browser | `commandUi.decorate({ name: 'reboot', ui: { kind: 'action' } })` so the bare command opens the dialog; the dialog itself in the `shell.overlay` slot |
 
 The control channel is the same `client-request` / `server-response`
 envelope `dsh-tailscale-remote` and `import-api-keys` use, gated by
 `ctx.connection.requestRejection(req)` (Host/Origin fence + browser-session
 cookie), so the proxy forwards it for any admitted connection.
+
+## Administrative use: `if-idle`
+
+`POST /reboot-command/if-idle` (Connection envelope, like the other endpoints)
+is the question a redeploy asks every server: *restart if that interrupts
+nothing, otherwise tell me why not*. It never arms and never interrupts. Idle
+→ `ok: true` and the SIGTERM follows 400 ms later; busy → `ok: false`, code
+`reboot-command/busy`, `details.busy[]` = the sessions with their blockers
+(`turn` / `queue` / `jobs` / `subagents`) plus the usual status snapshot.
+`status` alone is the read-only form. The gate is DSH's admission, so over
+the tailnet any login on the instance's allowed-user list may ask (the
+`dsh-tailscale-remote` proxy forwards admitted requests to every non-control
+path); the private deploy tooling drives whole hosts through this.
 
 ## Relay coupling (optional)
 

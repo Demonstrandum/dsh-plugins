@@ -157,6 +157,31 @@ Never keep the `cordis.dev.yml` row and a bundle install for the same home —
 duplicate id fails the boot; the preview keeps the row, the live home the
 bundle.
 
+## 8. `if-idle`: the administrative form (2026-09-24)
+
+A fleet redeploy (several DSH instances on a shared machine, one per account)
+needs to restart a server only when that interrupts nobody. `/reboot now`
+interrupts and `/reboot wait` arms, so a third form was added:
+
+- `/reboot if-idle` (also `safe`) and `POST /reboot-command/if-idle`
+  (Connection envelope like the other endpoints): the server re-checks
+  `busySessions()` and restarts itself only if the list is empty; otherwise
+  `ok: false`, code `reboot-command/busy`, `details.busy[]` = sessions with
+  blockers (`turn` / `queue` / `jobs` / `subagents`) and the status snapshot.
+  Never arms, never interrupts. `RebootController.rebootIfIdle()`, tested.
+- Who may ask: DSH's admission, i.e. over the tailnet any login on the
+  instance's allowed-user list (the `dsh-tailscale-remote` proxy forwards
+  admitted requests to every non-control path). The allowed-user list can be
+  changed live through the plugin's `set-users` control endpoint from the
+  host itself (loopback + launch-token cookie), no restart.
+- The private deploy tooling drives a whole host with it: a status script
+  joins `GET /api/transcript/v1/sessions` (session-introspect: attached /
+  running, workspace, title) with `POST /reboot-command/status` (blockers)
+  into a per-server SAFE / BUSY verdict, and the sync script's
+  `--restart-safe` asks `if-idle` after installing, leaving busy servers on
+  the old code (they pick it up at their next restart). Details and the host
+  inventory live in the private extras notes, never here.
+
 ## 7. Troubleshooting
 
 | Symptom | Cause | Fix |
