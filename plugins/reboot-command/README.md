@@ -10,6 +10,8 @@ that pane does not have.
                      2026-09-24 also `/reboot ` + Enter with nothing after — the
                      fork's ui-commands routes an empty-argument claim to the
                      decoration instead of executing the host command)
+                     In the dialog: Enter = Reboot now, Escape = Cancel
+                     (src/client/dialog-keys.ts; recipe §9)
 /reboot now        → interrupt whatever is running and reboot
 /reboot if-idle    → reboot only if nothing is in flight right now, else say why not
 /reboot wait       → arm: reboot once every session is idle for 2 s

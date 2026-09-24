@@ -22,6 +22,7 @@ import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent, ReactNode } from 'react'
+import { DIALOG_DEFAULT, useDialogDefaultAction } from './dialog-keys.ts'
 import { RemoteApiError } from './api.ts'
 import type { PathInfo, ProbeResult, RemoteApi, RemoteWorkspace, ServerInfo } from './api.ts'
 import { FLAT_POLL_INTERVAL_MS, frameKey, PANEL_ID, type RemoteSelection, type RemoteWorkspacesModel, type RuntimeState, type ViewState } from './store.ts'
@@ -457,6 +458,8 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime, drag,
   const [rename, setRename] = useState<string | null>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [pending, setPending] = useState(false)
+  // Enter = Rename / Remove (the primary button of the open dialog); Escape = close (Modal's own).
+  useDialogDefaultAction(rename !== null || confirmRemove, confirmRemove)
   const items: MenuEntry[] = [
     { id: 'rename', label: 'Rename' },
     { id: 'remove', label: 'Remove from sidebar', danger: true },
@@ -589,7 +592,7 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime, drag,
         footer={(
           <>
             <Button variant="outline" disabled={pending} onClick={() => { setRename(null) }}>Cancel</Button>
-            <Button variant="primary" disabled={pending || (rename ?? '').trim() === ''} onClick={() => {
+            <Button variant="primary" {...DIALOG_DEFAULT} disabled={pending || (rename ?? '').trim() === ''} onClick={() => {
               setPending(true)
               void model.renameWorkspace(workspace.id, (rename ?? '').trim()).then(() => { setRename(null) }).finally(() => { setPending(false) })
             }}>Rename</Button>
@@ -607,7 +610,7 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime, drag,
         footer={(
           <>
             <Button variant="outline" disabled={pending} onClick={() => { setConfirmRemove(false) }}>Cancel</Button>
-            <Button variant="primary" disabled={pending} onClick={() => {
+            <Button variant="primary" {...DIALOG_DEFAULT} disabled={pending} onClick={() => {
               setPending(true)
               void model.removeWorkspace(workspace.id).then(() => { setConfirmRemove(false) }).finally(() => { setPending(false) })
             }}>Remove</Button>
@@ -1197,6 +1200,8 @@ export function MoveRemoteDialog({ model, localWorkspaces, useRuntime }: Face) {
   const [error, setError] = useState<string | null>(null)
   const [summary, setSummary] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  // Enter = Move / Copy (also from the title input); Escape = close (Modal's own).
+  useDialogDefaultAction(request !== undefined)
   useEffect(() => {
     // A copy defaults to the session's own workspace ("duplicate"); a move has no default.
     setChoice(request?.destinationId ?? (request?.mode === 'copy' && request.source.local !== true ? `remote:${request.source.workspaceId}` : undefined))
@@ -1317,7 +1322,7 @@ export function MoveRemoteDialog({ model, localWorkspaces, useRuntime }: Face) {
         <>
           <Button variant="outline" disabled={pending} onClick={() => { model.openMove(undefined) }}>{summary === null ? 'Cancel' : 'Close'}</Button>
           {summary === null && (
-            <Button variant="primary" disabled={blocked} onClick={() => { void confirm() }}>
+            <Button variant="primary" {...DIALOG_DEFAULT} disabled={blocked} onClick={() => { void confirm() }}>
               {copying ? (pending ? 'Copying…' : 'Copy') : (pending ? 'Moving…' : 'Move')}
             </Button>
           )}

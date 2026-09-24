@@ -14,6 +14,8 @@
  *     this dialog or this tab, and other clients see it too).
  *
  * Buttons: Cancel · Wait (arm: reboot once every session is idle) · Reboot now.
+ * Keyboard: Enter = Reboot now (the default action, see dialog-keys.ts),
+ * Escape = close (the Modal's own).
  * After the reboot fires the dialog stays up and brings the page back itself:
  * it waits for the server to go away, pokes the relay's loopback URL (a page
  * served straight from dsh's port would otherwise wait for the Dock app or a
@@ -29,6 +31,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { DIALOG_DEFAULT, useDialogDefaultAction } from './dialog-keys.ts'
 
 const CHANNEL = '/reboot-command'
 const COMMAND = 'reboot'
@@ -185,6 +188,8 @@ function RebootDialog({ store, rpc, sessions }: { store: DialogStore, rpc: Clien
   }, [state.open, state.sessionId])
 
   const comeback = useComeback(fired, status?.relay.wakeUrl, serverGone)
+  // Enter = Reboot now; focus follows the dialog (the fired Modal is a different card).
+  useDialogDefaultAction(state.open, fired)
 
   const act = async (endpoint: 'now' | 'wait' | 'cancel'): Promise<void> => {
     setPending(true)
@@ -245,7 +250,7 @@ function RebootDialog({ store, rpc, sessions }: { store: DialogStore, rpc: Clien
             Reboot when idle
           </Button>
         )}
-        <Button variant="primary" disabled={pending || status === undefined} style={busy.length > 0 ? { background: 'var(--dsh-color-danger, #c0392b)', borderColor: 'var(--dsh-color-danger, #c0392b)' } : undefined} onClick={() => { void act('now') }}>
+        <Button variant="primary" {...DIALOG_DEFAULT} disabled={pending || status === undefined} style={busy.length > 0 ? { background: 'var(--dsh-color-danger, #c0392b)', borderColor: 'var(--dsh-color-danger, #c0392b)' } : undefined} onClick={() => { void act('now') }}>
           Reboot now
         </Button>
       </>}

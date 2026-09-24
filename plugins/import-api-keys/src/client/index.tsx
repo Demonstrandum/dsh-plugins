@@ -29,6 +29,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useEffect, useState } from 'react'
+import { DIALOG_DEFAULT, useDialogDefaultAction } from './dialog-keys.ts'
 // @ts-expect-error plain ESM without a declaration file; esbuild inlines it
 import { PI_PROVIDER_ENV, parseKeyFile } from '../../parse.mjs'
 
@@ -162,7 +163,7 @@ function ConfirmTable({ dialog, onImport, onClose }: { dialog: Extract<Dialog, {
       width={Math.min(window.innerWidth - 80, 720 + Math.max(0, ...rows.map(r => r.summary.length + r.name.length - 70)) * 6)}
       footer={<>
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="primary" disabled={selected.length === 0} onClick={() => { void onImport({ keys: Object.fromEntries(selected.filter(r => r.value !== undefined).map(r => [r.name, r.value as string])), enables: selected.map(r => r.enable).filter((e): e is Enable => e !== undefined) }) }}>
+        <Button variant="primary" {...DIALOG_DEFAULT} disabled={selected.length === 0} onClick={() => { void onImport({ keys: Object.fromEntries(selected.filter(r => r.value !== undefined).map(r => [r.name, r.value as string])), enables: selected.map(r => r.enable).filter((e): e is Enable => e !== undefined) }) }}>
           {selected.length === 0 ? 'Import' : `Import ${selected.length}`}
         </Button>
       </>}
@@ -191,12 +192,14 @@ function ConfirmTable({ dialog, onImport, onClose }: { dialog: Extract<Dialog, {
 function ImportDialog({ store, onImport }: { store: DialogStore, onImport: (plan: ImportPlan) => Promise<void> }) {
   const [dialog, setDialog] = useState<Dialog | undefined>(store.get())
   useEffect(() => store.subscribe(setDialog), [store])
+  // Enter = the primary button of whichever card is up (Import / OK); Escape = close (Modal's own).
+  useDialogDefaultAction(dialog !== undefined, dialog?.kind)
   if (dialog === undefined) return null
   const close = (): void => store.set(undefined)
 
   if (dialog.kind === 'error') {
     return (
-      <Modal open title={dialog.title} closeLabel="Close" onClose={close} width={460} footer={<Button variant="primary" onClick={close}>OK</Button>}>
+      <Modal open title={dialog.title} closeLabel="Close" onClose={close} width={460} footer={<Button variant="primary" {...DIALOG_DEFAULT} onClick={close}>OK</Button>}>
         <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{dialog.message}</div>
       </Modal>
     )
@@ -206,7 +209,7 @@ function ImportDialog({ store, onImport }: { store: DialogStore, onImport: (plan
   }
   if (dialog.kind === 'done') {
     return (
-      <Modal open title="API keys imported" closeLabel="Close" onClose={close} width={480} footer={<Button variant="primary" onClick={close}>OK</Button>}>
+      <Modal open title="API keys imported" closeLabel="Close" onClose={close} width={480} footer={<Button variant="primary" {...DIALOG_DEFAULT} onClick={close}>OK</Button>}>
         <div style={{ fontSize: 13, lineHeight: 1.5 }}>
           {dialog.written.length > 0 && <div style={{ marginBottom: 8 }}>Stored: <span style={mono}>{dialog.written.join(', ')}</span></div>}
           {dialog.failed.map(f => <div key={f.name} style={{ marginBottom: 4 }}>Failed <span style={mono}>{f.name}</span>: {f.message}</div>)}

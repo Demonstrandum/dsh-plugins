@@ -182,6 +182,50 @@ interrupts and `/reboot wait` arms, so a third form was added:
   the old code (they pick it up at their next restart). Details and the host
   inventory live in the private extras notes, never here.
 
+## 9. Enter confirms, Escape cancels (2026-09-24)
+
+Reported from the Dock app: Enter on the open `Reboot DSH?` dialog did
+nothing. Cause, in the shipped `Modal`
+(`packages/client/ui-primitives/src/Modal.tsx`): it turns Escape into
+`onClose` through a document listener, but it neither handles Enter nor moves
+focus into the dialog, so after a slash command the keyboard stays in the
+composer behind the mask (the command popup's settle path even re-focuses
+Lexical asynchronously). In-tree dialogs only get Enter where an `<input>`
+wires it itself (`MoveDialogs.tsx`), so button-only confirms had no default
+action anywhere.
+
+Fix — `src/client/dialog-keys.ts` (`useDialogDefaultAction(open, stage?)` +
+`DIALOG_DEFAULT`, spread onto the one primary `Button`): on open, focus goes to
+the default button, or to the dialog card (`tabindex=-1`) while that button is
+disabled (the reboot dialog until its first status poll), retried at 0/50/200
+ms to outlast Lexical's refocus; Enter clicks the default button through the
+DOM (`button[data-dialog-default]` inside the topmost
+`[role=dialog][aria-modal]`), so a disabled button means Enter does nothing,
+exactly like a click; focus returns to where it was when the dialog closes.
+Enter is left alone on a focused button/link (the browser clicks *that*),
+inside a textarea/contenteditable of the dialog, on menu/listbox rows or while
+a shipped `Menu` popup is open, during IME composition, with Shift/Alt/Ctrl,
+and whenever a handler already called `preventDefault` (inputs with their own
+Enter → confirm keep working, no double fire). The shipped `Button` is not
+`forwardRef` (React 18), hence the data attribute instead of a ref.
+
+The same survey found the other plugin dialogs with a default button and no
+Enter, and the identical file was copied into each (each plugin bundles its
+own client; keep the copies in sync): `import-api-keys` (Import, both OK
+cards), `import-sessions` (Import N, Close; the pick stage's path input keeps
+its own Enter → Scan), `dsh-remote-workspaces` (Rename workspace, Remove
+workspace, Move/Copy — Rename session and Add remote already handled Enter in
+their inputs). The two screenshot Lightboxes and the QR popover have no default
+action; Escape already closed them.
+
+Verified on the preview with `import-sessions` (the only one of the four not
+pnpm-linked into the live profile, so its rebuild hot-swaps nothing live):
+focus lands on the card at the pick stage, Enter with the default disabled is
+a no-op, Enter from a ticked checkbox clicks *Import 1 session* exactly once
+(a capture-phase `click` probe with `stopImmediatePropagation` stood in for
+the real import), Shift+Enter nothing, Enter on the focused *Back* button
+clicks Back, Escape closes and the composer has the caret again.
+
 ## 7. Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -191,3 +235,4 @@ interrupts and `/reboot wait` arms, so a third form was added:
 | Dialog says the relay LaunchAgent is not loaded | `launchctl print gui/$UID/<label>` fails | install it from Settings ▸ Tailscale remote, or `launchctl bootstrap` the plist (`dsh-tailscale-remote/README.md`) |
 | "Rebooting DSH…" never turns into a reload | page origin is not the relay and the relay poke is mixed-content-blocked (https page → http loopback), or nothing fronts DSH | open the relay/tailnet URL, or start `dsh web` by hand |
 | Armed reboot never fires | a session keeps a running background job or a loaded subagent (both are blockers by design) | open the dialog: the list names it; kill the job or use *Reboot now* |
+| Enter in the dialog does nothing | *Reboot now* is still disabled (first status poll pending, or an action in flight); or an old `lib/client.js` (before §9) | wait a beat; rebuild the plugin (`pnpm build`) — the live bundle hot-swaps |

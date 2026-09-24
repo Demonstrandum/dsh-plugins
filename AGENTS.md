@@ -620,7 +620,13 @@ can reproduce or maintain it:
   `tailscaleRemoteRelay` service (restart vs quit), the comeback poke to the
   relay's loopback URL for pages served straight from dsh's port, the
   preview verification (sleep-60 turn → Wait → clean exit → relay restart →
-  reload) and the two-step live install still pending.
+  reload) and the two-step live install still pending. §9 (2026-09-24): why
+  Enter did nothing in the dialog (the shipped `Modal` handles Escape only and
+  never moves focus off the composer) and the `dialog-keys.ts` hook — Enter
+  clicks the `DIALOG_DEFAULT` primary button, focus pulled into the dialog
+  past Lexical's async refocus, restored on close — copied into every plugin
+  dialog with a default button (`import-api-keys`, `import-sessions`,
+  `dsh-remote-workspaces`).
 - `session-introspect-plugin.md` — model-facing `transcript_*` tools for
   reading *other* agents' transcripts and running tool-use studies (§2.7:
   `transcript_export`, `split_at`/`until` cohorts, adoption used/avail,
