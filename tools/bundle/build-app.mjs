@@ -39,6 +39,8 @@ const NAME = opt('--name', 'DSH')
 const PORT = Number(opt('--port', '3090'))
 const SIGN = opt('--sign', '-')
 const DMG = !args.includes('--no-dmg')
+const PRUNE = !args.includes('--no-prune')
+const WITH_OFFICE = args.includes('--with-office')
 const BUNDLE_ID = 'io.github.taliesinb.dsh-app'
 
 const dockApp = await import(pathToFileURL(join(REPO, 'plugins', 'dsh-tailscale-remote', 'dock-app.mjs')).href)
@@ -68,6 +70,54 @@ async function machOFiles(dir) {
   return out
 }
 
+/**
+ * Drop what the runtime never reads (measured 2026-09-23 on the 640 MB tree):
+ * declarations 41 MB, source maps 46 MB, TypeScript sources 42 MB, READMEs
+ * 8 MB, test dirs 10 MB, node-pty's other-platform prebuilds 24 MB, three.js
+ * examples/src 29 MB (the wolfram client bundle inlines its own copy), and —
+ * unless --with-office — the 259 MB native LibreOffice engine behind Office →
+ * PDF previews (dsh-office-to-pdf creates its converter lazily on first use,
+ * so boot is unaffected; a preview then reports the engine as unavailable).
+ * Mirrors upstream's apps/desktop/scripts/runtime-file-policy.ts in spirit.
+ */
+async function prune(root) {
+  let files = 0, bytes = 0
+  const dropFile = async (path) => { bytes += (await stat(path)).size; files++; await rm(path, { force: true }) }
+  const dropDir = async (path) => {
+    const out = await execFileAsync('du', ['-sk', path]).catch(() => null)
+    if (!out) return
+    bytes += Number(out.stdout.split('\t')[0]) * 1024; files++
+    await rm(path, { recursive: true, force: true })
+  }
+  const platform = `${process.platform}-${process.arch}`
+  const walk = async (dir) => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      if (entry.isSymbolicLink()) continue
+      if (entry.isDirectory()) {
+        if (/^(?:test|tests|__tests__|testdata|\.github)$/.test(entry.name)) { await dropDir(path); continue }
+        if (dir.endsWith('/node-pty/prebuilds') && entry.name !== platform) { await dropDir(path); continue }
+        if (dir.endsWith('/node_modules/three') && (entry.name === 'examples' || entry.name === 'src')) { await dropDir(path); continue }
+        await walk(path)
+        continue
+      }
+      if (/\.(?:d\.[mc]?ts|map|tsbuildinfo)$/.test(entry.name)) { await dropFile(path); continue }
+      // Only documentation by name: SKILL.md, preset guides and chrome-devtools-mcp's
+      // issue descriptions are runtime data (measured), so `*.md` wholesale is wrong.
+      if (/^(?:README|CHANGELOG|CHANGES|HISTORY|CONTRIBUTING|SECURITY|CODE_OF_CONDUCT|UPGRADING|MIGRATION)[^/]*\.md$/i.test(entry.name)) { await dropFile(path); continue }
+      // Plain .ts sources (never .d.ts, handled above): the runtime is built JavaScript throughout.
+      if (/\.[mc]?ts$/.test(entry.name) && !dir.includes('/node_modules/typescript/')) { await dropFile(path); continue }
+    }
+  }
+  await walk(root)
+  if (!WITH_OFFICE) {
+    for (const name of await readdir(join(root, '@deepseek-ai'))) {
+      if (/^libreoffice-kit-(?:darwin|win32|linux)-|^libreoffice-kit-wasm$/.test(name)) await dropDir(join(root, '@deepseek-ai', name))
+    }
+  }
+  log(`pruned ${files} entries, ${(bytes / 1024 / 1024).toFixed(0)} MB`)
+}
+
 async function main() {
   const stagePkg = await readJson(join(STAGE, 'package.json'))
   const nodeInfo = await readJson(join(OUT, 'node', 'current.json'))
@@ -90,12 +140,18 @@ async function main() {
   await mkdir(join(resources, 'node', 'bin'), { recursive: true })
   await cp(join(OUT, 'node', nodeInfo.dir, 'bin', 'node'), join(resources, 'node', 'bin', 'node'))
   await cp(join(OUT, 'node', nodeInfo.dir, 'LICENSE'), join(resources, 'node', 'LICENSE'))
+  if (PRUNE) {
+    // The official binary carries local symbols (121 → 97 MB). Stripping invalidates its
+    // signature (SIGKILL on launch) — it is re-signed with everything else below.
+    await execFileAsync('/usr/bin/strip', ['-x', join(resources, 'node', 'bin', 'node')])
+  }
 
   log('copying the staged installation')
   await mkdir(join(resources, 'dsh'), { recursive: true })
   await cp(join(STAGE, 'package.json'), join(resources, 'dsh', 'package.json'))
   // node_modules is hoisted (no links out of the tree); copy dereferences the few pnpm-internal symlinks.
   await cp(join(STAGE, 'node_modules'), join(resources, 'dsh', 'node_modules'), { recursive: true, dereference: true, verbatimSymlinks: false })
+  if (PRUNE) await prune(join(resources, 'dsh', 'node_modules'))
 
   const bundles = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...stagePkg.dshBundle.plugins.map(p => p.name)]
   await mkdir(join(resources, 'profile-template'), { recursive: true })
