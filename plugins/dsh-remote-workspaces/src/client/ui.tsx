@@ -968,10 +968,6 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
             <Input value={url} placeholder="user@host · host/dsh/user · https://host.example.ts.net/dsh/" spellCheck={false} autoCapitalize="off" autoFocus
               onChange={(event) => { setUrl(event.currentTarget.value); setError(null) }}
               onKeyDown={(event) => { if (event.key === 'Enter' && canProbe) void runProbe() }} />
-            <span style={S.caption}>
-              A full URL, or a short form: <code>host/dsh/user</code>, <code>user@host</code> (a tailnet short name gets its MagicDNS suffix), <code>localhost:3082</code>.
-              Your tailnet login is used to sign in; a token is only needed when it is not on that server&apos;s allowed list.
-            </span>
           </div>
           {showToken
             ? (
