@@ -423,14 +423,10 @@ can reproduce or maintain it:
   the live bundle install taking effect without a restart, and the pnpm-12
   `packageManager` temp-dir trap (`node --import tsx/esm apps/cli/src/bin.ts`
   from the checkout root).
-- `client-bundle-rebuild-kills-pending-prompts.md` — `ask_user_question`
-  fails with `NO_PROVIDER` ("no user-questions answerer accepted the
-  request") seconds after a live-profile client bundle is rebuilt: the HMR
-  swap tears down every plugin injecting `sessions`, `ui-user-questions`
-  delegates the pending prompt, and the gateway reads a last-client `next`
-  as "nobody can answer". Same for approvals. Not a rebase regression; no
-  fork fix by decision (drafted handover-across-reload approach recorded);
-  just re-ask, and rebuild in the preview server instead.
+- `client-bundle-rebuild-kills-pending-prompts.md` — historical note on a
+  rare `NO_PROVIDER` from `ask_user_question` right after a live client
+  bundle rebuild. Not a reason to avoid rebuilding a live bundle; if it ever
+  happens, just re-ask.
 - `copy-sessions.md` — **Copy to…** beside every Move to… (fork `session.copy`
   + `ui-workspace` dialog; plugin `sessions.copy` / `sessions.copyAcross`,
   **Copy to remote…**): a new session with fresh ids from the source's durable
