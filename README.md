@@ -5,7 +5,11 @@
 </p>
 
 Out-of-tree work on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-(DSH), a coding-agent harness with a web GUI. Everything lives in this one repo:
+(DSH), a coding-agent harness with a web GUI.
+
+The goal is to improve DeepSeek Harness, which is currently in a pre-alpha state, to include some simple quality of life improvements and bug fixes, better general-purpose tools, more effective browser automation for iterating on custom web servers, the ability to utilize long-running agents that survive end-user laptop disconnections/restarts, a pleasant native-OS app experience, simple sharing of sessions for use on smartphones, config-free Tailscale integration, and an easy upgrade path from other agent harnesses. Many of these features will likely end up in in the final release candidate of DSH anyway, this set of plugins and the associated DSH fork makes DSH substantially more usable in the interim.
+
+Everything lives in this one repo:
 
 | | Where | What |
 |---|---|---|
