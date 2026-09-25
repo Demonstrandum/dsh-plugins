@@ -13,7 +13,7 @@ Everything lives in this one repo:
 
 | | Where | What |
 |---|---|---|
-| **Plugins** | `plugins/<name>/` | Twenty DSH plugins — agent tools, remote access, native OS apps, GUI tweaks, model plumbing. One installable npm package each. [Below](#plugins). |
+| **Plugins** | `plugins/<name>/` | Twenty-three DSH plugins — agent tools, remote access, native OS apps, GUI tweaks, model plumbing. One installable npm package each. [Below](#plugins). |
 | **Private layer** | `extras/` (optional git submodule) | Deployment inventory, host scripts and further plugins that are not public. Absent without org access; every script here continues without it. Its manifest `extras/dsh-extras.yml` is read by the same installers. |
 | **The fork** | `deepseek-harness/` (git submodule) | [the custom fork of DSH](https://github.com/taliesinb/deepseek-harness), branch `feat/embed-session`, pinned to the commit the plugins were last tested against. A handful of features needed changes no plugin can make. [Below](#the-fork). |
 | **Native OS apps** | built by `plugins/dsh-tailscale-remote` (macOS), `flake.nix` (Linux) | A native window onto a DSH server — the local one, the preview server or a remote machine — with loopback port forwarding: a WKWebView wrapper on macOS, an Electron thin client on Linux. [Below](#native-os-apps). |
@@ -215,6 +215,18 @@ Everything else — tools, remote access, apps, UI — is a plugin.
   reads pi's `auth.json` (or a flat key map / `.env`), shows what is new,
   unchanged or would be replaced, stores the keys as DSH credentials. Same in
   the local app, a hybrid remote frame and a direct-remote app.
+- `import-sessions` — `/import-claude` and `/import-pi` bring Claude Code and
+  pi transcripts from disk into DSH as real, resumable sessions, grouped into
+  the workspace whose directory matches the transcript's cwd: chooser on the
+  client device (upload) or on the server, one decision modal, a
+  "working-session" fold for very large transcripts; written through DSH's own
+  persistence services. Host + browser halves.
+- `reboot-command` — `/reboot` restarts *this* `dsh web` from inside a session:
+  a dialog listing every session a restart would interrupt (running turns,
+  background jobs, subagents, queued messages), **Wait** (fires once every
+  session is idle), **Reboot now**; the relay brings the server back. Also a
+  `POST /reboot-command/if-idle` route the deploy scripts use for safe
+  restarts. Host + browser halves.
 
 ### GUI
 
@@ -239,6 +251,12 @@ Everything else — tools, remote access, apps, UI — is a plugin.
   (every client bundle revision re-minted at once), reload instead of letting
   client HMR hot-swap the whole plugin tree in place, which crashes the React
   root and leaves a black window. Browser-only.
+- `brand-kit` — re-brand the GUI from configuration: mark and wordmark, web
+  fonts and typography, a one-hex accent ramp, the two shell strings ("Into
+  the Unknown", "Deep diving..."). Ships no brand; a brand is a *profile*
+  directory under `$DSH_HOME/brand-profiles/`, managed from the Plugins panel
+  (apply / duplicate / export-import `.brand.zip` / editor) or `cli.mjs`. No
+  active profile = the stock look. Host + browser halves.
 
 ### Models and presets
 
