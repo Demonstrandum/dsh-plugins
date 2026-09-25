@@ -70,9 +70,13 @@ disabled in a session, a denial is final.
   put the concrete facts in the private `extras/` submodule (its `AGENTS.md`
   has the full rule, the grep to run on every staged diff, and the history
   rewrite procedure). Before committing: `git diff --cached -- . ':!extras' |
-  grep -i` for the identifiers listed there. Three history rewrites already
-  (2026-09-21 and 2026-09-22 for leaks, 2026-09-25 to move a plugin into
-  `extras/`); a leak must never cause another.
+  grep -i` for the identifiers listed there. Four history rewrites already
+  (2026-09-21 and 2026-09-22 for leaks; 2026-09-25 to move a plugin into
+  `extras/` and to make the prose impersonal — no personal names, no
+  `/Users/<login>` paths, machine-neutral wording); a leak must never cause
+  another. House style since then: "the maintainer", "the custom fork",
+  "the development laptop", `/Users/USER/…`, `user@example.com`, "shared
+  machine", "fresh machine", "native OS apps".
 - Plugins are developed **out-of-tree** (this repo). Never fork/patch DSH to
   add a feature: "There is no privileged core to patch: you extend dsh by
   mounting a plugin beside the others" (`docs/architecture.md`).
