@@ -267,6 +267,14 @@ prompt). Launch A → 13 s later B was running from A's path, the server
 restarted, and B's own check reported "latest 2026092402; running
 2026092402". Delete the default afterwards (`defaults delete …`).
 
+**Against a real release (2026-09-25):** the first `pnpm release-app --repo
+<fork>` published `canary-2026092501` on a personal fork (nothing is
+published on the upstream repo from a branch — releases there come from `main`
+after the PR merges); an app built with `--build 2026092500 --update-repo
+<fork>` found it through api.github.com, downloaded the 92 MB asset, verified,
+swapped and relaunched in 19 s. Rate limit: unauthenticated 60/h per IP; one
+check per launch + one per 6 h is far below it.
+
 ## Known gaps / next
 
 - **Milestone 2 — first-run dialog** inside DSH (a host+client plugin,
