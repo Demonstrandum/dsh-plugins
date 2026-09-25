@@ -21,4 +21,6 @@ phone-ui
 wait-tool
 reboot-command
 brand-kit
+chat-title
+import-sessions
 app-lifeline
