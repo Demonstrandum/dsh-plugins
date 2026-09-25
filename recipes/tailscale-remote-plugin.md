@@ -270,7 +270,7 @@ DSH branch pushed: `taliesinb/deepseek-harness` → `fix/tailscale-mounting`.
 ## Sibling plugins with root-relative `/api` URLs
 
 `foreign-link-opener/src/client/index.ts` and
-`<private-plugin>/src/client/index.tsx` used `/api/...` literals,
+another client plugin's `src/client/index.tsx` used `/api/...` literals,
 which would escape the mount. Sources changed to `./api/...` (typecheck
 green) but **`lib/client.js` was not rebuilt** — both are installed in the
 live profile and a rebuild hot-swaps the open GUI. Run `pnpm build` in each

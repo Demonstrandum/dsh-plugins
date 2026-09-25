@@ -511,8 +511,9 @@ if wants apps && [ "$APPS" = 1 ]; then
     "Safari Technology Preview|safari-technology-preview|safari_* tools (only STP ships safaridriver --mcp)|26"
     "Google Chrome|google-chrome|chrome_* tools (chrome-devtools-mcp)|13"
   )
-  # Not offered: Dash and <private> are paid apps — their plugins are installed
-  # only when the app is already there (see plugin_exclusions below).
+  # Not offered: Dash is a paid app — its plugin is installed only when the app
+  # is already there (see the exclusions below); extras plugins gate themselves
+  # through the manifest's `requires:`.
   for row in "${APP_TABLE[@]}"; do
     IFS='|' read -r app cask why minmac <<<"$row"
     if [ -d "/Applications/$app.app" ] || [ -d "$HOME/Applications/$app.app" ]; then ok "$app.app present"; continue; fi
@@ -555,28 +556,19 @@ if wants apps && [ "$APPS" = 1 ]; then
   fi
 fi
 
-# <private>: activation is per macOS user. A kernel that starts but has no licence for this account makes
-# every <private>_* call fail with "No valid password found"; probe once so it lands in the to-do list.
-if [ -x "/Applications/<private>.app/Contents/MacOS/<private>Kernel" ] && [ "$DRY" != 1 ]; then
-  WK_OUT="$(perl -e 'alarm 60; exec @ARGV' -- "/Applications/<private>.app/Contents/MacOS/<private>Kernel" -noprompt -run 'Print[1+1]; Exit[]' 2>&1 | tr -d '\n' || true)"
-  case "$WK_OUT" in
-    *2*) ok "<private> kernel licensed for this user" ;;
-    *) todo "activate <private> for this macOS user: \"/Applications/<private>.app/Contents/MacOS/<private>Kernel\" -activate <activation-key> -noprompt -run 'Exit[]'   (<private>script -activate refuses a <private> kernel)" ;;
-  esac
-fi
-
 # Plugins that only make sense with a paid app already on the Mac: left out of
 # the build and the bundle install when the app is absent (re-run
 # `pnpm install-plugins` after installing the app to add them).
 # Detect by bundle id through LaunchServices, not by path: Dash may live in
 # /Applications/Setapp/Dash.app (com.kapeli.dash-setapp) or come from the App
 # Store / a direct download (com.kapeli.dashdoc) — the plugin accepts both.
+# Plugins of the optional extras layer carry their own gate in the manifest
+# (`requires:`), evaluated by tools/extras-manifest.mjs — nothing about them is
+# hardcoded here.
 app_by_id()   { local b; for b in "$@"; do osascript -e "id of application id \"$b\"" >/dev/null 2>&1 && return 0; done; return 1; }
 has_dash()    { app_by_id com.kapeli.dash-setapp com.kapeli.dashdoc || [ -d /Applications/Dash.app ] || [ -d /Applications/Setapp/Dash.app ]; }
-has_<private>() { [ -d /Applications/<private>.app ] || [ -d /Applications/<private>.app ] || command -v <private>script >/dev/null 2>&1 || app_by_id com.<private>.<private> com.<private>.<private>; }
 EXCLUDED=()
 has_dash    || EXCLUDED+=(dash-docsets)
-has_<private> || EXCLUDED+=(<private-plugin>)
 excluded() { case " ${EXCLUDED[*]-} " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }   # ${arr[*]-}: bash 3.2 + set -u treats an empty array as unbound
 
 # ===========================================================================
@@ -846,20 +838,23 @@ if wants plugins; then
     [ "$DRY" = 1 ] || sed -i '' "s#/Users/USER/github/tali-dash-plugins#$DIR#g" "$DIR/cordis.dev.yml"
     ok "cordis.dev.yml re-pointed at $DIR"
   fi
-  EXTRA_PDIRS=""
+  # Extras plugins: the manifest reader evaluates each `requires` gate (`ok` / `-` / `missing:<what>`) and
+  # names an optional `check` hook; skipped ones are reported with the manifest's own words. Rows are
+  # "path|status|check" (spaces are impossible in the paths, `|` is not a manifest character).
+  EXTRA_ROWS=""; EXTRA_CHECKS=""
   if [ -f "$DIR/extras/dsh-extras.yml" ] && [ -f "$DIR/tools/extras-manifest.mjs" ]; then
-    EXTRA_PDIRS="$(node "$DIR/tools/extras-manifest.mjs" "$DIR" 2>/dev/null | while IFS=$'\t' read -r epath ebundle einstall ereq; do
-      if [ "$ereq" != "-" ] && ! command -v "$ereq" >/dev/null 2>&1; then echo "SKIP:$epath:$ereq"; else echo "$epath/"; fi
+    EXTRA_ROWS="$(node "$DIR/tools/extras-manifest.mjs" "$DIR" 2>/dev/null | while IFS=$'\t' read -r epath ebundle einstall estatus echeck; do
+      case "$estatus" in missing:*) echo "SKIP|$epath|${estatus#missing:}" ;; *) echo "$epath/|$estatus|$echeck" ;; esac
     done)"
   fi
-  for pdir in "$DIR"/plugins/*/ $EXTRA_PDIRS; do
-    case "$pdir" in SKIP:*) warn "extras plugin $(basename "$(echo "$pdir" | cut -d: -f2)") skipped — requires the \`$(echo "$pdir" | cut -d: -f3)\` command, not on this Mac"; continue;; esac
+  for row in "$DIR"/plugins/*/ $EXTRA_ROWS; do
+    pdir="${row%%|*}"
+    case "$row" in SKIP\|*) warn "extras plugin $(basename "$(echo "$row" | cut -d'|' -f2)") skipped — requires $(echo "$row" | cut -d'|' -f3), not on this Mac"; continue;; esac
     p="$(basename "$pdir")"; [ -f "$pdir/package.json" ] || continue
-    case "$pdir" in "$DIR"/extras/*) p="extras:$(basename "$(dirname "$(dirname "$pdir")")")/$p" ;; esac
+    case "$pdir" in "$DIR"/extras/*) p="extras:${pdir#"$DIR"/extras/}"; p="${p%/}"; c="$(echo "$row" | cut -d'|' -f3)"; [ "$c" = "-" ] || [ -z "$c" ] || EXTRA_CHECKS="$EXTRA_CHECKS $c" ;; esac
     if excluded "$p"; then
       case "$p" in
         dash-docsets) warn "$p skipped — Dash.app (paid) is not installed" ;;
-        <private-plugin>) warn "$p skipped — <private>.app / <private>.app (paid) is not installed" ;;
         *) log "$p skipped (not a live-profile plugin)" ;;
       esac
       continue
@@ -878,6 +873,13 @@ if wants plugins; then
     fi
     if [ -n "$isclient" ] && [ ! -f "$pdir/lib/client.js" ] && [ "$DRY" = 0 ]; then die "plugins/$p is a client plugin without lib/client.js"; fi
     ok "$p"
+  done
+  # Post-build hooks named by the extras manifest (`check:`): every line one prints is something only a
+  # human can finish (a per-user licence, a login), so it goes on the to-do list.
+  for c in $EXTRA_CHECKS; do
+    [ -x "$c" ] || { warn "extras check hook not executable: $c"; continue; }
+    if [ "$DRY" = 1 ]; then log "would run extras check hook $(basename "$c")"; continue; fi
+    while IFS= read -r line; do [ -n "$line" ] && todo "$line"; done < <("$c" 2>>"$LOG" || true)
   done
   [ -z "$PLUGINS_SHA" ] || record_built plugins "$PLUGINS_SHA"
 fi
@@ -929,7 +931,8 @@ if wants install-plugins; then
   if [ "$DRY" = 1 ] && [ ! -d "$DIR" ]; then log "would run tools/install-plugins.sh ${IP_ARGS[*]}"
   else (cd "$DIR" && run tools/install-plugins.sh "${IP_ARGS[@]}") || die "install-plugins failed"; fi
   has_dash    || todo "if you buy Dash later: install it, then re-run: pnpm install-plugins (adds the dash_* tools)"
-  has_<private> || todo "if you install <private>/<private> later: re-run pnpm install-plugins (adds the <private>_* tools)"
+  # Extras plugins skipped by their `requires` gate are listed by install-plugins.sh itself ("skipped (requires …)");
+  # the same re-run adds them once the requirement is met.
 fi
 
 # ===========================================================================

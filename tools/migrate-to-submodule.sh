@@ -144,13 +144,6 @@ if [ "$DRY" = 0 ]; then
   config:
     traceFile: /tmp/dash-docsets-trace.log
 
-- id: tali-<private-plugin>
-  config:
-    subagents: true
-    idleMinutes: 60
-    theme: auto
-    traceFile: /tmp/<private-plugin>-trace.log
-
 - id: tali-session-introspect
   config:
     scope: all

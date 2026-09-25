@@ -206,7 +206,7 @@ visible on first turn after resume, sandbox root in the runtime-context snapshot
   DnD lands, so the invariant "drop = pre-filled dialog" holds everywhere.
 
 - Move blockers (`a3efd60bfa`) cover turn / background jobs / owned subagents. Plugin-held
-  agent-scoped resources (<private> kernel, browser windows, MCP sessions) are not
+  agent-scoped resources (language kernels, browser windows, MCP sessions) are not
   enumerated; a `session/move-blockers` hook plugins answer would close that.
 
 - Cross-tree DnD (local row → remote group and back).

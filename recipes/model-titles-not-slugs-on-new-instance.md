@@ -3,7 +3,7 @@
 **Date:** 2026-09-22. **Symptom:** in the DSH Remote sidebar, sessions the
 model names come out as natural phrases ("Symba status and profiles i…",
 "Checking for Symba toolset a…") while hand-typed `foo-bar: ` slugs work
-(`symba-demo`, `<private>-plot-demo`). On this Mac's live DSH the same sessions
+(`symba-demo`, `plot-demo`). On this Mac's live DSH the same sessions
 would be `symba-status-and-profiles`. **Nothing is broken**: the slug shape is
 a *config override* that lives in `$DSH_HOME`, and the remote's home never got it.
 (Host names, accounts and ports of the shared remote machine live only in the
@@ -60,7 +60,7 @@ maxOutputTokens/timeoutMs`), so the default is `natural`. This Mac's
 ## Verified in the preview (2026-09-22)
 
 The preview home (`~/.dsh-preview`) had the same gap and reproduced the
-symptom exactly (`"<private> plot command"`, `kind: provider`,
+symptom exactly (`"Plot command"`, `kind: provider`,
 `apple/foundation`). Adding the override above to
 `~/.dsh-preview/profiles/web/cordis.patch.yml` (kept), restarting the relay
 (`launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay.preview`,

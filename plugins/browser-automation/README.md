@@ -196,7 +196,7 @@ retina), click for an in-page lightbox (fit ↔ 1:1, Escape closes; never
 then the result text with its `NOTE:`s. The image is drawn with the
 session-authorized `loadImage` loader every toolview receives, because the
 shared `tool.call.images` gallery slot is `single` and owned by the
-`read_image` entry (same reasoning as `<private-plugin>`). Claiming a
+`read_image` entry (the same holds for any plugin with its own image rows). Claiming a
 key suppresses the generic card for every shape of the tool, so the row also
 covers running, error, interrupted-turn and the file fallback (a model without
 image input gets `saved to <path>` — summary says `saved to file`).

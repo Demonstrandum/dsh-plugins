@@ -122,9 +122,8 @@ log "syncing dsh-tailscale-remote (runtime files; deps resolved against the sync
 # Generic plugins (no machine-specific software): local-model bits, the slug
 # titler, the transcript tools (session-introspect), batch fs tools, and two
 # client conveniences. Excluded on purpose — dash-docsets (Dash.app),
-# browser-automation (Chrome/STP + sharp), <private-plugin>
-# (<private>), notion-mcp (the maintainer's OAuth): install that software on the
-# host first, then add the row here.
+# browser-automation (Chrome/STP + sharp), notion-mcp (the maintainer's OAuth), the
+# extras layer: install that software on the host first, then add the row here.
 PLUGINS=(local-model-supervisor enforce-model-preset session-title-slug session-introspect fs-tools foreign-link-opener settings-shortcut)
 log "syncing plugins: ${PLUGINS[*]}; minimal-no-tools preset"
 for P in "${PLUGINS[@]}"; do
@@ -137,8 +136,8 @@ done
 # node_modules and let the host `npm install` the exact pinned versions from
 # a link:-free package.json (workspace links are re-pointed at the synced
 # checkout below). They need the apps installed on the host: Chrome + Safari
-# Technology Preview (Allow Remote Automation) and <private> 15.
-APP_PLUGINS=(browser-automation <private-plugin>)
+# Technology Preview (Allow Remote Automation).
+APP_PLUGINS=(browser-automation)
 log "syncing app-backed plugins (deps installed on the host): ${APP_PLUGINS[*]}"
 for P in "${APP_PLUGINS[@]}"; do
   "${RSYNC[@]}" -a --delete --stats --exclude 'node_modules' --exclude 'src' --exclude 'tests' --exclude 'test' \
@@ -173,7 +172,7 @@ PLUGIN="$HOME/dsh/plugins/dsh-tailscale-remote"
 # shipped plugin gets the @deepseek-ai packages it imports as symlinks.
 CK="$HOME/dsh/checkout"
 link_dep() { mkdir -p "$1/node_modules/@deepseek-ai"; ln -sfn "$2" "$1/node_modules/@deepseek-ai/$3"; }
-for P in dsh-tailscale-remote session-introspect fs-tools foreign-link-opener settings-shortcut local-model-supervisor enforce-model-preset session-title-slug browser-automation <private-plugin>; do
+for P in dsh-tailscale-remote session-introspect fs-tools foreign-link-opener settings-shortcut local-model-supervisor enforce-model-preset session-title-slug browser-automation; do
   D="$HOME/dsh/plugins/$P"; [ -d "$D" ] || continue
   link_dep "$D" "$CK/vendor/schemastery" schemastery
   link_dep "$D" "$CK/vendor/cordis" cordis
@@ -236,13 +235,6 @@ cat > "$HOME/.dsh/deploy/remote.cordis.yml" <<YML
         chrome:
           headless: false
         traceFile: $HOME/dsh/logs/browser-automation-trace.log
-    - id: tali-<private-plugin>
-      name: '$HOME/dsh/plugins/<private-plugin>/index.js'
-      config:
-        subagents: true
-        idleMinutes: 60
-        theme: auto
-        traceFile: $HOME/dsh/logs/<private-plugin>-trace.log
     - id: tali-local-model-supervisor
       name: '$HOME/dsh/plugins/local-model-supervisor/index.js'
       config:

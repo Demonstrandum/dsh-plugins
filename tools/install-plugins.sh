@@ -6,8 +6,8 @@
 #   pnpm install-plugins [--profile web] [--checkout DIR] [--without NAME,NAME] [--remove] [--dry-run]
 #
 # --without drops plugins from the set for this run (directory names, e.g.
-# `--without dash-docsets,<private-plugin>` on a Mac without Dash or
-# <private> — tools/bootstrap-mac.sh does exactly that).
+# `--without dash-docsets` on a Mac without Dash — tools/bootstrap-mac.sh does
+# exactly that; extras plugins match by directory name or bundle name).
 #
 # Each plugin under plugins/ that is meant for a live profile declares
 # `dsh.bundle.patch` (its cordis.patch.yml inserts its own `tali-*` row by
@@ -63,7 +63,6 @@ PLUGINS=(
   browser-automation
   dash-docsets
   local-model-supervisor
-  <private-plugin>
   foreign-link-opener
   session-introspect
   fs-tools
@@ -96,15 +95,17 @@ if [ -n "$WITHOUT" ]; then
   PLUGINS=("${KEPT[@]}")
 fi
 
-# The optional private layer (extras/dsh-extras.yml): plugins with `install: true` whose `requires.command`
-# (if any) is present join the set. Absent submodule → nothing added. NB: macOS's /bin/bash is 3.2, where
-# "${EMPTY[@]}" under `set -u` is an error (fixed in 4.4) — an empty array must be expanded as
-# ${ARR[@]+"${ARR[@]}"}; that is exactly the no-extras case (a fresh account without the deploy key).
+# The optional private layer (extras/dsh-extras.yml): plugins with `install: true` whose `requires` gate
+# (evaluated by the manifest reader: `ok`, `-` = none, or `missing:<what>`) passes join the set. Absent
+# submodule → nothing added. NB: macOS's /bin/bash is 3.2, where "${EMPTY[@]}" under `set -u` is an error
+# (fixed in 4.4) — an empty array must be expanded as ${ARR[@]+"${ARR[@]}"}; that is exactly the no-extras
+# case (a fresh account without the deploy key).
 EXTRA_DIRS=()
 if [ -f "$HERE/extras/dsh-extras.yml" ] && [ -f "$HERE/tools/extras-manifest.mjs" ] && [ -z "${NO_EXTRAS:-}" ]; then
-  while IFS=$'\t' read -r epath ebundle einstall ereq; do
+  while IFS=$'\t' read -r epath ebundle einstall estatus echeck; do
     [ "$einstall" = yes ] || continue
-    if [ "$ereq" != "-" ] && ! command -v "$ereq" >/dev/null 2>&1; then log "extras: $ebundle skipped (requires \`$ereq\`)"; continue; fi
+    case "$estatus" in missing:*) log "extras: $ebundle skipped (requires ${estatus#missing:})"; continue ;; esac
+    case ",$WITHOUT," in *",$ebundle,"*|*",$(basename "$epath"),"*) log "leaving out $ebundle (--without)"; continue ;; esac
     [ -f "$epath/package.json" ] || { log "extras: $ebundle skipped (not checked out: $epath)"; continue; }
     EXTRA_DIRS+=("$epath")
   done < <(node "$HERE/tools/extras-manifest.mjs" "$HERE" 2>/dev/null)

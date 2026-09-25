@@ -30,7 +30,7 @@ transcript_read session:"…" raw:true fmt:"jsonl" out_file:"x.jsonl" → export
 The maintainer's recurring workflow: *"look at session `tensatory/interval-slider-proto`
 — the agent there is hitting X with tool Y; fix/redesign Y."* An agent in one
 session must read another agent's transcript to study how it experienced a
-DSH tool (browser-automation, <private>, dash, …), then improve the tool. Today
+DSH tool (browser-automation, dash, …), then improve the tool. Today
 that agent has no tool for it and reverse-engineers `~/.dsh` every time.
 
 ### 1.1 Evidence: what agents actually did (five sessions, `deepseek-harness` workspace)
@@ -43,7 +43,7 @@ replayed the same discovery loop before any analysis started:
 | `web-automation-errors` (`session-cec83493`) | `tensatory/interval-slider-proto` | 5 (`seq 28–48`) | `find -iname '*interval-slider*'` fails; title→id via grep of decompressed logs; ad hoc `grep -oE '(screenshot).{0,300}(fell back)…' \| uniq -c` as tool stats |
 | `content-some-bug` (`session-045f9961`) | `tensatory/initial-review` | 5 (`seq 66–219`) | then ~10 more calls learning the zstd multi-frame + packed-chunk-row contract because it had to *write* a repaired log |
 | `image-dims-bug` (`session-7992f51d`) | `tensatory/initial-review` | 8 (`seq 56–654`) | read a recipe to learn how to decode; three Node one-liners to walk image parts; base64 blobs made greps noisy |
-| `repeated-images` (`session-c96f22a9`) | `laptop/<private>-demo` | 9 (`seq 58–439`) | **opened the wrong session first** (`#126`: newest in `laptop/` = `dash-demo`); rummaged `storages/workspace.json` and `session_projcache` for the title; hand-wrote a USER/CALL/RESULT timeline printer (`#439`) |
+| `repeated-images` (`session-c96f22a9`) | `laptop/plot-demo` | 9 (`seq 58–439`) | **opened the wrong session first** (`#126`: newest in `laptop/` = `dash-demo`); rummaged `storages/workspace.json` and `session_projcache` for the title; hand-wrote a USER/CALL/RESULT timeline printer (`#439`) |
 | `tailscale-remote-plugin` (`session-7420babc`) | `deepseek-harness/remote-control` | 0 | never opened the transcript: the **recipe** from that session was enough |
 
 Recurring steps (each rediscovered from scratch):
@@ -517,5 +517,5 @@ spent 5–9 calls per session approximating:
 - `chrome_save_screenshot` **30 % error rate** (18/61), `chrome_get_screenshot` 13 %: ×17 the uninformative fallback `Error: chrome screenshot failed: Took a screenshot of the current page's viewport.` — the exact message `web-automation-errors` set out to fix. After it, agents switched to `read_image` (×14) or `bash` (×8); one retried identically.
 - ×10 `tool "…" returned invalid output: value is not lossless JSON` across `chrome_save_screenshot` (×7), `safari_get_page_content` (×2), `chrome_get_screenshot` (×1) — the same `undefined`-in-canonical-value bug this plugin hit; worth a sweep of `browser-automation`.
 - `chrome_evaluate_expression`: ×10 `Execution context was destroyed, most likely because of a navigation`, followed ×10 by a retry with changed args — the tool could say "wait for the navigation, then re-evaluate".
-- **11 sessions are refused by DSH's current reader** (3 native v0 logs — `deepseek-harness/<private>-tool`: `agent/inbox/spliced 46592 inserted message lacks required member "id"` (the `content.some` bug class, see `plugin-inject-string-content-bug.md`); `loss-landscape/loss-landscape` and `laptop/web-iteration-demo (1)`: `assistant/message … chunk references are not one complete ordered attempt` — and all 8 imported `pi-*` / `claude-*` sessions: `format v2 surface before first step cannot acquire a system head without changing chronology`). These will presumably fail to open in the GUI after the 2026-09-16 upgrade too; `transcript_tool_stats sessions:["*"] fmt:"json"` lists them with full diagnostics. Not this plugin's bug — but it is the first tool that shows the list.
+- **11 sessions are refused by DSH's current reader** (3 native v0 logs — `deepseek-harness/kernel-tool`: `agent/inbox/spliced 46592 inserted message lacks required member "id"` (the `content.some` bug class, see `plugin-inject-string-content-bug.md`); `loss-landscape/loss-landscape` and `laptop/web-iteration-demo (1)`: `assistant/message … chunk references are not one complete ordered attempt` — and all 8 imported `pi-*` / `claude-*` sessions: `format v2 surface before first step cannot acquire a system head without changing chronology`). These will presumably fail to open in the GUI after the 2026-09-16 upgrade too; `transcript_tool_stats sessions:["*"] fmt:"json"` lists them with full diagnostics. Not this plugin's bug — but it is the first tool that shows the list.
 

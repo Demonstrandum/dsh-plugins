@@ -1,5 +1,5 @@
 /**
- * Browser-half bundle build (copy of <private-plugin>/build.mjs, sans minify).
+ * Browser-half bundle build (this repo's esbuild client-bundle template; sans minify).
  * Produces lib/client.js in the artifact format the DSH web shell loads:
  *
  *   window.__ModuleLoader__.load({ id: '<package name>', factory: (require) => {

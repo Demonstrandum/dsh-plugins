@@ -46,8 +46,9 @@ Client-side interception + a host route that shells out to `open`:
    through the reverse proxy must never open Safari on the Mac. `when: always`
    exists for testing in a normal tab.
 
-Client↔host plumbing pattern copied from `<private-plugin>`'s
-`/api/<private>/open` route; bundle format/build from its `build.mjs`.
+Client↔host plumbing pattern copied from an earlier client plugin's "open"
+route; bundle format/build from its `build.mjs` (the template is now
+`plugins/wait-tool/build.mjs`).
 
 ## Install
 

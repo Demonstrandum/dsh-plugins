@@ -234,8 +234,8 @@ through the `loadImage` loader every toolview receives, an in-page lightbox
 (fit ↔ 1:1; never `window.open` — the Dock app's WKWebView loads it into its
 only window), then the verbatim result text. The shared `tool.call.images`
 gallery slot is `single` and owned by the read_image entry (a second declarer
-throws at load), hence the own `<img>` — the same reasoning as
-`<private-plugin>`'s rows. Because claiming a key suppresses the
+throws at load), hence the own `<img>` — the same reasoning applies to any
+plugin's own image rows. Because claiming a key suppresses the
 generic card for every shape of that tool, the row covers running / ok /
 file fallback (`saved to <path>` when the model has no image input) / error /
 interrupted.

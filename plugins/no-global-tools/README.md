@@ -19,7 +19,7 @@ token, `stopReason: length`.
 ```
 
 Not sufficient on its own for plugins that register **per agent** on
-`agent/created` (`browser-automation`, `<private-plugin>`): those are
+`agent/created` (`browser-automation` and its kind): those are
 scoped registrations and exempt from `restrict`. They gate themselves with
 their `skipPresets` config (default `['minimal', 'minimal-no-tools']`) and
 detach/re-attach on `agent-preset/selected`, because a blank session may be

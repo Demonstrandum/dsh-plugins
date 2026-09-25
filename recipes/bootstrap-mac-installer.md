@@ -325,8 +325,8 @@ did switch the blank session to `minimal-no-tools`, yet the request carried
 4K-window model, which answered one token with `stopReason: length`. The
 preset only omits the in-tree tool groups; plugin tools bypass it two ways:
 global registrations (`fs-tools`, `session-introspect`) and per-agent scoped
-registrations on `agent/created` (`browser-automation`,
-`<private-plugin>`). Fix, verified 0 tools on the wire afterwards:
+registrations on `agent/created` (`browser-automation` and the like). Fix,
+verified 0 tools on the wire afterwards:
 `plugins/no-global-tools` (a preset row calling `ctx.tools.restrict({ allow:
 [] })`, written into the preset by the bootstrap's `preset` step) for the
 former, and a `skipPresets` gate in the two per-agent plugins for the latter
@@ -335,7 +335,7 @@ former, and a `skipPresets` gate in the two per-agent plugins for the latter
 `agent-preset/selected`). Diagnosed by decoding the session log
 (`zstd -dc session.v3.jsonl.zstd`, `request/header` → `tools.length`).
 
-### Read-only "Tailscale remote"/"Server" panes and no <private> card for the owner
+### Read-only "Tailscale remote"/"Server" panes and no plugin cards for the owner
 
 Seen from the direct-remote Dock app: *"The Tailscale remote is controlled from
 the DSH host only"* and no host-settings cards. Not the relay — that only
@@ -348,7 +348,7 @@ one owner; on a shared machine the owner of an instance is never "the node". Fix
 (`dsh-tailscale-remote` `identityOperators`, default `true`): **identity-
 admitted ⇒ operator** — the same Serve-injected login the allowlist trusts;
 token/QR holders stay non-operators; `false` restores the old policy.
-Separately, the <private> card lives on the bundle's page in the **sidebar ▸
+Separately, a bundle plugin's card lives on the bundle's page in the **sidebar ▸
 Plugins** panel since the 0.1.6-alpha.2 rebase (not Settings), and an instance
 whose plugin client bundle was built before that fix registers into a slot
 that no longer exists — rebuild `lib/client.js` after pulling.
@@ -372,18 +372,26 @@ self-detect their tool should not use `requires` — the plugin's own remedy
 card is the better message. Moving a pin is a commit in extras, then a
 submodule bump here.
 
-**Paid apps are never installed.** Dash (Kapeli's docs browser) and
-<private> are not offered; instead `dash-docsets` and
-`<private-plugin>` are left out of the build and of the bundle
+**Paid apps are never installed.** Dash (Kapeli's docs browser) is not
+offered; instead `dash-docsets` is left out of the build and of the bundle
 install (`install-plugins.sh --without …`, a flag added for this) when the
 app is absent, with a to-do to re-run `pnpm install-plugins` after buying it.
 Detection is by **bundle id through LaunchServices** (`osascript -e 'id of
 application id "com.kapeli.dash-setapp"'`, then `com.kapeli.dashdoc`), not by
 path: on the development laptop Dash is the Setapp build at `/Applications/Setapp/Dash.app`,
 which a `/Applications/Dash.app` check misses (found out in the dry run: the
-plugin that works on that Mac would have been excluded there). <private>:
-`/Applications/<private>.app`, `<private>.app`, `<private>script` on PATH, or
-the `com.<private>.*` bundle ids.
+plugin that works on that Mac would have been excluded there).
+
+**Extras plugins gate themselves** (2026-09-25). Nothing about a private
+plugin is hardcoded in the public scripts: `extras/dsh-extras.yml` gives each
+plugin an optional `requires:` block (`app:` paths or macOS bundle ids,
+`command:` on PATH — *any one* present passes) and an optional `check:` hook.
+`tools/extras-manifest.mjs` evaluates the gate itself and prints `ok`, `-` or
+`missing:<what it looked for>`; `install-plugins.sh` (`skipped (requires …)`,
+`--without <dir|bundle>` also applies to extras rows), the bootstrap's `plugins`
+step and `sync-host` only read that column. After the build the bootstrap runs
+each `check` hook and turns every line it prints into a to-do item — the place
+for "only a human can finish this" facts such as a per-user licence.
 
 ## The thin client (`--thin-client HOST`, `tools/bootstrap-mac-thin-client.sh`)
 

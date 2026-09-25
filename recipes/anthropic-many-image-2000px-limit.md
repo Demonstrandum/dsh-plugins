@@ -21,7 +21,7 @@ single request carries **more than 20 image blocks**, a stricter cap of
 **2000 px per dimension applies to every image in that request** — including
 images from earlier turns that are resent as history and images nested inside
 `tool_result` blocks (screenshots returned by `read_image`, Safari/Chrome
-screenshot tools, `<private>_show`, …). Documented under "Request limits" in
+screenshot tools, plot tools, …). Documented under "Request limits" in
 [Anthropic's vision docs](https://platform.claude.com/docs/en/build-with-claude/vision#request-limits).
 So the 21st image — however small — flips the whole request into
 "many-image" mode and retroactively invalidates any earlier image wider or

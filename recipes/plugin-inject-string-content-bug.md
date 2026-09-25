@@ -31,15 +31,15 @@ so it repeats on every turn forever. The GUI's per-character "Unknown content
 block" rendering is the same string-iterated-as-array confusion.
 
 Trigger: the `onIdleClose` hook — fires when a browser window (`browser-automation`,
-30 min) or <private> kernel (`<private-plugin>`, 60 min) is closed for
+30 min) or a language kernel (an extras plugin, 60 min) is closed for
 idleness while the agent is still live. That is why the session broke hours
 after the last real work, and why the orphaned background job visible in the
 session was a red herring.
 
 ## Fix 1 — the plugins (`~/github/tali-dash-plugins`)
 
-Both `plugins/browser-automation/index.js` and
-`plugins/<private-plugin>/index.js` now have
+Both `plugins/browser-automation/index.js` and the kernel plugin's `index.js`
+(in `extras/`) now have
 
 ```js
 import { randomUUID } from 'node:crypto'

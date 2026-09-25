@@ -9,7 +9,8 @@ Out-of-tree work on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-h
 
 | | Where | What |
 |---|---|---|
-| **Plugins** | `plugins/<name>/` | Nineteen DSH plugins — agent tools, remote access, native OS apps, GUI tweaks, model plumbing. One installable npm package each. [Below](#plugins). |
+| **Plugins** | `plugins/<name>/` | Twenty DSH plugins — agent tools, remote access, native OS apps, GUI tweaks, model plumbing. One installable npm package each. [Below](#plugins). |
+| **Private layer** | `extras/` (optional git submodule) | Deployment inventory, host scripts and further plugins that are not public. Absent without org access; every script here continues without it. Its manifest `extras/dsh-extras.yml` is read by the same installers. |
 | **The fork** | `deepseek-harness/` (git submodule) | [the custom fork of DSH](https://github.com/taliesinb/deepseek-harness), branch `feat/embed-session`, pinned to the commit the plugins were last tested against. A handful of features needed changes no plugin can make. [Below](#the-fork). |
 | **macOS apps** | built by `plugins/dsh-tailscale-remote` | Native WKWebView Dock apps for the local server, the preview server and remote Macs, with loopback port forwarding. [Below](#native-os-apps). |
 | **Tooling** | `tools/`, `package.json` scripts | Fresh-machine bootstrap, plugin bundle install, deploy-to-remote, remote control. |
@@ -173,13 +174,6 @@ Everything else — tools, remote access, apps, UI — is a plugin.
   symbol search across installed docsets, pages (or just the anchored section)
   as Markdown with MathML → LaTeX; launches Dash hidden and enables its API
   server on demand. Host-only, no MCP. See its README.
-- `<private-plugin>` — per-chat <private> Language kernels
-  (`wl:<session>:<kernel>`) supervised over <private>'s own AgentTools MCP
-  server: `<private>_eval` / `<private>_run` / `<private>_show` (retina plots shown
-  inline to the user; `Manipulate` becomes an interactive widget; `Graphics3D`
-  a native rotatable three.js scene) / `<private>_symbol` / `<private>_lint` /
-  `<private>_kernel_*` lifecycle tools. Host + browser halves; no `mcp__*` names
-  reach the model. See its README.
 
 ### Remote access, phones and Macs
 
@@ -306,7 +300,7 @@ config blocks and commands, the *why* behind non-obvious choices, and what
 **failed** and why (the failed attempts are what save the next agent hours).
 Thirty-odd so far, from `apple-foundation-model-provider.md` and
 `bootstrap-mac-installer.md` through `rebase-fork-on-upstream.md` and
-`<private-plugin>-graphics3d.md`; the annotated index is in `AGENTS.md`.
+`wait-tool-plugin.md`; the annotated index is in `AGENTS.md`.
 
 ## Credits
 

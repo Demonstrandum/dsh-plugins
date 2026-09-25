@@ -68,7 +68,7 @@ alone.
 
 1. Live DOM experiment first, before writing any code: opened the preview
    (`http://127.0.0.1:3088/?token=…` from `~/.dsh-preview/logs/dsh-web-preview.log`),
-   picked a session long enough to scroll ("<private> plot command"; most
+   picked a session long enough to scroll (a plot demo; most
    preview sessions are too short — check `scrollHeight > clientHeight`),
    appended a `<style>` with the rule from the console, scrolled to bottom:
    last-row-to-seat gap **16px → 176px**, `atBottom` true after

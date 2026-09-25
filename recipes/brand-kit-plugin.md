@@ -64,7 +64,7 @@ private directory of assets and one YAML block in the profile patch.
 
 "Every knob configurable" invited the next question — a UI to add, duplicate,
 export and modify brands. Built as the bundle's configuration card in the
-Plugins panel (`plugins.bundle.config`, the seam `<private-plugin>`
+Plugins panel (`plugins.bundle.config`, the seam every settings-card plugin
 uses) over a Fetch route, with profiles as directories under
 `$DSH_HOME/brand-profiles/`. Findings:
 

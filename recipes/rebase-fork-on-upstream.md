@@ -48,7 +48,7 @@ cp ~/.dsh-preview/settings.yaml $H/; cp -R ~/.dsh-preview/{.agent-presets,sessio
 # enforce-model-preset, session-title-llm style: slug) — the plugins come in as bundles:
 P=~/github/tali-dash-plugins/plugins
 DSH_HOME=$H pnpm dsh plugin --profile web add $P/enforce-model-preset $P/browser-automation \
-  $P/dash-docsets $P/local-model-supervisor $P/<private-plugin> $P/foreign-link-opener \
+  $P/dash-docsets $P/local-model-supervisor $P/foreign-link-opener \
   $P/session-introspect $P/fs-tools $P/settings-shortcut $P/session-title-slug $P/dsh-remote-workspaces
 DSH_HOME=$H pnpm dsh --profile web --patch ~/github/tali-dash-plugins/cordis.dev.yml --dump-config | grep '^- id: tali-'
 DSH_HOME=$H pnpm dsh --profile web --patch ~/github/tali-dash-plugins/cordis.dev.yml --port 3091 --no-open
@@ -134,12 +134,12 @@ pristine `upstream/master`** (checked in a second worktree: `git worktree add
 | Plugin | Symptom | Cause / fix |
 |---|---|---|
 | `agent-status-indicator` | `useSessionPendingInteraction is not a function` in `conversation.input.dock` | upstream folded that share into `useSessionStatus` (`.agents/notes/…/2026-09-15-client-session-references.md`). **Deleted** (demo plugin, per the maintainer). |
-| `<private-plugin>` | `list slot "conversation.chat.turnTail" requires options.id` — the plugin's *client half failed to activate* | `conversation.chat.turnTail` changed **chain → list** (`577e4a036d`). Registration now carries **both** `id` (list) and `select` (chain) and `ShownGallery` derives its images from the owner props when `matched` is absent, so one bundle serves the live (old) and rebased DSH. Rebuilding this bundle hot-swaps the live GUI — a chain-only DSH throws `requires options.select` if `select` is dropped. |
+| a kernel plugin (now in `extras/`) | `list slot "conversation.chat.turnTail" requires options.id` — the plugin's *client half failed to activate* | `conversation.chat.turnTail` changed **chain → list** (`577e4a036d`). Registration now carries **both** `id` (list) and `select` (chain) and `ShownGallery` derives its images from the owner props when `matched` is absent, so one bundle serves the live (old) and rebased DSH. Rebuilding this bundle hot-swaps the live GUI — a chain-only DSH throws `requires options.select` if `select` is dropped. |
 | `foreign-link-opener` | `GET /api/foreign-links/config` → 400 | Pre-existing (same on the live DSH): exact Fetch routes never declared `requestBody: 'buffered'`; the node:http bridge then builds a *streaming* GET `Request`, which throws → webserver's last-resort 400. Host module, so the live server picks it up on its next restart. |
 | `session-title-slug` (found 2026-09-21) | A dimmed "New Session" ghost duplicates the selected New Session as soon as you type; clicking a ghost throws `sessions.open is not a function` | `SessionListState.current` and `ISessions.open` are gone; the bundle built anyway (esbuild) with `current === undefined`. Fixed: current = `retainedBy.mainView` holder, open = `ctx.uiWorkspace.openSession`. `recipes/session-title-slug-plugin.md` §Post-rebase breakage. |
-| `<private-plugin>` (found + fixed 2026-09-21) | Settings ▸ Plugins ▸ "<private> kernel" card never appears (no error: `slots.inject` waits for a slot that is never declared); once it does, its status fetch is a 400 | The `settings.plugin.item` keyed slot is gone (the section now carries only `settings.plugins.tab` chrome; `plugins.item` is reserved for the shell's host-plane pages). Re-registered as the bundle's `plugins.bundle.config` entry keyed by package name — the card now lives on the bundle's page in the Plugins panel. The route needed `requestBody: 'buffered'` (host half: live on next restart). `recipes/<private-plugin>.md` §3 Card. |
+| the same kernel plugin (found + fixed 2026-09-21) | Settings ▸ Plugins ▸ its kernel card never appears (no error: `slots.inject` waits for a slot that is never declared); once it does, its status fetch is a 400 | The `settings.plugin.item` keyed slot is gone (the section now carries only `settings.plugins.tab` chrome; `plugins.item` is reserved for the shell's host-plane pages). Re-registered as the bundle's `plugins.bundle.config` entry keyed by package name — the card now lives on the bundle's page in the Plugins panel. The route needed `requestBody: 'buffered'` (host half: live on next restart). Its recipe (`extras/recipes/`) §3 Card. |
 
-Sweep done 2026-09-21: `pnpm typecheck` in every client plugin (settings-shortcut, foreign-link-opener, dsh-tailscale-remote, <private-plugin>, dsh-remote-workspaces, session-title-slug, numbered-switching) — only the two above failed. Do this after every rebase.
+Sweep done 2026-09-21: `pnpm typecheck` in every client plugin (settings-shortcut, foreign-link-opener, dsh-tailscale-remote, dsh-remote-workspaces, session-title-slug, numbered-switching, the extras client plugins) — only the two above failed. Do this after every rebase.
 
 ## Promoted 2026-09-18 21:06
 
@@ -187,7 +187,7 @@ The original checklist, for the next time:
 1. `cd ~/github/tali-dash-plugins/deepseek-harness && git fetch origin && git checkout trial/rebase-upstream`
    (or fast-forward `feat/embed-session` to it and force-push — the fork branch
    is the maintainer's own), `pnpm install --frozen-lockfile && pnpm run build`.
-2. Rebuild the plugin bundles whose types moved: `(cd plugins/<private-plugin> && pnpm build)` etc.
+2. Rebuild the plugin bundles whose types moved: `(cd plugins/<plugin> && pnpm build)` for each (extras plugins too).
 3. Restart the live server (`launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay`) and the preview relay.
 4. `git add deepseek-harness && git commit` in this repo to bump the submodule pin.
 5. Follow-up worth a fork commit: make `ui-open-in-app`'s `/open-in-app/…` URLs document-relative (`hostUrl()` from client-connection), and give `preview-identity`'s manifest `./favicon.svg` / `./` paths.

@@ -48,9 +48,9 @@ port 3088) is deliberately left out.
 >
 > It asks where the clone goes, installs the Command Line Tools, Homebrew,
 > node/pnpm/git, offers Tailscale / Safari Technology Preview / Chrome as
-> casks when missing (never the paid apps: `dash-docsets` and
-> `<private-plugin>` are installed only if Dash / <private> are
-> already present), clones, builds the fork and the plugins, initialises
+> casks when missing (never the paid apps: `dash-docsets` is installed only
+> if Dash is already present; extras plugins gate themselves through the
+> manifest), clones, builds the fork and the plugins, initialises
 > `~/.dsh`, installs the plugin bundles, sets up afm + the Apple provider and
 > preset, installs the relay, enables the route and builds the Dock app —
 > i.e. A1, A2, A4, A6, C1–C5 below, in order. Two hard gates: when **DSH
@@ -251,7 +251,6 @@ deploy's plugin list):
 |---|---|---|
 | `browser-automation` (`safari_*`, `chrome_*` tools) | **Safari Technology Preview** (developer.apple.com/safari/technology-preview) — only STP ships `safaridriver --mcp`; stable Safari has no fallback. **Google Chrome** for `chrome_*` (`chrome-devtools-mcp` is a pinned dependency of the plugin, run by node). | First run of each may prompt: Safari ▸ Develop ▸ Allow Remote Automation is *not* needed for STP `--mcp`, but STP must be launched once to accept its licence. |
 | `dash-docsets` | Dash 8 with docsets installed | plugin enables Dash's HTTP API itself |
-| `<private-plugin>` | <private> / <private> 15 (`<private>.app`, `<private>Script.app`) with the AgentTools MCP server | |
 | LM Studio provider (`lmstudio`, `:1234`) | LM Studio.app with a model loaded and the local server on | |
 
 ### A7. Keep a headless remote awake
@@ -383,9 +382,8 @@ the fork disagree about versions.
 
 Every plugin's `link:` dependency is **relative** to the submodule
 (`link:../../deepseek-harness/vendor/cordis` …), so nothing needs rewriting.
-`browser-automation` and `<private-plugin>` depend on
-`@modelcontextprotocol/sdk` / `sharp` from npm at the fork's versions instead
-of linking into its `.pnpm` store.
+`browser-automation` depends on `@modelcontextprotocol/sdk` / `sharp` from
+npm at the fork's versions instead of linking into its `.pnpm` store.
 
 The one absolute-path file is `cordis.dev.yml` (dev overlay; row `name:` must
 be an absolute module path — the loader's `!!js` interpolation applies to
@@ -405,7 +403,7 @@ they are installed too:
 ```sh
 for p in plugins/*/; do (cd "$p" && pnpm install); done          # the three plain-ESM ones are no-ops
 for p in dsh-tailscale-remote dsh-remote-workspaces session-title-slug settings-shortcut \
-         foreign-link-opener <private-plugin>; do (cd plugins/$p && pnpm build); done
+         foreign-link-opener; do (cd plugins/$p && pnpm build); done
 ```
 
 `enforce-model-preset`, `local-model-supervisor`, `instance-identity` are plain
@@ -494,7 +492,6 @@ carries an absolute path. It refuses to run if a client plugin's
 | `tali-browser-automation` | **Safari Technology Preview** + **Google Chrome** (A6) | `safari_*`, `chrome_*` |
 | `tali-dash-docsets` | **Dash 8** (A6) | `dash_*` |
 | `tali-local-model-supervisor` | afm (A4); only fires for the `apple` provider | — |
-| `tali-<private-plugin>` | **<private> / <private> 15+** at `/Applications/<private>.app` (ships the `<private>/AgentTools` paclet; defaults find both) | `<private>_*` |
 | `tali-foreign-link-opener` | only useful with a Safari "Add to Dock" web app; harmless otherwise | — |
 | `tali-session-introspect` | nothing | `transcript_*` |
 | `tali-fs-tools` | nothing | `list_dir`, `read_many`, `edit_many`, `search` |
@@ -509,8 +506,8 @@ first use — so remove it or leave it.
 
 **Configuration.** The bundles' row configs are the plugins' schema defaults,
 and those equal the maintainer's live settings (`tailscale-remote` proxy `:3084` /
-relay `:3083`, `browser-automation` `subagents: true`, `<private>` `theme: auto`,
-the `apple → minimal-no-tools` rule, …). `~/.dsh/profiles/web/cordis.patch.yml`
+relay `:3083`, `browser-automation` `subagents: true`, the
+`apple → minimal-no-tools` rule, …). `~/.dsh/profiles/web/cordis.patch.yml`
 (created by the first launch; `patchReload: live`) therefore stays **empty**
 unless you want to override a row by id — remember a patch replaces the row's
 whole `config`, so restate every key. The maintainer's only live additions are debug

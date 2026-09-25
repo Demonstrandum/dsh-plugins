@@ -16,7 +16,7 @@
  * attachment }` block to its JSON — so expanding a screenshot card showed
  * `{"type":"image","attachment":{"attachmentId":…}}` and no picture. The shared
  * `tool.call.images` gallery slot is `single` and owned by the read_image entry,
- * so (like <private-plugin>) this row draws its own <img> from the
+ * so this row draws its own <img> from the
  * session-authorized `loadImage` loader every toolview receives.
  *
  * Claiming a key suppresses the generic card for EVERY shape of that tool, so

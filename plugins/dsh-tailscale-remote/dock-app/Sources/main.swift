@@ -808,7 +808,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     /// Secondary windows opened by the page (window.open / target=_blank on an in-scope URL, e.g. a
-    /// <private>_show image at full size). Each is its own WKWebView sharing this app's data store
+    /// an inline plot image at full size). Each is its own WKWebView sharing this app's data store
     /// (cookies), so the request is admitted like the main page. Kept alive here; removed on close.
     private var popups: [NSWindow] = []
 
@@ -827,7 +827,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // Out of scope → the default browser, as before.
         guard scope.contains(url) else { NSWorkspace.shared.open(url); return nil }
         // In scope → a real second window. (Until 2026-09-22 this loaded the URL into the MAIN
-        // window: clicking a <private>_show image replaced the whole GUI with the bare image, and
+        // window: clicking an inline image replaced the whole GUI with the bare image, and
         // the red button then closed the app's only window.) WebKit requires the returned view to
         // be created with the configuration it hands us.
         return makePopup(configuration: configuration, title: url.lastPathComponent)

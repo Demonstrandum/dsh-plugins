@@ -162,8 +162,9 @@ HTTPS in identity mode (no tailnet peer was running DSH).
 
 ## Deploying app-backed plugins to a remote (2026-09-18)
 
-`tools/deploy-remote.sh` ships `browser-automation` and
-`<private-plugin>` when the apps exist on the host. Facts learned:
+`tools/deploy-remote.sh` ships `browser-automation` (and, until it moved to
+`extras/`, a second app-backed plugin) when the apps exist on the host. Facts
+learned:
 
 - **pnpm's node_modules do not survive rsync** (even `-aL`): transitive deps
   (`zod`) live only in `.pnpm`. The deploy syncs plugin files without
@@ -184,10 +185,10 @@ HTTPS in identity mode (no tailnet peer was running DSH).
   for a never-logged-in account, a WebDriver session followed at once. The
   bootstrap runs it after installing STP; until it is run, `safari_*` tools
   error with WebDriverErrorDomain 6 and their remedy text names the command.
-- **<private>'s first kernel launch took 62 s** on the remote (paclet index +
-  licence handshake) — past `<private>_eval`'s 60 s `timeConstraint`, so the
+- **A kernel plugin's first launch took 62 s** on the remote (package index +
+  licence handshake) — past its eval tool's 60 s `timeConstraint`, so the
   very first call fails and the retry succeeds; subsequent cold starts are
-  ~1 s. Warm it once after install: `<private>script -code 1+1`.
+  ~1 s. Warm such kernels once after install.
 - Loader import failures are only visible as `<row>: failed to import` in
   the launchd log; `node -e 'import("./index.js")'` in the plugin dir gives
   the real error.

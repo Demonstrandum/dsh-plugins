@@ -94,8 +94,8 @@ Serve-injected login the allowlist trusts. Token/cookie holders (QR) are never
 operators. Operator index responses carry
 `globalThis.__DSH_TRANSPORT__ = { ownsHost: true }`, so the shell reports
 `ctx.connection.isLoopback`, Settings persist on the host as at
-`http://127.0.0.1:3080/`, and host-settings panes (e.g. the <private> kernel
-card) appear; other devices stay memory-only. Why identity: on a shared machine
+`http://127.0.0.1:3080/`, and host-settings panes (e.g. a plugin's
+kernel-location card) appear; other devices stay memory-only. Why identity: on a shared machine
 with one DSH per account, the person an instance belongs to is never "the node
 itself", so the self-address rule alone left every owner with a read-only
 panel and no host settings (2026-09-21). Set `identityOperators: false` for
@@ -289,7 +289,7 @@ the state file), else an offline page that retries every 5 s. Injects
 `__DSH_TRANSPORT__.ownsHost` itself, opens out-of-scope links and every
 `window.open` in the default browser, persistent data store, menu bar (⌘R
 reload, Reconnect, zoom, full screen, ⌘⇧O open in browser, ⌘⇧C copy address),
-frame autosave, real second windows for in-scope `window.open`/`target=_blank` (until 2026-09-22 the URL was loaded into the main window — a <private>_show image click replaced the whole GUI and the red button then closed the app; popups share the app's cookie store and `window.close()` works), a menu fix (WKWebView's mousedown default on a Radix `menuitemradio`/`menuitemcheckbox` row moves focus to `<body>`, the menu's focus-outside guard unmounts it before `pointerup`, and the click selects nothing — model and reasoning-effort rows were unselectable in every Dock app until 2026-09-21; the wrapper now `preventDefault()`s that mousedown, radio/checkbox rows only, plain `menuitem`s such as "Model ›" work unaided and break when touched), page diagnostics to `~/Library/Logs/DSH Dock/<app>.log` (uncaught errors, unhandled rejections, console.error/warn, failed or non-GET fetches, WebSocket closes, RPC replies carrying `ok:false`), a one-shot `open-panel` hint from the page (`dshDock` message: start directory, hidden files, prompt — used by `/import-api-keys` to open in `~/.pi/agent`), `isInspectable` (Safari ▸ Develop ▸ this Mac), downloads to
+frame autosave, real second windows for in-scope `window.open`/`target=_blank` (until 2026-09-22 the URL was loaded into the main window — an inline-image click replaced the whole GUI and the red button then closed the app; popups share the app's cookie store and `window.close()` works), a menu fix (WKWebView's mousedown default on a Radix `menuitemradio`/`menuitemcheckbox` row moves focus to `<body>`, the menu's focus-outside guard unmounts it before `pointerup`, and the click selects nothing — model and reasoning-effort rows were unselectable in every Dock app until 2026-09-21; the wrapper now `preventDefault()`s that mousedown, radio/checkbox rows only, plain `menuitem`s such as "Model ›" work unaided and break when touched), page diagnostics to `~/Library/Logs/DSH Dock/<app>.log` (uncaught errors, unhandled rejections, console.error/warn, failed or non-GET fetches, WebSocket closes, RPC replies carrying `ok:false`), a one-shot `open-panel` hint from the page (`dshDock` message: start directory, hidden files, prompt — used by `/import-api-keys` to open in `~/.pi/agent`), `isInspectable` (Safari ▸ Develop ▸ this Mac), downloads to
 ~/Downloads. Not Safari: no Web Notifications, no Safari extensions.
 
 **Loopback links (2026-09-23).** A `localhost` / `127.0.0.1` URL in the page

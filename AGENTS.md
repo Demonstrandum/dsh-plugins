@@ -67,8 +67,9 @@ disabled in a session, a denial is final.
   put the concrete facts in the private `extras/` submodule (its `AGENTS.md`
   has the full rule, the grep to run on every staged diff, and the history
   rewrite procedure). Before committing: `git diff --cached -- . ':!extras' |
-  grep -i` for the identifiers listed there. Two history rewrites already
-  (2026-09-21, 2026-09-22); there must not be a third.
+  grep -i` for the identifiers listed there. Three history rewrites already
+  (2026-09-21 and 2026-09-22 for leaks, 2026-09-25 to move a plugin into
+  `extras/`); a leak must never cause another.
 - Plugins are developed **out-of-tree** (this repo). Never fork/patch DSH to
   add a feature: "There is no privileged core to patch: you extend dsh by
   mounting a plugin beside the others" (`docs/architecture.md`).
@@ -186,7 +187,7 @@ boots from the injected `window.__DSH_BOOT__` graph. Subsystem doc:
 ### Client bundle format
 
 Source of truth: `packages/client/tsdown.client.ts` (in-tree preset). Our
-out-of-tree equivalent is `plugins/<private-plugin>/build.mjs` (esbuild).
+out-of-tree equivalent is `plugins/wait-tool/build.mjs` (esbuild).
 The artifact is a CJS bundle wrapped in a factory registration:
 
 ```js
@@ -284,7 +285,7 @@ windows) is admitted by the node's own Tailscale identity at
 `https://laptop.example.ts.net/dsh/` (live) and `/dsh-preview/`
 (preview server on its own home `~/.dsh-preview`, started on demand by its
 relay; its `?token=` URL is in `~/.dsh-preview/logs/dsh-web-preview.log`) — see `recipes/dock-app-via-tailnet.md`.
-Elsewhere, the fallback below still applies. Alternative used in `recipes/<private-plugin>.md`: load
+Elsewhere, the fallback below still applies. Alternative used for the first client plugins: load
 `lib/client.js` in Node under a fake `window.__ModuleLoader__` with stub
 platform modules, capture what `apply(ctx)` registers, and replay a real
 session log (`zstd -dc $DSH_HOME/sessions/<ws>/<session>/session.jsonl.zstd`)
@@ -360,8 +361,9 @@ can reproduce or maintain it:
   Tailscale gate (install → `tailscale up` reconnect → driven browser login),
   clone, fork + plugin builds, `~/.dsh`, bundles, afm + Apple provider, relay
   → route → Dock app); the fresh-machine abort gate and its resume marker, the
-  paid-app rule (Dash/<private> never installed, their plugins gated on
-  bundle-id detection — the Setapp-Dash trap), why a `.pkg` is the wrong
+  paid-app rule (Dash never installed, its plugin gated on bundle-id
+  detection — the Setapp-Dash trap; extras plugins gate through the
+  manifest's `requires:`), why a `.pkg` is the wrong
   container, the headless facts it relies on, the macOS-VM landscape
   (Virtualization.framework vs UTM / Tart / VirtualBuddy) and the pending
   clean-VM test plan; `pnpm bootstrap-remote user@host` (ssh runner) and
@@ -548,7 +550,7 @@ can reproduce or maintain it:
 - `plugin-inject-string-content-bug.md` — "This turn failed: content.some is
   not a function": a host plugin passed a bare string as `agent.inject`
   `content`, poisoning the session log; the `UserMessage` shape rule, the fix
-  in `browser-automation`/`<private-plugin>`, and the
+  in `browser-automation` (and its twin in an extras plugin), and the
   `repair-session-string-content.mjs` log-repair tool (zstd multi-frame and
   packed-chunk-row traps).
 - `instance-identity.md` — telling the DSH / DSH Preview / DSH Remote windows
@@ -714,30 +716,9 @@ can reproduce or maintain it:
   cancelled turn must be thrown as a coded `ABORTED` HarnessError (rejecting
   with `signal.reason` logs `Error: [object Object]`); the throwaway-home +
   Chrome trial that exercised all four settlements.
-- `<private-plugin>-graphics3d.md` — native three.js `<private>_show` for
-  `Graphics3D` (experiment + implementation, 2026-09-21): the ~26-head box IR that
-  `ToBoxes` normalizes every 3D primitive/plot into (and the regions that pass
-  through unboxed), why glTF export is too lossy to be the IR (triangles only,
-  drops lines/points/text, rejects `Plot3D`), the `dsh-graphics3d/0` JSON
-  scene + `Scene3D.wl` translator + `viewer.html` under
-  `plugins/<private-plugin>/experiments/graphics3d/`, the measured
-  three.js↔<private> lighting facts (π intensities, gamma space, Phong vs
-  Blinn, `ImageScaled` z from the back for directional but from the front for
-  point lights), sizes vs PNG, and the plugin wiring as built (`kernel/Scene3D.wl`
-  + `"scene"` in the `DSH-SHOW` report via a temp file, `saveFile` attachment +
-  `/api/<private>/scene`, `manipulate?format=scene` geometry swaps under a
-  persistent camera, `src/client/scene3d.tsx`; throwaway-home verification and
-  the hidden-command-card-before-first-turn trap).
-- `<private-plugin>.md` — per-chat <private>/<private> kernels
-  (`<private-plugin>` plugin): the Pi `<private>_Show`/rho archaeology,
-  why the paclet fork's Show tool is obsolete, `<private>_show`'s user-only image
-  path (presentationMeta + pinned turn-tail gallery + plugin fetch route, and
-  the gallery's skip rules for error-box renders / duplicate attachments), the
-  SIGTERM-immune kernel and its kill ladder, the client-plugin gotchas, and the
-  kernel-location setting (Settings ▸ Plugins ▸ "<private> kernel" card over a
-  host settings namespace; cross-platform auto-detection that fills the setting
-  in; every tool fails with a configure-me message when nothing is found) with
-  the probe-then-`<private>script -configure` hand-off and its `15.` regex trap.
+
+Recipes of the private plugins live in `extras/recipes/` and are indexed in
+the extras README.
 
 ## Doc map (checkout-relative)
 
@@ -760,4 +741,14 @@ can reproduce or maintain it:
 
 ## The optional `extras/` submodule
 
-symbolica-ai/dsh-extras (private): deployment inventory, host scripts, pins of private plugins. Everything that names a host, tailnet, login or internal repo goes there, never here. Missing = fine (no org access); the tooling continues without it. Manifest `extras/dsh-extras.yml`, read by `tools/extras-manifest.mjs`; see recipes/bootstrap-mac-installer.md.
+symbolica-ai/dsh-extras (private): deployment inventory, host scripts, and
+private plugins — vendored directories or nested pins under
+`extras/plugins/`, each with its recipes under `extras/recipes/` and its
+blurb in the extras README. Everything that names a host, tailnet, login or
+internal repo goes there, never here; so does any plugin that should not be
+public. Missing = fine (no org access); the tooling continues without it.
+Manifest `extras/dsh-extras.yml`, read by `tools/extras-manifest.mjs`: per
+plugin `path`, `bundle`, `install`, an optional `requires:` gate (any of app
+paths / bundle ids / commands — the reader evaluates it, installers only see
+`ok` or `missing:<what>`) and an optional `check:` hook whose output the
+bootstrap turns into to-do items; see recipes/bootstrap-mac-installer.md.
