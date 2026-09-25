@@ -553,7 +553,7 @@ The live row sits in `~/.dsh/profiles/web/cordis.patch.yml`; the preview
 server runs against **its own home** `~/.dsh-preview`, whose
 `profiles/web/cordis.patch.yml` inserts the same plugin with `instance: preview`,
 ports 3085/3086, `mountPath: /dsh-preview`, `dockAppName: DSH Preview`, a red
-glyph and `relayStart` = `pnpm dsh --profile web --patch …/cordis.dev.yml --no-open --port 3088`
+glyph and `relayStart` = `pnpm dsh --profile web --patch …/cordis.dev.local.yml --no-open --port 3088`
 (the LaunchAgent carries `DSH_HOME=~/.dsh-preview`; `relay:install --dsh-home`):
 
 ```

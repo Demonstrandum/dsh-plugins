@@ -142,7 +142,7 @@ plugin (it used to skip `preview-identity`).
 
 ## Verification (preview, 2026-09-21)
 
-- `DSH_HOME=~/.dsh-preview pnpm dsh --profile web --patch cordis.dev.yml --dump-config`
+- `DSH_HOME=~/.dsh-preview pnpm dsh --profile web --patch cordis.dev.local.yml --dump-config`
   shows the row with its config, exit 0.
 - `curl :3088/favicon.svg` → `fill="#E5484D"`; `/manifest.webmanifest` →
   `short_name: DSH-dev`, `id: /?instance=3088`.

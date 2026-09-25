@@ -160,7 +160,7 @@ complement (plugins under trial). The LaunchAgent plist carries
 `DSH_HOME=/Users/USER/.dsh-preview` (`pnpm relay:install --instance preview
 --dsh-home ~/.dsh-preview --log-dir ~/.dsh-preview/logs --listen 127.0.0.1:3085
 --backend 127.0.0.1:3086 --dsh 127.0.0.1:3088 --cwd … --start "pnpm dsh --profile
-web --patch …/cordis.dev.yml --no-open --port 3088"`). The preview is
+web --patch …/cordis.dev.local.yml --no-open --port 3088"`). The preview is
 **local-only by design**: `~/.dsh-preview/settings.yaml` carries just the
 `apple` (default, `foundation`) and `lmstudio` providers copied from the live
 file, `.agent-presets/minimal-no-tools` is copied, and the profile patch adds

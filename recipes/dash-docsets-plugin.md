@@ -87,7 +87,7 @@ Preview (no live-config change), from the DSH checkout:
 ```sh
 cd ~/github/deepseek-harness
 DSH_HOME=/tmp/tali-dash-plugins-home pnpm dsh web \
-  --patch /Users/USER/github/tali-dash-plugins/cordis.dev.yml --port 3081 --no-open
+  --patch /Users/USER/github/tali-dash-plugins/cordis.dev.local.yml --port 3081 --no-open
 ```
 
 The dev overlay already contains the row. For the live web GUI, add to

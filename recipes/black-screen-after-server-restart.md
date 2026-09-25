@@ -68,7 +68,7 @@ reference: `plugins/dsh-tailscale-remote/dock-app/Sources/main.swift`.
 4. **Reproduction (preview server, Chrome, no live instance touched):**
    ```sh
    # open https://laptop.example.ts.net/dsh-preview/ in a browser, then
-   kill -TERM "$(pgrep -f 'bin.ts --profile web --patch .*cordis.dev.yml')"   # relay respawns it
+   kill -TERM "$(pgrep -f 'bin.ts --profile web --patch .*cordis.dev.local.yml')"   # relay respawns it
    ```
    Within ~10 s the page logs exactly the cascade above and
    `document.body.innerText === ''`. Comparing `window.__DSH_BOOT__.entries[*].rev`

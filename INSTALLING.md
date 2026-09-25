@@ -345,8 +345,8 @@ Apple route have only been exercised on the maintainer's machines.
 directory name is free). The fork lives inside it as the submodule
 `deepseek-harness/`; the plugins link into it relatively
 (`link:../../deepseek-harness/...`) and every tool defaults to it. Nothing in
-the profile needs an absolute path; only the dev overlay `cordis.dev.yml`
-does, and only if you use it.
+the profile needs an absolute path; only the dev overlay does, and it is
+generated (`pnpm dev-overlay` → `cordis.dev.local.yml`) if you use it.
 
 **Stopping points.** After C4 you have a fully working local DSH with the
 plugins (`pnpm dsh web`). A4/C3-Apple (on-device model) and C5 (Tailscale
@@ -385,14 +385,14 @@ Every plugin's `link:` dependency is **relative** to the submodule
 `browser-automation` depends on `@modelcontextprotocol/sdk` / `sharp` from
 npm at the fork's versions instead of linking into its `.pnpm` store.
 
-The one absolute-path file is `cordis.dev.yml` (dev overlay; row `name:` must
-be an absolute module path — the loader's `!!js` interpolation applies to
-`config` only, never `name`). It matters only if you use the preview/dev
-overlay; otherwise skip it:
+The one absolute-path file is the dev overlay (row `name:` must be an absolute
+module path — the loader's `!!js` interpolation applies to `config` only,
+never `name`). The committed `cordis.dev.yml` is a template; generate the
+real one (gitignored) if you use the preview/dev overlay, otherwise skip it:
 
 ```sh
 cd ~/github/tali-dash-plugins
-sed -i '' "s#/Users/USER/github/tali-dash-plugins#$PWD#g" cordis.dev.yml
+pnpm dev-overlay        # writes cordis.dev.local.yml with this checkout's paths
 ```
 
 Install **every** plugin, then build the ones with a client bundle. The

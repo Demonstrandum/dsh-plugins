@@ -833,10 +833,9 @@ if wants plugins; then
     [ -n "$prev" ] && log "plugin sources moved ${prev:0:10} → ${PLUGINS_SHA:0:10} since the last build — rebuilding all plugins" || log "existing plugin builds of unknown provenance (no $BUILT record) — rebuilding once"
     RB=1
   fi
-  # The dev overlay is the one file with absolute paths; harmless to fix even if unused.
-  if [ -f "$DIR/cordis.dev.yml" ] && grep -q '/Users/USER/github/tali-dash-plugins' "$DIR/cordis.dev.yml" && [ "$DIR" != /Users/USER/github/tali-dash-plugins ]; then
-    [ "$DRY" = 1 ] || sed -i '' "s#/Users/USER/github/tali-dash-plugins#$DIR#g" "$DIR/cordis.dev.yml"
-    ok "cordis.dev.yml re-pointed at $DIR"
+  # The dev overlay needs absolute paths: generate cordis.dev.local.yml from the committed template.
+  if [ -x "$DIR/tools/dev-overlay.sh" ]; then
+    if [ "$DRY" = 1 ]; then log "would write cordis.dev.local.yml (pnpm dev-overlay)"; else "$DIR/tools/dev-overlay.sh" >>"$LOG" 2>&1 && ok "cordis.dev.local.yml written for $DIR" || warn "dev-overlay failed (preview overlay only)"; fi
   fi
   # Extras plugins: the manifest reader evaluates each `requires` gate (`ok` / `-` / `missing:<what>`) and
   # names an optional `check` hook; skipped ones are reported with the manifest's own words. Rows are

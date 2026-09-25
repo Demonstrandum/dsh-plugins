@@ -62,7 +62,7 @@ preview home, the preview LaunchAgent and the preview Dock app, never `~/.dsh`:
 R=~/github/tali-dash-plugins                       # this repo; the fork is its submodule deepseek-harness/
 H=~/.dsh-preview
 
-# 1. Preview home: the standing rows (the plugins under trial go in cordis.dev.yml, not here).
+# 1. Preview home: the standing rows (the plugins under trial go in cordis.dev.yml → pnpm dev-overlay, not here).
 mkdir -p $H/profiles/web $H/.agent-presets
 [ -f $H/profiles/web/cordis.patch.yml ] || cat > $H/profiles/web/cordis.patch.yml <<YML
 - insert:
@@ -76,7 +76,7 @@ mkdir -p $H/profiles/web $H/.agent-presets
         dockAppName: DSH Preview
         dockAppGlyphColor: '#E5484D'
         relayCwd: $R/deepseek-harness
-        relayStart: pnpm dsh --profile web --patch $R/cordis.dev.yml --no-open --port 3088
+        relayStart: pnpm dsh --profile web --patch $R/cordis.dev.local.yml --no-open --port 3088
     - id: tali-local-model-supervisor
       name: '$R/plugins/local-model-supervisor/index.js'
       config:
@@ -107,8 +107,18 @@ cd $R/plugins/dsh-tailscale-remote
 pnpm relay:install --instance preview --dsh-home $H --log-dir $H/logs \
   --listen 127.0.0.1:3085 --backend 127.0.0.1:3086 --dsh 127.0.0.1:3088 \
   --cwd $R/deepseek-harness \
-  --start "pnpm dsh --profile web --patch $R/cordis.dev.yml --no-open --port 3088"
+  --start "pnpm dsh --profile web --patch $R/cordis.dev.local.yml --no-open --port 3088"
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3085/     # 503 splash → DSH cold-starts (~3 s) → 401
+```
+
+A relay installed before 2026-09-25 still names `cordis.dev.yml` (the template,
+whose rows now carry placeholder paths): edit its `--start` in
+`~/Library/LaunchAgents/io.github.taliesinb.dsh-web-relay.preview.plist` to
+`cordis.dev.local.yml`, run `pnpm dev-overlay`, then reload the definition —
+`launchctl kickstart -k` reuses the cached plist, so it must be
+`launchctl bootout gui/$UID/<label>` followed by `launchctl bootstrap gui/$UID <plist>`.
+
+```sh
 
 # 3. Publish the route and build the Dock app. Either via the preview GUI (Settings →
 #    Tailscale remote → Enable, then This Mac → Install Dock app), or headless through the
@@ -132,8 +142,10 @@ pnpm dock-app:uninstall --instance preview --name "DSH Preview"`, then
 
 **How to use it as an agent:**
 
-1. Put the plugin row(s) under trial into `cordis.dev.yml` (absolute `name`
-   paths; an `insert` list — it is a *complement* to the preview home's
+1. Put the plugin row(s) under trial into `cordis.dev.yml` (`name` paths under
+   the `/Users/USER/github/tali-dash-plugins` placeholder prefix, then
+   `pnpm dev-overlay` regenerates `cordis.dev.local.yml`, which is what loads;
+   an `insert` list — it is a *complement* to the preview home's
    profile patch; do not repeat its standing ids listed above).
 2. Start or restart the preview: `launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay.preview`
    (restarts the relay **and** the DSH it spawned — required after editing

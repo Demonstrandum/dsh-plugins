@@ -25,7 +25,7 @@ out, where the authoritative docs live, and how to record what you did.
 
 | Symbol | Meaning | What belongs there |
 |---|---|---|
-| `<plugins>` | **this repo** | All plugin code (`plugins/<name>/`), recipes (`recipes/`), helper tools (`tools/`), the dev overlay `cordis.dev.yml` |
+| `<plugins>` | **this repo** | All plugin code (`plugins/<name>/`), recipes (`recipes/`), helper tools (`tools/`), the dev overlay template `cordis.dev.yml` (generated copy: `cordis.dev.local.yml`) |
 | `<dsh-src>` | the DSH **source checkout** — the custom fork (`taliesinb/deepseek-harness`, branch `feat/embed-session`) as this repo's git **submodule `deepseek-harness/`**; the clone that `pnpm dsh web` runs from | Reference for APIs, docs (`docs/`), shipped presets. Fork commits live there (Remotes/embed/tailscale-mounting); ordinary features are plugins, not fork patches. Bump the submodule pin (`git add deepseek-harness`) when the fork moves |
 | `$DSH_HOME` | the DSH home, default `~/.dsh` | Configuration, not code: `settings.yaml` (providers, models), `.agent-presets/`, `profiles/web/cordis.patch.yml` (which plugins the live web GUI runs), `sessions/`, `attachments/` |
 | `<recipes-ws>` | the maintainer's **recipes workspace** — a code-free directory used as a session cwd whose `AGENTS.md` just points here | Nothing; recipes live in `<plugins>/recipes/` |
@@ -35,10 +35,13 @@ checkout** before relying on this file — it is a summary, the checkout is the
 truth. Recipes spell out the concrete `~`-relative paths of the machine they
 were written on; map them onto the symbols above when you are elsewhere.
 
-Absolute paths are unavoidable in one place and are tolerated there:
-`cordis.dev.yml` rows (`name:` must be an absolute module path; the loader's
-`!!js` interpolation covers `config` only) — regenerate it if the checkout or
-this repo moves. The plugins' `link:` dependencies are **relative**
+Absolute paths are unavoidable in one place and are generated there: the dev
+overlay rows (`name:` must be an absolute module path; the loader's `!!js`
+interpolation covers `config` only). The committed `cordis.dev.yml` is a
+**template** with the placeholder prefix `/Users/USER/github/tali-dash-plugins`;
+`pnpm dev-overlay` writes the gitignored `cordis.dev.local.yml` with the real
+path, and that generated file is what the preview relay and every `--patch`
+command load — edit the template, regenerate. The plugins' `link:` dependencies are **relative**
 (`link:../../deepseek-harness/...`, i.e. the submodule), so the fork must be
 checked out there (`git submodule update --init`). The repo is **not** local-only: it is pushed
 to `origin` (https://github.com/taliesinb/dsh-plugins), so commit finished
@@ -74,8 +77,8 @@ disabled in a session, a denial is final.
   add a feature: "There is no privileged core to patch: you extend dsh by
   mounting a plugin beside the others" (`docs/architecture.md`).
 - Layout: one plugin = one directory under `plugins/`, each an installable npm
-  package. `cordis.dev.yml` at the repo root is the dev overlay that loads all
-  of them by absolute path.
+  package. `cordis.dev.yml` at the repo root is the dev overlay template that
+  loads them by absolute path (through the generated `cordis.dev.local.yml`).
 - The recipe owns the system-level story; the plugin README owns the plugin.
   Cross-reference rather than duplicate.
 - **No explanatory blurbs in the UI.** The maintainer does not want captions, help
@@ -127,7 +130,7 @@ generated API in `docs/cordis-api/`):
 
    ```sh
    cd <dsh-src>
-   DSH_HOME=~/.dsh-preview pnpm dsh --profile web --patch <plugins>/cordis.dev.yml --port 3088 --no-open
+   DSH_HOME=~/.dsh-preview pnpm dsh --profile web --patch <plugins>/cordis.dev.local.yml --port 3088 --no-open
    # (what the preview relay runs for you; see PREVIEWING.md)
    ```
 
@@ -251,19 +254,19 @@ export function apply(ctx: Context) {
 
 ```sh
 cd <plugins>/plugins/<plugin> && pnpm watch   # rebuilds lib/client.js on save (hot-swaps the preview GUI)
-# row in <plugins>/cordis.dev.yml, then (re)start the standing preview:
+# row in <plugins>/cordis.dev.yml, `pnpm dev-overlay`, then (re)start the standing preview:
 launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay.preview
 ```
 
 ### The preview server
 
 Trial plugins in the **standing preview instance** — `DSH_HOME=~/.dsh-preview`,
-port 3088, composed from that home's profile patch plus `cordis.dev.yml`,
+port 3088, composed from that home's profile patch plus `cordis.dev.local.yml`,
 started on demand by the relay LaunchAgent
 `io.github.taliesinb.dsh-web-relay.preview`, reachable token-free from any
 browser on this Mac at `https://laptop.example.ts.net/dsh-preview/`
 and by the user as **DSH Preview** in the Dock — never by patching the live
-config. Add rows to `cordis.dev.yml`, then
+config. Add rows to `cordis.dev.yml`, `pnpm dev-overlay`, then
 `launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay.preview`.
 **Its default model is local and dumb on purpose**: `apple/foundation` (Apple
 Foundation on-device, 4K window) on the `minimal-no-tools` preset — basic text

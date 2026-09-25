@@ -156,7 +156,7 @@ config:
 Dev overlay (already a row in `<plugins>/cordis.dev.yml`):
 
 ```sh
-cd <dsh-src> && pnpm dsh web --patch <plugins>/cordis.dev.yml
+cd <dsh-src> && pnpm dsh web --patch <plugins>/cordis.dev.local.yml
 ```
 
 Live web profile: an absolute-path row `tali-fs-tools` in

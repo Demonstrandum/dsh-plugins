@@ -79,7 +79,7 @@ every session is idle.
 ```sh
 # compose without booting
 cd ~/github/tali-dash-plugins/deepseek-harness
-DSH_HOME=~/.dsh-preview pnpm dsh --profile web --patch ~/github/tali-dash-plugins/cordis.dev.yml --dump-config | grep reboot
+DSH_HOME=~/.dsh-preview pnpm dsh --profile web --patch ~/github/tali-dash-plugins/cordis.dev.local.yml --dump-config | grep reboot
 # restart the preview (host rows are not hot-reloaded; this also loads the
 # changed tailscale-remote host half)
 launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay.preview

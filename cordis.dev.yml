@@ -1,9 +1,15 @@
 # Dev overlay for the STANDING PREVIEW server (see PREVIEWING.md).
 #
+# THIS FILE IS A TEMPLATE: the loader needs absolute module paths and this
+# repo lives somewhere else on every machine, so the rows carry the
+# placeholder prefix /Users/USER/github/tali-dash-plugins and `pnpm dev-overlay`
+# (tools/dev-overlay.sh) writes cordis.dev.local.yml (gitignored) with the real
+# one. Everything loads the GENERATED file. Edit this one, then regenerate.
+#
 # The preview runs against its own home, ~/.dsh-preview (never the live
 # ~/.dsh), started on demand by the relay LaunchAgent
 # io.github.taliesinb.dsh-web-relay.preview as
-#   DSH_HOME=~/.dsh-preview pnpm dsh --profile web --patch <this file> --no-open --port 3088
+#   DSH_HOME=~/.dsh-preview pnpm dsh --profile web --patch <plugins>/cordis.dev.local.yml --no-open --port 3088
 # Composition = profile bundles + ~/.dsh-preview/profiles/web/cordis.patch.yml
 # + this overlay. That profile patch owns the preview's standing rows —
 # tali-tailscale-remote (relay :3085 → proxy :3086, /dsh-preview, DSH Preview.app),
@@ -15,7 +21,7 @@
 # (host rows are not hot-reloaded; client bundles are).
 #
 # Paths MUST be absolute (a patch contributes config; it does not move the
-# loader's module-resolution root). Machine-specific by design.
+# loader's module-resolution root) — hence the placeholder + generated copy.
 - insert:
     # Instance identity: "DSH Preview" wordmark + window title, red sidebar
     # whale + favicon and a "DSH-dev" web-app manifest so the preview is never

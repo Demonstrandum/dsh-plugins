@@ -131,7 +131,7 @@ rm -rf /tmp/dsh-copy-home && cp -R ~/.dsh-preview /tmp/dsh-copy-home
 # add an insert row for plugins/dsh-remote-workspaces/index.js (it is a live
 # bundle, not in cordis.dev.yml)
 cd <dsh-src> && DSH_HOME=/tmp/dsh-copy-home pnpm dsh --profile web \
-  --patch <plugins>/cordis.dev.yml --no-open --port 3097
+  --patch <plugins>/cordis.dev.local.yml --no-open --port 3097
 ```
 
 Then over HTTP with the printed token (cookie from `GET /?token=…`, Typert

@@ -91,7 +91,7 @@ mkdir -p /tmp/tali-dash-plugins-home /tmp/tdsn-scratch
 cp ~/.dsh/.credentials.yaml ~/.dsh/settings.yaml /tmp/tali-dash-plugins-home/
 cd ~/github/deepseek-harness
 SSH_TTY=/dev/preview DSH_HOME=/tmp/tali-dash-plugins-home \
-  pnpm dsh web --patch ~/github/tali-dash-plugins/cordis.dev.yml --port 3084 --no-open
+  pnpm dsh web --patch ~/github/tali-dash-plugins/cordis.dev.local.yml --port 3084 --no-open
 ```
 
 Then, in the tokened URL: Add workspace → "Edit path" → `/tmp/tdsn-scratch`
@@ -164,7 +164,7 @@ Trap recorded in PREVIEWING.md tier 2.
   left in `/tmp/cordis.patch.yml.bak-<epoch>`. The row was then REMOVED from
   `cordis.dev.yml` (the preview composes live profile + overlay; a second row
   with the same id fails the boot with "duplicate loader entry id").
-  `pnpm dsh web --dump-config` (with and without `--patch cordis.dev.yml`)
+  `pnpm dsh web --dump-config` (with and without `--patch cordis.dev.local.yml`)
   confirmed a single resolved row.
 - Rebuilding `lib/client.js` now hot-swaps the LIVE GUI (PREVIEWING.md tier 2)
   — run `pnpm watch` only when that is intended.

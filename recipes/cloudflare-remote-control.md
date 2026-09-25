@@ -73,7 +73,7 @@ restated:
 ```
 
 Port note: `127.0.0.1:3081` is already taken by the plugin-dev instance
-(`dsh web --patch ~/github/tali-dash-plugins/cordis.dev.yml --port 3081`), so the
+(`dsh web --patch ~/github/tali-dash-plugins/cordis.dev.local.yml --port 3081`), so the
 proxy listens on `3082`. `backendPort` is left at its default `0` = "follow this
 process's `webServer.port`", so the proxy always fronts the DSH instance it runs
 inside.

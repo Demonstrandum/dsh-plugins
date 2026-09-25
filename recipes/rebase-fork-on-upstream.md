@@ -50,8 +50,8 @@ P=~/github/tali-dash-plugins/plugins
 DSH_HOME=$H pnpm dsh plugin --profile web add $P/enforce-model-preset $P/browser-automation \
   $P/dash-docsets $P/local-model-supervisor $P/foreign-link-opener \
   $P/session-introspect $P/fs-tools $P/settings-shortcut $P/session-title-slug $P/dsh-remote-workspaces
-DSH_HOME=$H pnpm dsh --profile web --patch ~/github/tali-dash-plugins/cordis.dev.yml --dump-config | grep '^- id: tali-'
-DSH_HOME=$H pnpm dsh --profile web --patch ~/github/tali-dash-plugins/cordis.dev.yml --port 3091 --no-open
+DSH_HOME=$H pnpm dsh --profile web --patch ~/github/tali-dash-plugins/cordis.dev.local.yml --dump-config | grep '^- id: tali-'
+DSH_HOME=$H pnpm dsh --profile web --patch ~/github/tali-dash-plugins/cordis.dev.local.yml --port 3091 --no-open
 ```
 
 (`pnpm install-plugins --checkout ~/github/dsh-rebase-trial` would do the same
