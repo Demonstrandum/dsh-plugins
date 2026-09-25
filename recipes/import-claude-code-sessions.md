@@ -1,7 +1,77 @@
-# Importing Supacode / Claude Code transcripts into DSH
+# Importing Claude Code / pi transcripts into DSH
 
-How to find coding-agent transcripts that were written under **Supacode**, and
-turn them into real, resumable DSH sessions attached to a workspace.
+How to turn coding-agent transcripts on disk (Claude Code, pi — including the
+ones written under **Supacode**, which delegates persistence to the agent CLIs
+it hosts) into real, resumable DSH sessions attached to a workspace.
+
+## The supported route (2026-09-24): the `tali-import-sessions` plugin
+
+`plugins/import-sessions` (package `tali-import-sessions`, in the live install
+set and the preview overlay) replaces every hand-run tool below. In the GUI,
+`/import-claude` or `/import-pi` opens one modal: choose the transcripts **on
+the client device** (uploaded — the route for a remote Dock app (macOS) or DSH Remote (Linux) on a
+laptop talking to a shared host), **on the server** (native dialog pointed at
+the store) or by typed server path; pick sessions in a workspace → session
+tree (or a single-session card); set each workspace's **Import to** (the DSH
+workspace whose path matches the transcript's `cwd`, a new one titled by the
+directory basename, any existing workspace, or Ungrouped); and, only when a
+selected session is *large* (estimated surface > 100K tokens), choose
+**Working session** (fold older turns behind a checkpoint) or **Archive**.
+Headless: `/import-claude <path>`. Everything is written through DSH's own
+services (`sessionPersistence` format v3, `attachments` for real images,
+`sessionProjectionCache`, `workspaceRegistry.attachSession`) — no restart, no
+byte-level artifacts. README: `plugins/import-sessions/README.md`; protocol:
+`plugins/import-sessions/PROTOCOL.md`.
+
+Verified on this machine against every local transcript: 11 Claude sessions
+(+28 subagent transcripts) and 24 pi sessions build invariant-clean logs; the
+157 MB ncatlab session imports with 4,056 paired tool calls, 908 images as
+attachments and 25 child sessions, folded to a 48K-token surface, and opens in
+the GUI with tool cards and the subagent dropdown.
+
+### Format facts the plugin had to learn (v3, 2026-09-24)
+
+- The logical `SessionHeader` passed to `sessionPersistence.create` has **no
+  `type` field** (`{version: 3, id, createdAt, cwd?, isSeeded, delegationDepth,
+  parentSession?, origin?}`); the codec adds `type: 'session'` on disk.
+- `assistant/message.data.stream` (the provider's timed chunk stream) is
+  **required** — an import has none, so it is `[]`. Rendering uses
+  `message.content`.
+- Surface replacements are `surfaceOp: {op:'replace', startSeq, endSeq}` (v2
+  spelled `start/end`), and `sourceEventSeqs` must cite every shadowed surface
+  node. The token meter prices the replacement against the **immediately
+  preceding** `compaction/prune` claim with the same range. Using the
+  plugin's own `source.plugin` (not `compact`) keeps compaction's checkpoint
+  rules out of it.
+- Both `workspaceRegistry.create(dir)` and `workspace.attachSession(id)` need
+  the directory to **exist on the server**; transcripts from deleted worktrees
+  (or from another machine) default to Ungrouped with an override selector.
+
+### Where the chooser opens (Dock app hint)
+
+The Dock app (`plugins/dsh-tailscale-remote/dock-app`) implements
+`runOpenPanel` with `canChooseFiles = true` plus `canChooseDirectories` from
+the input's `webkitdirectory`, and honours the one-shot
+`webkit.messageHandlers.dshDock.postMessage({type:'open-panel', directory, …})`
+hint `import-api-keys` introduced. The importer posts `directory:
+'~/.pi/agent/sessions'` (or `~/.claude/projects`) right before clicking its
+hidden `webkitdirectory` input, so the panel opens **in the store**, and one
+panel covers both shapes: pick the store or a workspace folder → bulk, pick one
+`.jsonl` → single. In a plain browser `webkitdirectory` is folder-only (pick the
+session's workspace folder instead). Electron (DSH Remote) needs nothing.
+
+**Local vs remote.** The `sources` endpoint reports `client.sameMachine`
+(no tailnet-proxy headers, or the proxy's `x-dsh-tailscale-remote-self`),
+`client.host` (tailnet peer name from `tailscale status --json`) and
+`server.host` (`os.hostname()` shortened). The dialog shows one line when the
+page runs on the server machine (upload from this device), and a second
+"Choose" line — the server scanning its own store, no chooser — only for a
+remote client *and* only when the server actually has that store.
+
+---
+
+*Everything below is the pre-plugin history, kept for the byte-level contract
+and the measurements that shaped the plugin.*
 
 Worked example: the Supacode-era nLab→Dash docset work in
 `~/github/ncatlab-dash` (session `4d6f2b87-e481-4140-a28b-0b3f4bff3a4b`,
@@ -33,9 +103,9 @@ integrations report lifecycle over a Unix socket).
 | Claude Code | `~/.claude/projects/<slug-of-cwd>/<sessionId>.jsonl` | one JSONL per session; slug is the cwd with `/`→`-` |
 | Claude subagents | `…/<sessionId>/subagents/agent-*.jsonl` | one per Task call |
 | Claude memory | `…/<sessionId or project>/memory/*.md` | project memory notes |
-| pi | `~/.pi/agent/sessions/--<path>--/` | DSH's `dsh-import-agents` plugin covers this |
-| codex | `~/.codex/sessions/` | same plugin |
-| opencode | `~/.local/share/opencode/opencode.db` | same plugin |
+| pi | `~/.pi/agent/sessions/--<path>--/` | was covered by the third-party `dsh-import-agents` plugin (removed 2026-09-24, see below) |
+| codex | `~/.codex/sessions/` | same (former) plugin |
+| opencode | `~/.local/share/opencode/opencode.db` | same (former) plugin |
 
 Find them:
 
@@ -229,10 +299,18 @@ or drop tool results and reasoning from the surface entirely. An archive may be
 as large as it likes: it reads, searches and renders — it just cannot be
 prompted.
 
-## Alternative: the installed `dsh-import-agents` plugin
+## Former alternative: the `dsh-import-agents` plugin (removed 2026-09-24)
 
-`~/.dsh/profiles/web/node_modules/dsh-import-agents` (third-party; README +
-source in that directory) already imports **pi, opencode, codex and
+**Status:** removed from the live web profile on 2026-09-24 via
+`pnpm dsh plugin --profile web remove dsh-import-agents` (its
+`import-pi-opencode` row had been `disabled: true` in `cordis.patch.yml` since
+the submodule migration; that row is gone too, and so is the template row in
+`tools/migrate-to-submodule.sh`). It was never part of the bootstrap/deploy
+plugin set (`tools/install-plugins.sh` installs only `plugins/*` + extras), so
+no deployment change was needed. The notes below are kept as design input for
+the first-party importer that is to replace it.
+
+`dsh-import-agents` 0.3.0 (third-party, npm) imported **pi, opencode, codex and
 claude-code**, offers a **Sync** button in the composer and `/import-all`,
 writes stable ids (`claude-<id>`), and `/attach-workspaces` retro-attaches
 imported sessions to a workspace matching their original `cwd`, creating it on
@@ -256,8 +334,8 @@ writes first wins** — delete the artifact before switching paths.
   imported into an already-initialized home stays "Ungrouped".
 - Membership is cwd-exact: a session joins a workspace only when the session
   header's `cwd` equals the workspace path.
-- Create/attach through a client: the GUI's **Add workspace** button, or the
-  plugin's `/attach-workspaces`.
+- Create/attach through a client: the GUI's **Add workspace** button (or,
+  formerly, `dsh-import-agents`' `/attach-workspaces`).
 
 ### Attaching an already-imported session
 
@@ -275,23 +353,21 @@ Three routes, in order of intrusiveness:
 
 1. **Do nothing.** The session is usable, searchable and openable; it is simply
    not grouped.
-2. **`/attach-workspaces`** (the installed plugin's command, typed in any
-   session's composer). Supported, but global: it walks every `pi-`/`oc-`/
+2. **`/attach-workspaces`** (the former `dsh-import-agents` command, typed in
+   any session's composer — **no longer available** since the plugin's removal;
+   kept here as a design reference). Global: it walks every `pi-`/`oc-`/
    `codex-`/`claude-` session, creates a workspace per distinct cwd, and
    normalizes every workspace whose title is still its basename to
    `name (~/path)`. On a home with imported pi sessions that means new
    workspaces for those folders plus a rename of every default-named workspace.
 3. **Edit the registry, then restart the server.** Precise and sidebar-neutral.
-   Use `~/github/tali-dash-plugins/tools/attach-session-to-workspace.py`:
-
-   ```sh
-   python3 ~/github/tali-dash-plugins/tools/attach-session-to-workspace.py \
-     --session claude-4d6f2b87-e481-4140-a28b-0b3f4bff3a4b --workspace ncatlab
-   ```
-
-   It backs the document up, refuses an edit the registry would reject at
-   startup (duplicate session account, duplicate path, order drift), and writes
-   atomically. **The running server owns this file** and rewrites it from
+   This was `tools/attach-session-to-workspace.py` (**retired 2026-09-24**: the
+   plugin attaches at import time through `workspace.attachSession`, which is
+   a server-side call plugins can make — the missing RPC was never the real
+   gap). If you ever need the manual route again, recover the script from git
+   history. It backed the document up, refused an edit the registry would
+   reject at startup (duplicate session account, duplicate path, order drift),
+   and wrote atomically. **The running server owns this file** and rewrites it from
    in-memory state on any workspace mutation — including every session
    creation, which attaches — so run it with the server stopped, or run it and
    restart promptly (and re-run if it was clobbered; the helper is idempotent).
@@ -320,9 +396,9 @@ DSH_HOME=/tmp/verify-home DSH_AGENTS_HOME=/tmp/verify-home/agents \
   pnpm dsh web --port 3099 --no-open     # prints the tokened URL on stdout
 ```
 
-`DSH_AGENTS_HOME` matters: `dsh-import-agents` writes its skills to
-`$DSH_AGENTS_HOME/skills`, defaulting to `~/.agents/skills` — a live path even
-when `DSH_HOME` is isolated.
+`DSH_AGENTS_HOME` matters for any plugin that writes skills: `dsh-import-agents`
+wrote its to `$DSH_AGENTS_HOME/skills`, defaulting to `~/.agents/skills` — a
+live path even when `DSH_HOME` is isolated.
 
 ## Verification recipe (what "it works" means)
 
@@ -344,7 +420,7 @@ when `DSH_HOME` is isolated.
 | `assistant/message names turn T/step S but open is …` | missing `step/start`/`step/end` | emit steps per assistant message |
 | Session shows as "Ungrouped" | registry already initialized, or cwd mismatch | create the workspace via GUI/plugin; check the header's `cwd` equals the workspace path |
 | GUI returns `dsh web authentication required` | launch token is per process | use a fresh instance's printed URL, or act in the existing GUI |
-| Plugin says nothing to import | its id already exists | it is idempotent; remove the artifact to re-import |
+| An importer says nothing to import | its id already exists | importers are idempotent; remove the artifact to re-import |
 | Every prompt fails with `prompt is too long` / `CONTEXT_WINDOW_EXCEEDED`, and `/compact` fails with the same error | the import's whole surface is re-sent and exceeds the model window; the pruner cannot trim results already at its threshold, and the summarizer needs the same oversized request | run `shrink-session-surface.mjs --keep-turns N` with the server stopped (see above) |
 | Context meter shows a plausible number but a lower one than the provider reports | the meter's fixed estimator prices ~4 chars/token; JSON-heavy tool-call text tokenizes nearer 3 | treat the meter as a pressure signal, not a budget: leave real headroom (~2x) on imports |
 
@@ -353,6 +429,6 @@ when `DSH_HOME` is isolated.
 - `~/github/tali-dash-plugins/AGENTS.md` — plugin conventions and the
   live-`~/.dsh` hazard rules (this import touches session storage, not plugin
   config, so no hot-reload risk).
-- `~/.dsh/profiles/web/node_modules/dsh-import-agents/README.md` — the
-  supported importer's exact behavior.
+- `dsh-import-agents` on npm (0.3.0) — the former third-party importer's README,
+  should its exact behavior need re-checking; it is no longer installed.
 - `preview-identity.md` — the preview server's own recipe.

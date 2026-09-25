@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 /**
  * import-claude-session.mjs — convert a Claude Code transcript into a DSH
- * session log.
+ * session log, OFFLINE (server stopped).
+ *
+ * SUPERSEDED (2026-09-24) by the `tali-import-sessions` plugin
+ * (plugins/import-sessions): `/import-claude` in the GUI or `/import-claude
+ * <path>` headlessly import through DSH's own services while the server runs,
+ * with real image attachments, subagent child sessions and a working-session
+ * fold. This script writes the on-disk artifact directly and predates format
+ * v3 (no `stream` field, v2 replace spelling); keep it only as a reference for
+ * the byte-level container contract described in the recipe.
  *
  * Claude Code (and therefore Supacode, which delegates persistence to the agent
  * CLIs it hosts) keeps one JSONL transcript per session under

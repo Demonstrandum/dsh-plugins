@@ -3,6 +3,12 @@
  * shrink-session-surface.mjs — hide an oversized imported transcript's older
  * history from the MODEL while keeping every byte in the session log.
  *
+ * SUPERSEDED (2026-09-24): the `tali-import-sessions` plugin applies this fold
+ * at import time ("Working session" in the dialog). This script writes the
+ * FORMAT v2 replace spelling (`surfaceOp.start/end`); DSH now writes v3 logs
+ * (`session.v3.jsonl.zstd`, `surfaceOp.startSeq/endSeq`), so do not run it
+ * against a v3 log. Reference only.
+ *
  * Why: an imported transcript is replayed as live model-visible history, so a
  * long one (the nLab→Dash import is 8,639 surface events ≈ 1.26M tokens by the
  * token meter and ~2.5M by a provider tokenizer) exceeds every model window.

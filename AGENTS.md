@@ -499,10 +499,16 @@ can reproduce or maintain it:
   changed files pass through when every anchor is unique else return the
   matching regions and record the observation, freshness checked before any
   write; `search` names missing roots with the cwd.
-- `import-claude-code-sessions.md` — migrating Supacode/Claude Code transcripts
-  (and their project memory) into DSH sessions: why Supacode keeps no
-  transcripts, the session-log frame contract, the converter tool in
-  `tools/`, and the installed `dsh-import-agents` plugin alternative.
+- `import-claude-code-sessions.md` — importing Claude Code / pi transcripts
+  (Supacode-era included) into DSH sessions: the `tali-import-sessions` plugin
+  (`plugins/import-sessions`: device-upload or server chooser, one decision
+  modal, directory-matched workspaces, working-session fold for large
+  sessions, written through DSH's services), the format-v3 facts it had to
+  learn (no `type` in the logical header, required `assistant/message.stream`,
+  `startSeq/endSeq` replaces), the Dock-app `runOpenPanel` gap, plus the
+  pre-plugin history: why Supacode keeps no transcripts, the session-log frame
+  contract, the superseded `tools/` scripts, and the removed third-party
+  `dsh-import-agents` plugin.
 - `inline-links-remote-audit.md` — audit (no code) of what the client
   auto-links in agent output (GFM allowlist, inline-code URLs, `#L` file
   links, produced-file mentions, `WebBlock`) and what a click does, then what

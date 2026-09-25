@@ -98,3 +98,12 @@
     # path was verified headlessly instead; recipe: recipes/chat-title-plugin.md
     - id: tali-chat-title
       name: '/Users/USER/github/tali-dash-plugins/plugins/chat-title/index.js'
+    # Under trial (2026-09-24): import-sessions — `/import-claude` and
+    # `/import-pi` bring Claude Code / pi transcripts from disk into real DSH
+    # sessions: chooser on the client device (upload) or on the server, one
+    # decision modal (tree or single card, directory-matched workspace
+    # destinations, working-session fold offered for large sessions), written
+    # through sessionPersistence/attachments/workspaceRegistry. Recipe:
+    # recipes/import-claude-code-sessions.md
+    - id: tali-import-sessions
+      name: '/Users/USER/github/tali-dash-plugins/plugins/import-sessions/index.js'

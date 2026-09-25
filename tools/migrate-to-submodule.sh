@@ -177,14 +177,10 @@ if [ "$DRY" = 0 ]; then
     maxOutputTokens: 64
     timeoutMs: 60000
     style: slug
-
-# dsh-import-agents stays installed but unmounted.
-- id: import-pi-opencode
-  disabled: true
 YML
   "$HERE/tools/install-plugins.sh" --checkout "$NEW"
 else
-  echo "  overrides kept: tailscale-remote (relayCwd=$NEW), traceFiles, notion mcp row, session-title-llm, import-pi-opencode"
+  echo "  overrides kept: tailscale-remote (relayCwd=$NEW), traceFiles, notion mcp row, session-title-llm"
   echo "  \$ tools/install-plugins.sh --checkout $NEW"
 fi
 

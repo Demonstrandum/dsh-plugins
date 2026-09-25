@@ -1,0 +1,16 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# Config keys and their defaults are the plugin's schema defaults; override by
+# id in the profile's cordis.patch.yml when needed (a patch replaces the whole
+# `config`).
+- insert:
+    - id: tali-import-sessions
+      name: tali-import-sessions
+      config:
+        # Source roots; `~` expands to the server user's home.
+        claudeRoot: ~/.claude/projects
+        piRoot: ~/.pi/agent/sessions
+        # Working-session defaults offered in the options step.
+        keepTurns: 20
+        resultCap: 4096
+        # Archive-mode cap on one tool-result body (chars); 0 = unlimited.
+        archiveResultCap: 0
