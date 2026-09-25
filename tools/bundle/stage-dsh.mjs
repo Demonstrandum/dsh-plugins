@@ -27,7 +27,7 @@
  * the checkout's `patches/` relative to the target and loses the symlink.
  */
 import { execFile, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -107,6 +107,34 @@ async function packAll(pkgs) {
 
 function readJson(path) { return JSON.parse(readFileSync(path, 'utf8')) }
 
+/**
+ * A plugin with a `build` script needs its devDependencies (esbuild) and, for
+ * a client plugin, a current `lib/client.js`: `pnpm install` when node_modules
+ * is missing or older than package.json, `pnpm build` when the bundle is
+ * missing or older than any source file. A `prepack` hook that builds would
+ * otherwise fail here with ERR_MODULE_NOT_FOUND esbuild on a fresh checkout.
+ */
+async function ensurePluginBuilt(dir) {
+  const pkg = readJson(join(dir, 'package.json'))
+  if (!pkg.scripts?.build) return
+  const mtime = p => { try { return statSync(p).mtimeMs } catch { return 0 } }
+  const needsInstall = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).length > 0
+    && mtime(join(dir, 'node_modules')) < mtime(join(dir, 'package.json'))
+  if (needsInstall) { log(`installing ${pkg.name} devDependencies`); await pnpm(dir, ['install', '--silent', '--no-frozen-lockfile']) }
+  const bundle = join(dir, 'lib', 'client.js')
+  const newestSource = Math.max(...['src', 'index.js', 'build.mjs', 'package.json'].map(p => newestUnder(join(dir, p))))
+  if (pkg.dsh?.client && mtime(bundle) < newestSource) { log(`building ${pkg.name}`); await pnpm(dir, ['build']) }
+}
+
+function newestUnder(path) {
+  let st
+  try { st = statSync(path) } catch { return 0 }
+  if (!st.isDirectory()) return st.mtimeMs
+  let newest = st.mtimeMs
+  for (const entry of readdirSync(path)) newest = Math.max(newest, newestUnder(join(path, entry)))
+  return newest
+}
+
 /** allowBuilds from the checkout, rekeyed so the `file:` spec form does not defeat the subprocess-local entry. */
 function allowBuilds() {
   const text = readFileSync(join(CHECKOUT, 'pnpm-workspace.yaml'), 'utf8')
@@ -147,6 +175,7 @@ async function main() {
   // checkout never enter the tree and their runtime deps come from the registry.
   const plugins = []
   for (const dir of PLUGIN_DIRS) {
+    await ensurePluginBuilt(dir)
     const out = await pnpm(dir, ['pack', '--pack-destination', TARBALLS, '--json'], { capture: true })
     const info = parsePackJson(out)
     const file = info.filename.split('/').pop()
