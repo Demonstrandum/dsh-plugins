@@ -12,7 +12,7 @@ Out-of-tree work on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-h
 | **Plugins** | `plugins/<name>/` | Twenty DSH plugins — agent tools, remote access, native OS apps, GUI tweaks, model plumbing. One installable npm package each. [Below](#plugins). |
 | **Private layer** | `extras/` (optional git submodule) | Deployment inventory, host scripts and further plugins that are not public. Absent without org access; every script here continues without it. Its manifest `extras/dsh-extras.yml` is read by the same installers. |
 | **The fork** | `deepseek-harness/` (git submodule) | [the custom fork of DSH](https://github.com/taliesinb/deepseek-harness), branch `feat/embed-session`, pinned to the commit the plugins were last tested against. A handful of features needed changes no plugin can make. [Below](#the-fork). |
-| **macOS apps** | built by `plugins/dsh-tailscale-remote` | Native WKWebView Dock apps for the local server, the preview server and remote Macs, with loopback port forwarding. [Below](#native-os-apps). |
+| **Native OS apps** | built by `plugins/dsh-tailscale-remote` (macOS), `flake.nix` (Linux) | A native window onto a DSH server — the local one, the preview server or a remote machine — with loopback port forwarding: a WKWebView wrapper on macOS, an Electron thin client on Linux. [Below](#native-os-apps). |
 | **Tooling** | `tools/`, `package.json` scripts | Fresh-machine bootstrap, plugin bundle install, deploy-to-remote, remote control. |
 | **Recipes** | `recipes/` | One Markdown file per completed setup / change / diagnosis, written so a future agent (or human) with zero context can reproduce it. Index in `AGENTS.md`. |
 
@@ -253,7 +253,10 @@ Everything else — tools, remote access, apps, UI — is a plugin.
 
 ## Native OS apps
 
-Not a plugin feature exactly — a ~350-line AppKit/WKWebView wrapper compiled
+A DSH server is a web GUI; these give it a real window on the desktop. On
+Linux that is the Electron thin client packaged by the root Nix flake
+(`nix run github:taliesinb/dsh-plugins`, [docs](plugins/dsh-tailscale-remote/linux-app/README.md)).
+On macOS it is not a plugin feature exactly — a ~350-line AppKit/WKWebView wrapper compiled
 on the target Mac with `xcrun swiftc` (Command Line Tools suffice), built and
 installed by `dsh-tailscale-remote`'s scripts (`pnpm dock-app:install`,
 `pnpm remote-app <host>`) or by the bootstrap. Why not Safari's *Add to Dock*:

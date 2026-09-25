@@ -62,7 +62,7 @@ removed. Why the flip: the colleagues' Macs all had *something* (the stock
 Desktop app, an earlier run) and the fresh-machine abort was the first thing every
 one of them hit; the take-over keeps `~/.dsh` so nothing is lost. Thin-client
 apps (`…dsh-dock-app.remote-*`, § The thin client) are never removed by the
-take-over — they open other Macs' DSH and hold no local state. Verified on
+take-over — they open other machines' DSH and hold no local state. Verified on
 the development laptop 2026-09-23 (`--dry-run`): nine findings, the take-over plan lists
 the relay, the three listeners, the Dock apps and keeps `DSH Hub.app`;
 `--no-replace --dry-run` reports the would-be abort and continues.

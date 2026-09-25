@@ -26,8 +26,8 @@ hooks; two of them (`_ioSection`, GenericCommandCard's `_body`) fall back to
 `[class*="_local"]` scoped under `[data-tool]` / `[data-variant="others"]`
 because those cards carry no attribute of their own, and could not be seen
 on the preview (its sessions have no tool calls) — verify on the live app.
-Third round: a **View ▸ Desktop / Mobile** switch in the DSH Dock apps so
-the maintainer can trial the phone view on the Mac without a phone or a browser
+Third round: a **View ▸ Desktop / Mobile** switch in the DSH Dock apps to
+trial the phone view on the Mac without a phone or a browser
 automation session.
 Fifth round: the composer itself — replaced on mobile by a bottom **tongue**
 and a full-screen text entry (the plugin gains a browser half; see §The
