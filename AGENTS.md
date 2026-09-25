@@ -597,6 +597,15 @@ can reproduce or maintain it:
   events), the iOS "never finishes loading" root cause (client-hmr's
   mid-load `EventSource` — deferred past `load` by a head-script shim), and
   the rest of the phone pass still open (sidebar rail, right dock).
+- `private-plugins-in-extras.md` — plugins that live in the private `extras/`
+  layer yet install like public ones: the manifest's `requires:` gate (any of
+  app paths / bundle ids / commands, evaluated by `tools/extras-manifest.mjs`
+  so no public script hardcodes a private plugin's needs) and `check:` hooks
+  whose output becomes bootstrap to-dos; and the 2026-09-25 procedure that
+  moved a plugin there — extract with history, relink one level deeper, hand-
+  scrub the public tree, rehearsed `filter-repo` with a targeted table,
+  `sync-host` reset onto a rewritten upstream, absolute-path profile links and
+  the pnpm store-version trap.
 - `preview-identity.md` — superseded stub (2026-09-05 red favicon + "DSH-dev"
   manifest for the Safari Dock preview; the dev-overlay/profile collision rule).
 - `promotion-loop-and-duplicate-dsh-tools.md` — the two faults that made the
