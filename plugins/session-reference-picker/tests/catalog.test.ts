@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceSnapshot } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import { filterSessionPickerItems, relativeSessionAge, sessionPickerItems } from '../src/client/catalog.ts'
+import { filterSessionPickerItems, relativeSessionAge, sessionLabelSegments, sessionPickerItems } from '../src/client/catalog.ts'
 import { encodeSessionReferenceUri, formatSessionReferenceMention } from '../src/client/mention.ts'
 
 const retainedBy = {}
@@ -49,6 +49,14 @@ test('filter supports full qualified substring and split workspace/session match
   assert.deepEqual(filterSessionPickerItems(items, 'other/bar').map(item => item.sessionId), ['older'])
   assert.deepEqual(filterSessionPickerItems(items, '/run').map(item => item.sessionId), ['loose'])
   assert.deepEqual(filterSessionPickerItems(items, 'foo/').map(item => item.sessionId), ['recent'])
+})
+
+test('display label separates workspace and session with a dimmed slash', () => {
+  assert.deepEqual(sessionLabelSegments('dummy2', 'preview-ok'), [
+    { text: 'dummy2' },
+    { text: ' / ', dim: true },
+    { text: 'preview-ok' },
+  ])
 })
 
 test('relative age labels use the compact existing-picker vocabulary', () => {

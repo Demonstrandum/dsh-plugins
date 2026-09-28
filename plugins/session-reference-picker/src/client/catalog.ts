@@ -57,6 +57,15 @@ function fallbackWorkspaceName(cwd: string | undefined): string {
   return normalized.slice(normalized.lastIndexOf('/') + 1) || '(unregistered)'
 }
 
+/** Structured display pieces for `workspace / session`; identity remains the unspaced qualified name. */
+export function sessionLabelSegments(workspace: string, title: string) {
+  return [
+    { text: workspace },
+    { text: ' / ', dim: true },
+    { text: title },
+  ] as const
+}
+
 /** Compact relative activity age matching the existing session-reference picker style. */
 export function relativeSessionAge(updatedAt: number, now: number = Date.now()): string {
   const elapsed = Math.max(0, now - updatedAt)

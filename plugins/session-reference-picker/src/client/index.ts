@@ -5,7 +5,7 @@ import type { IWorkspaces } from '@deepseek-ai/dsh-api-workspace-controller/clie
 import type {
   ClientSessionContext, InputTriggerServiceContract, InputTriggerSource,
 } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
-import { filterSessionPickerItems, relativeSessionAge, sessionPickerItems } from './catalog.ts'
+import { filterSessionPickerItems, relativeSessionAge, sessionLabelSegments, sessionPickerItems } from './catalog.ts'
 import { formatSessionReferenceMention } from './mention.ts'
 
 export const name = 'session-reference-picker-client'
@@ -29,6 +29,7 @@ export function apply(ctx: Context): void {
       const now = Date.now()
       return Promise.resolve(filterSessionPickerItems(catalog, query).map(item => ({
         name: item.qualifiedName,
+        labelSegments: sessionLabelSegments(item.workspaceName, item.sessionName),
         description: relativeSessionAge(item.updatedAt, now),
         icon: 'session' as const,
         value: JSON.stringify({ sessionId: item.sessionId, label: item.qualifiedName }),
