@@ -671,21 +671,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
-    func showOffline(reason: String) {
+    private func escapedHTML(_ value: String) -> String {
+        value.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    func showOffline(title: String = "DSH is unreachable", reason: String, url: URL? = nil, autoRetry: Bool = true) {
         showingOfflinePage = true
+        retryTimer?.invalidate()
+        let address = escapedHTML((url ?? webView.url ?? remoteURL).absoluteString)
         let html = """
-        <!doctype html><html><head><meta charset="utf-8"><title>\(config.name)</title>
-        <style>:root{color-scheme:light dark}body{margin:0;min-height:100vh;display:grid;place-items:center;font:15px/1.5 -apple-system,system-ui,sans-serif;background:#fafafa;color:#222}
-        @media (prefers-color-scheme:dark){body{background:#1c1c1e;color:#e5e5e7}}main{max-width:34em;padding:2em;text-align:center}h1{font-size:1.25em;font-weight:600}
-        p{color:#666}@media (prefers-color-scheme:dark){p{color:#a1a1a6}}code{font:.92em ui-monospace,Menlo,monospace}
-        button{font:inherit;padding:.4em 1.1em;border-radius:8px;border:1px solid #8884;background:#3b82f6;color:#fff;cursor:pointer}</style></head>
-        <body><main><h1>DSH is unreachable</h1><p>\(reason)</p><p><code>\(config.url)</code></p>
-        <p><button onclick="webkit.messageHandlers.dshDock.postMessage('retry')">Try again</button></p>
-        <p style="font-size:.9em">Retrying automatically every 5 seconds.</p></main></body></html>
+        <!doctype html><html><head><meta charset="utf-8"><title>\(escapedHTML(config.name))</title>
+        <style>:root{color-scheme:light dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;font:15px/1.5 -apple-system,system-ui,sans-serif;background:#fafafa;color:#222}
+        @media (prefers-color-scheme:dark){body{background:#1c1c1e;color:#e5e5e7}}main{width:min(38em,calc(100% - 3em));padding:2.5em;text-align:center}h1{font-size:1.45em;font-weight:650;margin:0 0 .6em}
+        p{color:#666;margin:.7em 0}@media (prefers-color-scheme:dark){p{color:#a1a1a6}}code{display:block;font:.88em ui-monospace,Menlo,monospace;overflow-wrap:anywhere;padding:.7em 1em;border-radius:8px;background:#8881}
+        button{font:600 1.05em -apple-system,system-ui,sans-serif;padding:.75em 1.6em;margin-top:.7em;border-radius:10px;border:0;background:#0a84ff;color:#fff;cursor:pointer;box-shadow:0 1px 4px #0003}button:active{transform:translateY(1px)}</style></head>
+        <body><main><h1>\(escapedHTML(title))</h1><p>\(escapedHTML(reason))</p><p><code>\(address)</code></p>
+        <p><button autofocus onclick="this.disabled=true;this.textContent='Reconnecting…';webkit.messageHandlers.dshDock.postMessage('retry')">Reconnect</button></p>
+        \(autoRetry ? "<p style=\"font-size:.9em\">Retrying automatically every 5 seconds.</p>" : "")</main></body></html>
         """
         webView.loadHTMLString(html, baseURL: nil)
-        retryTimer?.invalidate()
-        retryTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in self?.connect() }
+        if autoRetry {
+            retryTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in self?.connect() }
+        }
     }
 
     private lazy var logURL: URL = {
@@ -788,6 +798,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        if navigationResponse.isForMainFrame, let http = navigationResponse.response as? HTTPURLResponse,
+           !(200...399).contains(http.statusCode) {
+            let url = http.url ?? webView.url ?? remoteURL
+            let phrase = HTTPURLResponse.localizedString(forStatusCode: http.statusCode).capitalized
+            appendLog("[navigation] HTTP \(http.statusCode) \(phrase): \(url.absoluteString)")
+            decisionHandler(.cancel)
+            DispatchQueue.main.async { [weak self] in
+                self?.showOffline(
+                    title: "DSH failed to load",
+                    reason: "The server returned HTTP \(http.statusCode) \(phrase).",
+                    url: url,
+                    autoRetry: false)
+            }
+            return
+        }
         if navigationResponse.isForMainFrame, !navigationResponse.canShowMIMEType {
             decisionHandler(.download)
             return
