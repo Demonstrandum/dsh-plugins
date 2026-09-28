@@ -70,6 +70,7 @@ PLUGINS=(
   session-title-slug
   dsh-remote-workspaces
   numbered-switching
+  session-reference-picker
   import-api-keys
   reload-on-restart
   transcript-grace-margin

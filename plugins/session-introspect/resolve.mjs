@@ -127,7 +127,14 @@ export function createResolver({ local, tailnet }, options) {
     // canonical mention / URI
     const mention = /dsh-session:([A-Za-z0-9_-]+)/.exec(raw)
     if (mention) {
-      const id = Buffer.from(mention[1], 'base64url').toString('utf8')
+      let id
+      try {
+        const decoded = JSON.parse(Buffer.from(mention[1], 'base64url').toString('utf8'))
+        if (typeof decoded !== 'string') throw new TypeError('decoded session id is not a string')
+        id = decoded
+      } catch (error) {
+        throw new IntrospectError(`Invalid dsh-session reference: ${error instanceof Error ? error.message : String(error)}.`)
+      }
       const hit = byId(id)
       if (!hit) throw new IntrospectError(`Mention refers to session "${id}", which is not visible${where}.`)
       return hit

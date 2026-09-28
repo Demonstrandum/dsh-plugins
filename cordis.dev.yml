@@ -61,6 +61,9 @@
     # as the live bundle, so a rebuild hot-swaps both.
     - id: tali-numbered-switching
       name: '/Users/USER/github/tali-dash-plugins/plugins/numbered-switching/index.js'
+    # Under trial (2026-09-28): `%` opens a recent-first ordinary-session picker.
+    - id: tali-session-reference-picker
+      name: '/Users/USER/github/tali-dash-plugins/plugins/session-reference-picker/index.js'
     # Under trial (2026-09-22): reload-on-restart — a server restart re-mints
     # every client bundle rev, client-hmr then hot-swaps the whole plugin tree
     # and the React root crashes (black window in the Dock apps). The plugin

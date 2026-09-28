@@ -1,0 +1,4 @@
+# Bundle patch: browser-only `%` session reference picker.
+- insert:
+    - id: tali-session-reference-picker
+      name: tali-session-reference-picker

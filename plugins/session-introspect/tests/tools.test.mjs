@@ -67,11 +67,12 @@ test('resolver: workspace/title, bare title, id prefix, latest:, self, mention; 
   const me = await run('transcript_outline', {})
   assert.equal(me.session.id, SELF)
   assert.equal(me.session.live, true)
-  const mention = await run('transcript_outline', { session: `@[x](dsh-session:${Buffer.from(WAE).toString('base64url')})` })
+  const mention = await run('transcript_outline', { session: `@[x](dsh-session:${Buffer.from(JSON.stringify(WAE)).toString('base64url')})` })
   assert.equal(mention.session.id, WAE)
+  await assert.rejects(run('transcript_outline', { session: '@[x](dsh-session:bm90LWpzb24)' }), /Invalid dsh-session reference/)
   await assert.rejects(run('transcript_outline', { session: 'nonexistent-title' }), /No session matched "nonexistent-title".*transcript_find/s)
   await assert.rejects(run('transcript_outline', { session: 'nowhere/x' }), /No workspace named "nowhere"/)
-  await assert.rejects(run('transcript_outline', { session: 'e' }), /"e" matches 3 sessions[\s\S]*\(\/Users\/tali\/github\/tensatory\)/)
+  await assert.rejects(run('transcript_outline', { session: 'e' }), /"e" matches 3 sessions[\s\S]*tensatory\/interval-slider-proto/)
 })
 
 test('resolver: titles come from cheap projections when available, else one fold per unknown session', async () => {
