@@ -2,7 +2,7 @@
   "name": "tali-fs-tools",
   "version": "0.1.0",
   "private": true,
-  "description": "DSH plugin: batch filesystem tools beside the built-ins — list_dir (directories included), read_many (several line ranges per call, observed for the read-guard), edit_many (several literal replacements across files, validated before any write) and search (ripgrep with context, files/count modes, include/exclude globs, several roots and patterns).",
+  "description": "DSH plugin: batch filesystem tools beside the built-ins — list_dir (directories included), read_many (several line ranges per call, observed for the read-guard), edit_many (several literal replacements across files, validated before any write) and search (literal/word/regex selectors and exclusions, context, files/count modes, path globs and several roots).",
   "type": "module",
   "main": "index.js",
   "exports": {

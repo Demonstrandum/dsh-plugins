@@ -12,8 +12,8 @@
  *               (guard, match, uniqueness) before anything is written; unread files
  *               with unique anchors go through, others return the matching regions;
  *               optional `verify` command runs in the same call
- *   search      ripgrep with context, files/count modes, several roots and
- *               patterns, include/exclude globs, exclude_pattern, -i, -F
+ *   search      literal/word/regex selectors and exclusions, context,
+ *               files/count modes, several roots, include/exclude globs
  *
  * All four go through ctx.fs (sandbox + observation policy apply exactly as for
  * the built-ins); `search` spawns the packaged ripgrep through ctx.subprocess.
@@ -66,7 +66,7 @@ export const PROMPT_HINT = 'Batch filesystem tools: use list_dir (not ls/tree) t
   + 'replace_all for every occurrence, insert_after/insert_before a unique marker, replace_between two markers (or to end of file), append — '
   + 'all validated before anything is written — and `verify: { command }` to run the typecheck/tests in the same call instead of a separate bash call. '
   + 'An unread file whose anchors match uniquely is edited anyway; otherwise the matching regions come back. search (not grep/rg) for content '
-  + 'search with context, files-only/count modes, include/exclude globs and several roots. Prefer bash `workdir` over `cd X &&` prefixes; '
+  + 'search with literal/word/regex selectors and exclusions, context, files-only/count modes, path globs and several roots. Prefer bash `workdir` over `cd X &&` prefixes; '
   + 'the session cwd is the workspace root.'
 
 export function apply(ctx, config) {

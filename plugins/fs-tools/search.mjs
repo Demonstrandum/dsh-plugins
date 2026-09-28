@@ -4,10 +4,10 @@
  *   context (-A/-B/-C)            `context: 3`
  *   files only (-l) / counts (-c) `mode: "files" | "count"`
  *   several roots                 `paths: ["src", "docs"]`
- *   several patterns (-e … -e …)  `patterns: ["foo", "bar"]`
- *   --include / --exclude globs   `include: ["*.ts"]`, `exclude: ["*.spec.ts"]`
- *   `| grep -v X` post-filter     `exclude_pattern: "X"`
- *   -i / -F / --no-ignore         `case_insensitive`, `literal`, `no_ignore`
+ *   literal / word / regex         `text`, `word`, `regex`
+ *   line exclusions                `exclude_text`, `exclude_word`, `exclude_regex`
+ *   include / exclude path globs   `include_glob`, `exclude_glob`
+ *   -i / --no-ignore               `ignore_case`, `no_ignore`
  *
  * Runs the packaged `@vscode/ripgrep` binary through ctx.subprocess (the same
  * seam the in-tree grep uses) in the session cwd, parses `rg --json`, and
@@ -38,37 +38,66 @@ function stringList(value, name) {
   return list
 }
 
+function integerInRange(value, name, min, max, fallback) {
+  if (value === undefined || value === null) return fallback
+  if (!Number.isInteger(value) || value < min || value > max) throw new FsToolsError(`${name} must be an integer between ${min} and ${max}`)
+  return value
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function compileExclusions({ text, word, regex, ignoreCase }) {
+  const flags = ignoreCase ? 'iu' : 'u'
+  const out = []
+  for (const value of text) out.push(new RegExp(escapeRegex(value), flags))
+  for (const value of word) out.push(new RegExp(`(?:^|[^\\p{L}\\p{N}_])${escapeRegex(value)}(?=$|[^\\p{L}\\p{N}_])`, flags))
+  for (const value of regex) {
+    try { out.push(new RegExp(value, flags)) }
+    catch (error) { throw new FsToolsError(`exclude_regex is not a valid JavaScript regular expression: ${error instanceof Error ? error.message : String(error)}`) }
+  }
+  return out
+}
+
 /**
  * @param {any} args
  * @param {{ maxResults: number }} caps
  */
 export function parseSearchArgs(args, caps) {
-  const patterns = [...(args.pattern !== undefined && args.pattern !== null ? [String(args.pattern)] : []), ...stringList(args.patterns, 'patterns')]
-  if (patterns.length === 0) throw new FsToolsError('pattern (or patterns) is required')
-  if (patterns.some(p => p.length === 0)) throw new FsToolsError('pattern must be a non-empty string')
+  const ignoreCase = args.ignore_case === true || args.case_insensitive === true
+  const text = stringList(args.text, 'text')
+  const word = stringList(args.word, 'word')
+  const regex = stringList(args.regex, 'regex')
+  const legacy = [...(args.pattern !== undefined && args.pattern !== null ? [String(args.pattern)] : []), ...stringList(args.patterns, 'patterns')]
+  if (legacy.some(p => p.length === 0)) throw new FsToolsError('pattern must be a non-empty string')
+  if (args.literal === true) text.push(...legacy)
+  else regex.push(...legacy)
+  if (text.length + word.length + regex.length === 0) throw new FsToolsError('one of text, word or regex is required')
+
   const mode = args.mode ?? 'lines'
   if (!['lines', 'files', 'count'].includes(mode)) throw new FsToolsError('mode must be lines, files or count')
-  const include = stringList(args.include, 'include')
-  const exclude = stringList(args.exclude, 'exclude')
-  for (const g of [...include, ...exclude]) if (g.startsWith('!')) throw new FsToolsError('include/exclude globs must be positive; put exclusions in exclude')
-  let excludeRe
-  if (args.exclude_pattern !== undefined && args.exclude_pattern !== null) {
-    try {
-      excludeRe = new RegExp(String(args.exclude_pattern), args.case_insensitive ? 'i' : '')
-    } catch (error) {
-      throw new FsToolsError(`exclude_pattern is not a valid JavaScript regular expression: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
+  const include = stringList(args.include_glob ?? args.include, args.include_glob !== undefined ? 'include_glob' : 'include')
+  const exclude = stringList(args.exclude_glob ?? args.exclude, args.exclude_glob !== undefined ? 'exclude_glob' : 'exclude')
+  for (const g of [...include, ...exclude]) if (g.startsWith('!')) throw new FsToolsError('include/exclude globs must be positive; put exclusions in exclude_glob')
+
+  const excludeText = stringList(args.exclude_text, 'exclude_text')
+  const excludeWord = stringList(args.exclude_word, 'exclude_word')
+  const excludeRegex = stringList(args.exclude_regex, 'exclude_regex')
+  if (args.exclude_pattern !== undefined && args.exclude_pattern !== null) excludeRegex.push(String(args.exclude_pattern))
+  const excludes = compileExclusions({ text: excludeText, word: excludeWord, regex: excludeRegex, ignoreCase })
+
   return {
-    patterns,
+    text,
+    word,
+    regex,
     paths: stringList(args.paths ?? args.path, 'paths'),
     include,
     exclude,
-    excludeRe,
+    excludes,
     mode,
-    context: positiveInt(args.context, 'context', 0, MAX_CONTEXT),
-    caseInsensitive: args.case_insensitive === true,
-    literal: args.literal === true,
+    context: integerInRange(args.context, 'context', 0, MAX_CONTEXT, 0),
+    caseInsensitive: ignoreCase,
     noIgnore: args.no_ignore === true,
     hidden: args.hidden === true,
     maxResults: positiveInt(args.max_results, 'max_results', caps.maxResults, 5000),
@@ -83,14 +112,15 @@ export function parseSearchArgs(args, caps) {
 export function buildSearchArgv(input) {
   const argv = ['--no-config', '--json']
   if (input.caseInsensitive) argv.push('--ignore-case')
-  if (input.literal) argv.push('--fixed-strings')
   if (input.noIgnore) argv.push('--no-ignore')
   if (input.hidden) argv.push('--hidden')
   // Context only matters for the line rendering; files/count aggregate in JS from match records.
   if (input.mode === 'lines' && input.context > 0) argv.push(`--context=${input.context}`)
   for (const g of input.include) argv.push(`--glob=${g}`)
   for (const g of input.exclude) argv.push(`--glob=!${g}`)
-  for (const p of input.patterns) argv.push(`--regexp=${p}`)
+  for (const p of input.text) argv.push(`--regexp=${escapeRegex(p)}`)
+  for (const p of input.word) argv.push(`--regexp=\\b${escapeRegex(p)}\\b`)
+  for (const p of input.regex) argv.push(`--regexp=${p}`)
   argv.push('--')
   argv.push(...(input.paths.length > 0 ? input.paths : ['.']))
   return argv
@@ -159,12 +189,12 @@ export function relativeTo(path, cwd) {
 }
 
 /**
- * Apply exclude_pattern and drop context rows no longer near a kept match.
+ * Apply line exclusions and drop context rows no longer near a kept match.
  * @param {Array<{ kind: string, line: number, text: string }>} records
  */
-function filterRecords(records, excludeRe, context) {
-  if (!excludeRe) return records
-  const kept = records.filter(r => r.kind !== 'match' || !excludeRe.test(r.text))
+function filterRecords(records, excludes, context) {
+  if (excludes.length === 0) return records
+  const kept = records.filter(r => r.kind !== 'match' || !excludes.some(re => re.test(r.text)))
   const matchLines = kept.filter(r => r.kind === 'match').map(r => r.line)
   return kept.filter(r => r.kind === 'match' || matchLines.some(m => Math.abs(m - r.line) <= context))
 }
@@ -183,7 +213,7 @@ export function aggregate(parsed, input, cwd) {
   // ripgrep's file order is nondeterministic (parallel walk): sort by path so results are stable.
   const ordered = [...parsed.entries()].sort((a, b) => relativeTo(a[0], cwd).localeCompare(relativeTo(b[0], cwd)))
   for (const [rawPath, records] of ordered) {
-    const recs = filterRecords(records, input.excludeRe, input.context)
+    const recs = filterRecords(records, input.excludes, input.context)
     const matches = recs.filter(r => r.kind === 'match').length
     if (matches === 0) continue
     totalMatches += matches
@@ -208,7 +238,7 @@ export function aggregate(parsed, input, cwd) {
     }
     if (rows.length > 0) files.push({ path, matches, rows })
   }
-  return { mode: input.mode, files, totalMatches, totalFiles: [...parsed.keys()].filter(k => filterRecords(parsed.get(k), input.excludeRe, input.context).some(r => r.kind === 'match')).length, shownMatches, truncated, maxResults: input.maxResults }
+  return { mode: input.mode, files, totalMatches, totalFiles: [...parsed.keys()].filter(k => filterRecords(parsed.get(k), input.excludes, input.context).some(r => r.kind === 'match')).length, shownMatches, truncated, maxResults: input.maxResults }
 }
 
 /** @param {ReturnType<typeof aggregate>} v */
@@ -229,13 +259,17 @@ function renderMatches(v) {
     const width = String(Math.max(...v.files.map(f => f.matches))).length
     return `${head}${cut}\n${v.files.map(f => `${String(f.matches).padStart(width)}  ${f.path}`).join('\n')}`
   }
-  const cut = v.truncated ? ` (showing first ${v.shownMatches}; raise max_results, add exclude/exclude_pattern, or narrow paths)` : ''
+  const cut = v.truncated ? ` (showing first ${v.shownMatches}; raise max_results, add an exclusion, or narrow paths)` : ''
   const blocks = v.files.map(f => {
     const width = String(Math.max(...f.rows.filter(r => !r.gap).map(r => r.line))).length
     const body = f.rows.map(r => r.gap ? `  ${'-'.repeat(width)}-` : `  ${String(r.line).padStart(width)}${r.match ? ':' : '-'} ${r.text}`).join('\n')
     return `${f.path}\n${body}`
   })
   return `${head}${cut}\n\n${blocks.join('\n\n')}`
+}
+
+function stringOrList(description) {
+  return { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }], description }
 }
 
 /**
@@ -245,21 +279,23 @@ function renderMatches(v) {
 export function createSearchTool(ctx, caps) {
   return defineTool({
     name: 'search',
-    description: 'Search file contents with ripgrep, with the options bash grep gets used for: context lines, files-only or per-file counts, '
-      + 'several roots, several patterns (OR), include/exclude globs, a `| grep -v`-style exclude_pattern, case-insensitive and literal matching. '
+    description: 'Search file contents with explicit literal-text, whole-word, and regular-expression selectors. Positive selectors combine with OR; exclusion selectors reject matching lines. '
+      + 'Paths are literal files/directories, never globs; use include_glob and exclude_glob for path filtering. '
       + `Respects .gitignore unless no_ignore. Returns the first ${caps.maxResults} matches grouped by file ("N:" match rows, "N-" context rows). `
       + 'Use this instead of grep/rg in bash.',
     parameters: {
-      pattern: { type: 'string', description: 'Regular expression (ripgrep/Rust syntax; use literal:true for a fixed string).' },
-      patterns: { type: 'array', items: { type: 'string' }, description: 'Several patterns; a line matching any of them matches.' },
-      paths: { type: 'array', items: { type: 'string' }, description: 'Files or directories to search (relative to the session workspace, absolute, or ~). Roots that do not exist are reported and skipped. Default: ["."].' },
-      include: { type: 'array', items: { type: 'string' }, description: 'Only files matching these globs, e.g. ["*.ts", "*.tsx"]. Gitignore semantics: a glob containing "/" is anchored at the search root, so use "**/dir/**" for a directory at any depth.' },
-      exclude: { type: 'array', items: { type: 'string' }, description: 'Skip files matching these globs, e.g. ["*.spec.ts", "**/tests/**"] (same anchoring rule as include).' },
-      exclude_pattern: { type: 'string', description: 'Drop matching lines whose text matches this (JavaScript) regex — the `| grep -v` filter.' },
-      mode: { type: 'string', enum: ['lines', 'files', 'count'], description: 'lines (default): matching lines with numbers; files: file list only (-l); count: per-file match counts (-c).' },
-      context: { type: 'integer', description: `Context lines before and after each match (0–${MAX_CONTEXT}; lines mode).` },
-      case_insensitive: { type: 'boolean', description: 'Case-insensitive matching (-i).' },
-      literal: { type: 'boolean', description: 'Treat patterns as fixed strings, not regexes (-F).' },
+      text: stringOrList('Literal text to search for. A string or list; positive selectors combine with OR.'),
+      word: stringOrList('Whole word to search for. A string or list; positive selectors combine with OR.'),
+      regex: stringOrList('Regular expression in ripgrep/Rust syntax. A string or list; positive selectors combine with OR.'),
+      exclude_text: stringOrList('Reject matched lines containing this literal text. A string or list.'),
+      exclude_word: stringOrList('Reject matched lines containing this whole word. A string or list.'),
+      exclude_regex: stringOrList('Reject matched lines matching this JavaScript regular expression. A string or list.'),
+      ignore_case: { type: 'boolean', description: 'Make positive and exclusion matching case-insensitive.' },
+      paths: { type: 'array', items: { type: 'string' }, description: 'Literal files or directories to search. Relative paths resolve against the session workspace; values are not globs. Missing roots are reported and skipped. Default: ["."].' },
+      include_glob: stringOrList('Only search files matching these path globs, e.g. "*.ts" or ["*.ts", "*.tsx"]. A glob containing "/" is anchored at the search root; use "**/dir/**" at any depth.'),
+      exclude_glob: stringOrList('Skip files matching these path globs, e.g. "*.spec.ts" or "**/tests/**".'),
+      mode: { type: 'string', enum: ['lines', 'files', 'count'], description: 'lines (default): matching lines with numbers; files: file list only; count: per-file match counts.' },
+      context: { type: 'integer', description: `Context lines before and after each match (0–${MAX_CONTEXT}; lines mode). Zero is valid.` },
       no_ignore: { type: 'boolean', description: 'Also search files ignored by .gitignore (node_modules, build output).' },
       hidden: { type: 'boolean', description: 'Also search hidden files and directories.' },
       max_results: { type: 'integer', description: `Cap on matches (lines mode) or files (files/count); default ${caps.maxResults}.` },
@@ -312,7 +348,7 @@ export function createSearchTool(ctx, caps) {
       return decorate(aggregate(parseRgJson(run.stdout), input, cwd))
     },
     presentCall: (args) => {
-      const pats = [...(args.pattern ? [args.pattern] : []), ...(Array.isArray(args.patterns) ? args.patterns : [])]
+      const pats = [...stringList(args.text, 'text'), ...stringList(args.word, 'word'), ...stringList(args.regex, 'regex'), ...(args.pattern ? [args.pattern] : []), ...(Array.isArray(args.patterns) ? args.patterns : [])]
       const where = Array.isArray(args.paths) && args.paths.length ? ` in ${args.paths.join(', ')}` : ''
       return { card: 'generic', title: `Search ${pats.join(' | ')}${where}`, kind: 'search', rawInput: pats.join(' | ') }
     },

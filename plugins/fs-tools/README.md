@@ -115,21 +115,47 @@ escalation the built-in `edit`/`write` remain.
 ### `search`
 
 ```
-search { pattern? , patterns?: string[], paths?: string[], include?: string[], exclude?: string[],
-         exclude_pattern?: string, mode?: 'lines' | 'files' | 'count', context?: 0..20,
-         case_insensitive?, literal?, no_ignore?, hidden?, max_results?: int }
+search {
+  text?: string | string[]
+  word?: string | string[]
+  regex?: string | string[]
+  exclude_text?: string | string[]
+  exclude_word?: string | string[]
+  exclude_regex?: string | string[]
+  ignore_case?: boolean
+  paths?: string[]
+  include_glob?: string | string[]
+  exclude_glob?: string | string[]
+  mode?: 'lines' | 'files' | 'count'
+  context?: 0..20
+  no_ignore?: boolean
+  hidden?: boolean
+  max_results?: int
+}
 ```
 
-ripgrep with the flags bash `grep` gets used for: context (`-C`), files only
-(`-l`), per-file counts (`-c`), several roots, several patterns (OR),
-include/exclude globs (gitignore semantics — a glob with `/` is anchored at the
-root, use `**/dir/**`), a `| grep -v`-style `exclude_pattern` (JS regex over the
-matched line, context rows re-trimmed), `-i`, `-F`, `--no-ignore`, `--hidden`.
-Output is grouped by file, sorted by path (ripgrep's own order is
-nondeterministic), `N:` for matches and `N-` for context rows, `--` between
-non-contiguous chunks. Capped at `max_results` matches (lines) or files
-(files/count) with a note. Every model value rides in `--flag=value` form or
-behind `--`, so no value can become a flag.
+At least one positive selector is required. `text` is literal, `word` is a
+whole-word match, and `regex` uses ripgrep/Rust regex syntax; strings and lists
+are accepted and all positive selectors combine with OR. The three exclusions
+reject matching lines and therefore apply consistently in lines, files, and
+count modes. `exclude_regex` uses JavaScript regex syntax. `ignore_case`
+applies to both positive and exclusion matching.
+
+`paths` contains literal files or directories and never expands globs. Relative
+roots resolve against the session workspace. Use `include_glob` and
+`exclude_glob` for path filtering: a basename glob such as `*.ts` matches at
+any depth, while a glob containing `/` is anchored at each search root; use
+`**/dir/**` for a directory at arbitrary depth.
+
+Output is grouped by file and sorted by path (ripgrep's own order is
+nondeterministic), with `N:` for matches, `N-` for context rows, and `--`
+between non-contiguous chunks. It is capped at `max_results` matches (lines)
+or files (files/count), with a note. Every model value rides in `--flag=value`
+form or behind `--`, so no value can become a flag.
+
+Legacy `pattern`, `patterns`, `literal`, `case_insensitive`, `include`,
+`exclude`, and `exclude_pattern` inputs remain accepted for existing callers,
+but are intentionally absent from the advertised schema.
 
 ## System-prompt hint
 

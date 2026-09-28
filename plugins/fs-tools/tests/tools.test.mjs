@@ -406,15 +406,17 @@ test('edit_many: argument validation', async () => {
 // ---------------------------------------------------------------- search
 
 test('search: argv construction keeps model values behind --flag= and --', () => {
-  const input = parseSearchArgs({ pattern: '-foo', patterns: ['bar'], paths: ['-src'], include: ['*.ts'], exclude: ['*.spec.ts'], context: 2, case_insensitive: true, literal: true }, { maxResults: 250 })
+  const input = parseSearchArgs({ text: '-foo', word: 'bar', regex: 'b.z', paths: ['-src'], include_glob: '*.ts', exclude_glob: ['*.spec.ts'], context: 0, ignore_case: true }, { maxResults: 250 })
   assert.deepEqual(buildSearchArgv(input), [
-    '--no-config', '--json', '--ignore-case', '--fixed-strings', '--context=2',
-    '--glob=*.ts', '--glob=!*.spec.ts', '--regexp=-foo', '--regexp=bar', '--', '-src',
+    '--no-config', '--json', '--ignore-case',
+    '--glob=*.ts', '--glob=!*.spec.ts', '--regexp=-foo', '--regexp=\\bbar\\b', '--regexp=b.z', '--', '-src',
   ])
-  assert.throws(() => parseSearchArgs({}, { maxResults: 250 }), /pattern \(or patterns\) is required/)
-  assert.throws(() => parseSearchArgs({ pattern: 'x', mode: 'nope' }, { maxResults: 250 }), /mode must be/)
-  assert.throws(() => parseSearchArgs({ pattern: 'x', exclude_pattern: '(' }, { maxResults: 250 }), /exclude_pattern is not a valid/)
-  assert.throws(() => parseSearchArgs({ pattern: 'x', include: ['!a'] }, { maxResults: 250 }), /must be positive/)
+  assert.equal(input.context, 0)
+  assert.throws(() => parseSearchArgs({}, { maxResults: 250 }), /one of text, word or regex is required/)
+  assert.throws(() => parseSearchArgs({ text: 'x', context: -1 }, { maxResults: 250 }), /context must be an integer between 0 and 20/)
+  assert.throws(() => parseSearchArgs({ text: 'x', mode: 'nope' }, { maxResults: 250 }), /mode must be/)
+  assert.throws(() => parseSearchArgs({ text: 'x', exclude_regex: '(' }, { maxResults: 250 }), /exclude_regex is not a valid/)
+  assert.throws(() => parseSearchArgs({ text: 'x', include_glob: '!a' }, { maxResults: 250 }), /must be positive/)
 })
 
 test('search: lines mode with context, grouped by file, N: matches and N- context, gaps marked', async () => {
@@ -453,6 +455,23 @@ test('search: files / count modes, include + exclude globs, several patterns, ex
   assert.equal(text('search', {}, none), 'No matches found')
 })
 
+test('search: text is literal, word is whole-word, selectors OR, and typed exclusions work in every mode', async () => {
+  const literal = await run('search', { text: 'foo(', paths: ['src'], mode: 'count' })
+  assert.deepEqual(literal.files.map(f => `${f.path}=${f.matches}`), ['src/a.ts=2', 'src/b.ts=1'])
+
+  const words = await run('search', { word: 'foo', include_glob: '*.ts', mode: 'files' })
+  assert.deepEqual(words.files.map(f => f.path).sort(), ['src/a.ts', 'src/b.ts', 'src/util/c.ts'])
+
+  const selected = await run('search', { text: ['Readme', 'C = 3'], mode: 'files' })
+  assert.deepEqual(selected.files.map(f => f.path).sort(), ['docs/readme.md', 'src/util/c.ts'])
+
+  const excluded = await run('search', { word: 'foo', paths: ['src/a.ts'], exclude_text: 'import', exclude_word: 'twice', mode: 'count' })
+  assert.deepEqual(excluded.files.map(f => `${f.path}=${f.matches}`), ['src/a.ts=1'])
+
+  const excludedRegex = await run('search', { text: 'FOO', ignore_case: true, paths: ['src/a.ts'], exclude_regex: 'RETURN|TWICE|IMPORT', mode: 'files' })
+  assert.deepEqual(excludedRegex.files, [])
+})
+
 test('search: max_results caps matches with a note; invalid regex surfaces rg diagnostic', async () => {
   const v = await run('search', { pattern: 'foo', max_results: 2 })
   assert.equal(v.shownMatches, 2)
@@ -460,6 +479,14 @@ test('search: max_results caps matches with a note; invalid regex surfaces rg di
   assert.ok(v.totalMatches > 2)
   assert.match(text('search', {}, v), /showing first 2; raise max_results/)
   await assert.rejects(run('search', { pattern: 'foo(' }), (e) => { assert.equal(e.code, 'SEARCH_FAILED'); assert.match(e.message, /unclosed group|regex/i); return true })
+})
+
+test('search: hidden legacy arguments remain compatible but are absent from the advertised schema', async () => {
+  const legacy = await run('search', { pattern: 'foo(1)', literal: true, include: ['*.ts'], exclude_pattern: 'twice', case_insensitive: true, mode: 'count' })
+  assert.deepEqual(legacy.files.map(f => f.path), ['src/a.ts'])
+  for (const hidden of ['pattern', 'patterns', 'literal', 'case_insensitive', 'include', 'exclude', 'exclude_pattern']) {
+    assert.equal(tool('search').parameters[hidden], undefined)
+  }
 })
 
 test('search: missing roots are skipped and named with the cwd; ~ expands; all-missing is a clear error', async () => {
