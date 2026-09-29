@@ -182,7 +182,7 @@ final class Updater: NSObject {
         fetchText(info.shaURL) { [weak self] expectedSha in
             guard let self else { return }
             let delegate = DownloadDelegate(progress: { [weak self] fraction in
-                self?.progressBar?.doubleValue = fraction * 100
+                self?.progress(.download, fraction)
             }, finished: { [weak self] result in
                 DispatchQueue.main.async {
                     guard let self else { return }
@@ -194,10 +194,10 @@ final class Updater: NSObject {
                             try? FileManager.default.removeItem(at: dmgPath)
                             try FileManager.default.moveItem(at: tmp, to: dmgPath)
                             self.progressLabel?.stringValue = "Verifying…"
+                            self.progress(.verify, 0)
                             try self.verify(dmgPath, expectedSha: expectedSha)
+                            self.progress(.verify, 1)
                             self.progressLabel?.stringValue = "Installing…"
-                            self.progressBar?.isIndeterminate = true
-                            self.progressBar?.startAnimation(nil)
                             DispatchQueue.global(qos: .userInitiated).async {
                                 let outcome = Result { try self.swap(dmg: dmgPath, staging: staging) }
                                 DispatchQueue.main.async {
@@ -217,6 +217,56 @@ final class Updater: NSObject {
             self.session = session
             session.downloadTask(with: info.dmgURL).resume()
         }
+    }
+
+    /// One bar for the whole update: download 0–60 %, verify 60–65 %, install 65–98 %, relaunch 100.
+    enum Phase { case download, verify, install }
+    private func progress(_ phase: Phase, _ fraction: Double) {
+        let (from, to): (Double, Double)
+        switch phase {
+        case .download: (from, to) = (0, 60)
+        case .verify: (from, to) = (60, 65)
+        case .install: (from, to) = (65, 98)
+        }
+        let value = from + (to - from) * min(max(fraction, 0), 1)
+        if Thread.isMainThread { progressBar?.doubleValue = value }
+        else { DispatchQueue.main.async { self.progressBar?.doubleValue = value } }
+    }
+
+    /// Recursive copy reporting bytes copied over bytes total (a first pass sizes the tree).
+    private func copyTree(from source: URL, to destination: URL) throws {
+        let fm = FileManager.default
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey]
+        var total: Int64 = 0
+        var entries: [(URL, URLResourceValues)] = []
+        if let walk = fm.enumerator(at: source, includingPropertiesForKeys: keys, options: []) {
+            for case let url as URL in walk {
+                let values = try url.resourceValues(forKeys: Set(keys))
+                entries.append((url, values))
+                if values.isDirectory != true, values.isSymbolicLink != true { total += Int64(values.fileSize ?? 0) }
+            }
+        }
+        var done: Int64 = 0
+        var lastReport = Date.distantPast
+        try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+        let base = source.standardizedFileURL.path
+        for (url, values) in entries {
+            let relative = String(url.standardizedFileURL.path.dropFirst(base.count)).drop(while: { $0 == "/" })
+            let target = destination.appendingPathComponent(String(relative))
+            if values.isSymbolicLink == true {
+                try fm.createSymbolicLink(atPath: target.path, withDestinationPath: try fm.destinationOfSymbolicLink(atPath: url.path))
+            } else if values.isDirectory == true {
+                try fm.createDirectory(at: target, withIntermediateDirectories: true)
+            } else {
+                try fm.copyItem(at: url, to: target)
+                done += Int64(values.fileSize ?? 0)
+                if Date().timeIntervalSince(lastReport) > 0.05 {
+                    lastReport = Date()
+                    progress(.install, total == 0 ? 1 : Double(done) / Double(total))
+                }
+            }
+        }
+        progress(.install, 1)
     }
 
     private func preflight() throws {
@@ -263,9 +313,11 @@ final class Updater: NSObject {
         let current = Bundle.main.bundleURL
         let parent = current.deletingLastPathComponent()
         let incoming = parent.appendingPathComponent(".\(current.lastPathComponent).update-\(UUID().uuidString.prefix(8))")
-        // `cp -R` keeps the ad-hoc signature intact (attributes, symlinks) where FileManager.copyItem has surprised before.
-        let copy = run("/bin/cp", ["-R", appInImage.path, incoming.path])
-        guard copy.status == 0 else { throw UpdateError.copy(copy.output) }
+        // Copied file by file so the bar moves: 260 MB over a few thousand files
+        // is the slow part, and `cp -R` reports nothing. Symlinks are recreated,
+        // permissions and extended attributes come with `copyItem` per file, and
+        // `codesign --verify --deep` below is the proof the result is intact.
+        try copyTree(from: appInImage, to: incoming)
         let verify = run("/usr/bin/codesign", ["--verify", "--deep", incoming.path])
         guard verify.status == 0 else { try? fm.removeItem(at: incoming); throw UpdateError.copy("the copied bundle fails codesign --verify: \(verify.output)") }
         do {
@@ -283,6 +335,7 @@ final class Updater: NSObject {
     private func relaunch(_ app: URL) {
         log("update: installed \(app.path); relaunching")
         progressLabel?.stringValue = "Relaunching…"
+        progressBar?.doubleValue = 100
         // `open` after this process has exited, so LSMultipleInstancesProhibited does not refuse the new copy.
         let script = "while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"\(app.path)\""
         let p = Process()
