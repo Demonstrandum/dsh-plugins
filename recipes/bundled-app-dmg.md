@@ -159,8 +159,17 @@ Security → Open Anyway) once. A `Developer ID Application:` identity drops in
 via `--sign` (adds `--options runtime --timestamp`); notarization
 (`xcrun notarytool submit` + `stapler`) is not scripted yet.
 
-DMG: `hdiutil create -format ULMO -fs APFS` over a staging folder with an
-`/Applications` symlink. **hdiutil fails inside the DSH file sandbox** with
+DMG: a read-write image (`hdiutil create -format UDRW`) over a staging folder
+with the app, an `/Applications` symlink and `.background/backdrop.png`
+(`Tools/make-dmg-background.swift`: the DSH near-white surface, a 6 % red
+whale watermark off the right edge, a thin arrow, one grey caption at
+660×400 pt rendered 2×); the image is mounted and **Finder itself** writes the
+view settings into its `.DS_Store` through osascript — icon view, 128 px
+icons, no toolbar/status/path bar, window bounds, backdrop, the two icon
+positions matching the arrow — then `hdiutil convert -format ULMO` makes
+the compressed read-only DMG (51 MB, smaller than the one-shot `create`).
+Trap in the renderer: an `NSBitmapImageRep` whose `size` is set in points
+already draws at 2×; an explicit `scaleBy(2)` on top gave 4× text. **hdiutil fails inside the DSH file sandbox** with
 the misleading `create failed - Directory not empty` even for a 3-file folder
 (diskimages-helper cannot attach); run the build from a terminal or use
 `--no-dmg` and finish by hand.

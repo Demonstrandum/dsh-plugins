@@ -146,6 +146,57 @@ async function prune(root) {
   log(`pruned ${files} entries, ${(bytes / 1024 / 1024).toFixed(0)} MB`)
 }
 
+/** Compile Tools/make-dmg-background.swift on demand (cached by mtime), like buildDockApp does for the icon renderer. */
+async function dmgBackgroundTool() {
+  const toolsDir = join(REPO, 'plugins', 'dsh-tailscale-remote', 'dock-app')
+  const source = join(toolsDir, 'Tools', 'make-dmg-background.swift')
+  const binary = join(toolsDir, 'build', 'make-dmg-background')
+  const mtime = async p => (await stat(p).catch(() => null))?.mtimeMs ?? 0
+  if (await mtime(binary) < await mtime(source)) {
+    log('compiling the DMG background renderer')
+    await mkdir(join(toolsDir, 'build'), { recursive: true })
+    await execFileAsync('/usr/bin/xcrun', ['swiftc', '-O', '-o', binary, source, '-framework', 'Cocoa'], { maxBuffer: 8 * 1024 * 1024 })
+  }
+  return binary
+}
+
+/**
+ * Finder writes the volume's .DS_Store: icon view, backdrop, positions. Runs
+ * through osascript against the mounted read-write image; Finder must be
+ * running (it always is on a logged-in desktop). Positions are icon centres
+ * in the 660×400 content area, matching the backdrop's arrow and caption.
+ */
+async function layoutDmgWindow(mount, appName) {
+  const volume = mount.split('/').pop()
+  const script = `
+    tell application "Finder"
+      tell disk "${volume}"
+        open
+        set current view of container window to icon view
+        set toolbar visible of container window to false
+        set statusbar visible of container window to false
+        set pathbar visible of container window to false
+        set sidebar width of container window to 0
+        set the bounds of container window to {200, 120, 860, 520}
+        set theOptions to the icon view options of container window
+        set arrangement of theOptions to not arranged
+        set icon size of theOptions to 128
+        set text size of theOptions to 13
+        set background picture of theOptions to file ".background:backdrop.png"
+        set position of item "${appName}" of container window to {180, 190}
+        set position of item "Applications" of container window to {480, 190}
+        close
+        open
+        update without registering applications
+        delay 2
+        close
+      end tell
+    end tell`
+  await execFileAsync('/usr/bin/osascript', ['-e', script], { timeout: 60000 })
+  // Finder keeps .fseventsd / .Trashes out of the way; make the backdrop folder invisible in older Finders too.
+  await execFileAsync('/usr/bin/SetFile', ['-a', 'V', join(mount, '.background')]).catch(() => {})
+}
+
 async function main() {
   const stagePkg = await readJson(join(STAGE, 'package.json'))
   const nodeInfo = await readJson(join(NODE_DIR, 'current.json'))
@@ -237,8 +288,28 @@ async function main() {
     await mkdir(staging, { recursive: true })
     await cp(app, join(staging, `${NAME}.app`), { recursive: true, verbatimSymlinks: true })
     await symlink('/Applications', join(staging, 'Applications'))
+    // Window dressing: a rendered backdrop (whale watermark, arrow, caption) in
+    // a hidden folder, and Finder's view settings — icon size, the two icon
+    // positions, no sidebar/toolbar, 660×400 — written into the volume's .DS_Store
+    // by Finder itself while a read-write image is mounted. Then the image is
+    // converted to the compressed read-only DMG. The coordinates match
+    // Tools/make-dmg-background.swift.
+    await mkdir(join(staging, '.background'), { recursive: true })
+    await execFileAsync(await dmgBackgroundTool(), [join(REPO, 'plugins', 'dsh-tailscale-remote', 'dock-app', 'icon.svg'), join(staging, '.background', 'backdrop.png'), '--glyph-color', GLYPH])
     log('creating the DMG')
-    await execFileAsync('/usr/bin/hdiutil', ['create', '-volname', NAME, '-srcfolder', staging, '-ov', '-format', 'ULMO', '-fs', 'APFS', dmg], { maxBuffer: 16 * 1024 * 1024 })
+    const rw = join(OUT, 'dmg-rw.dmg')
+    await rm(rw, { force: true })
+    await execFileAsync('/usr/bin/hdiutil', ['create', '-volname', NAME, '-srcfolder', staging, '-ov', '-format', 'UDRW', '-fs', 'APFS', rw], { maxBuffer: 16 * 1024 * 1024 })
+    const attach = await execFileAsync('/usr/bin/hdiutil', ['attach', '-readwrite', '-noverify', '-nobrowse', rw])
+    const mount = attach.stdout.split('\n').map(l => l.split('\t').pop()?.trim()).find(p => p?.startsWith('/Volumes/'))
+    if (!mount) throw new Error(`hdiutil attach: no mount point in\n${attach.stdout}`)
+    try {
+      await layoutDmgWindow(mount, `${NAME}.app`)
+    } finally {
+      await execFileAsync('/usr/bin/hdiutil', ['detach', mount, '-quiet']).catch(async () => { await new Promise(r => setTimeout(r, 2000)); await execFileAsync('/usr/bin/hdiutil', ['detach', mount, '-force', '-quiet']) })
+    }
+    await execFileAsync('/usr/bin/hdiutil', ['convert', rw, '-format', 'ULMO', '-o', dmg, '-ov'], { maxBuffer: 16 * 1024 * 1024 })
+    await rm(rw, { force: true })
     await rm(staging, { recursive: true, force: true })
     const dmgSize = (await stat(dmg)).size
     log(`dmg ready: ${dmg} (${(dmgSize / 1024 / 1024).toFixed(0)} MB)`)
