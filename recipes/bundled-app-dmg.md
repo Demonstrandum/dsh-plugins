@@ -233,7 +233,9 @@ SDKs (openai, anthropic, google/genai ~30 MB), OpenTelemetry 29 MB, node-pty
 
 **In the app** — `Updater.swift`, configured by the `update` block of
 `dsh-dock-app.json` (`{ repo, intervalHours: 6, feed: null }`). Check 10 s
-after launch and every 6 h, plus **DSH Canary ▸ Check for Updates…**:
+after launch and every 6 h, plus **DSH Canary ▸ Check for Updates… (⇧⌘U)** —
+always listed in a bundled app, disabled ("off in this build") when the build
+carries no feed (a `pnpm canary --app` build), via `validateMenuItem`:
 `GET https://api.github.com/repos/<repo>/releases/latest` (unauthenticated:
 60 requests/h per IP is plenty; `User-Agent` is mandatory or GitHub answers
 403), build = integer after the last `-` of `tag_name`, compared with
