@@ -346,6 +346,36 @@ Facts found building it:
   unexplained; if it recurs, the profile's `app-setup/state.json` is the
   thing to delete.
 
+### Install from the dialog + real progress bars (2026-09-29, later)
+
+- **Updater bar**: one continuous bar for the whole update — download
+  0–60 %, verify 60–65 %, install 65–98 %, relaunch 100 — instead of the
+  determinate download followed by an indeterminate "Installing…". The
+  install phase is driven by a file-by-file copy (`copyTree`, sizes summed
+  first, ≥ 50 ms between reports) replacing `cp -R`, which reports nothing;
+  `codesign --verify --deep` afterwards is the proof the copy is intact.
+  Measured 2026092800 → 2026092903 headless (`dsh.update.autoInstall`) in
+  44 s, relaunched.
+- **Install buttons** in the app-setup dialog (`plugins/app-setup/install.mjs`,
+  table in its README): direct vendor downloads, `installer -pkg` through
+  macOS's own admin dialog (`osascript … with administrator privileges`),
+  Chrome by `ditto` to a staging name + rename, afm unpacked into
+  `$DSH_HOME/app-setup/bin` — which `EmbeddedServer` prepends to PATH
+  *inside* the login shell (`export PATH="$DSH_APP_BIN:$PATH"; exec "$@"`),
+  after `.zprofile` had its say. Jobs live in the host route's memory
+  (`state.jobs`), the dialog polls at 400 ms while one runs. Two lessons:
+  never write over an existing `.app` (ditto over a running Chrome fails on
+  every file with `Operation not permitted`; the installer now refuses), and
+  errors go to the row as one line (`firstLine()`), the full text to the log.
+- **Stage trap**: a `file:` tarball whose name@version is unchanged is served
+  stale by pnpm's lockfile even when its bytes changed — an edited plugin
+  survived three restages. `stage-dsh.mjs` drops the lockfile and the
+  plugins' installed copies before every install (`forgetPlugins`; the 300
+  fork tarballs re-resolve in ~4 s).
+- Hook-order bug found by the canary: a `useRef`/`useEffect` placed after an
+  early `return null` → React #310, the overlay entry crashed and the dialog
+  never appeared. Hooks above the return.
+
 ## Fresh-OS test in a VM (2026-09-29)
 
 `pnpm vm-test fresh` (`tools/vm-test.sh`) boots a pristine macOS 26 guest

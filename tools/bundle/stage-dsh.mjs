@@ -245,6 +245,12 @@ async function main() {
 
   log(`installing production closure (${NODE_LINKER}) into ${OUT}`)
   rmSync(join(OUT, 'node_modules'), { recursive: true, force: true })
+  // A `file:` tarball whose name@version did not change is served from pnpm's
+  // store/lockfile even when its bytes did (measured: an edited plugin stayed
+  // stale through three restages). The plugins are always repacked, so their
+  // lockfile entries and store copies are dropped before every install; the
+  // fork tarballs (--skip-pack) keep theirs.
+  await forgetPlugins(plugins.map(p => p.file))
   await pnpm(OUT, ['install', '--prod', '--no-frozen-lockfile'])
   verifyFirstParty(new Set([...records.map(r => r.name), ...plugins.map(p => p.name)]))
   anchorPlugins(plugins.map(p => p.name))
@@ -270,6 +276,19 @@ function anchorPlugins(names) {
   rmSync(manifestPath)
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
   log(`anchored ${names.length} plugins in ${manifestPath}`)
+}
+
+/**
+ * Forget the plugins between installs: the lockfile goes (re-resolving 300
+ * `file:` tarballs takes ~4 s) and so do their installed copies. The
+ * fork tarballs are unaffected — pnpm re-reads them from disk by integrity.
+ */
+async function forgetPlugins(files) {
+  rmSync(join(OUT, 'pnpm-lock.yaml'), { force: true })
+  for (const file of files) {
+    const name = file.replace(/-\d+\.\d+\.\d+.*\.tgz$/, '')
+    rmSync(join(OUT, 'node_modules', name), { recursive: true, force: true })
+  }
 }
 
 /** Every first-party package in the lockfile must resolve to a staged tarball, never to the registry. */

@@ -34,10 +34,11 @@ interface Item {
   kind: 'required' | 'optional' | 'paid'
   installed: boolean
   detail?: string
-  action: 'open' | 'launch' | null
+  action: 'open' | 'launch' | 'install' | null
   url?: string
 }
-interface State { firstRun: boolean, items: Item[], version: string }
+interface Job { step: 'download' | 'install' | 'done' | 'failed', fraction: number, error?: string, done?: boolean }
+interface State { firstRun: boolean, items: Item[], version: string, jobs: Record<string, Job> }
 
 declare global {
   // eslint-disable-next-line no-var
@@ -65,36 +66,62 @@ function useSetupState(poll: boolean): { state: State | null, error: string | nu
   const refresh = useCallback(async () => {
     try { setState(await call('state') as State); setError(null) } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)) }
   }, [])
+  const busy = Object.values(state?.jobs ?? {}).some(j => !j.done)
   useEffect(() => {
     void refresh()
-    if (!poll) return
-    const timer = setInterval(() => { void refresh() }, 5000)
+    if (!poll && !busy) return
+    const timer = setInterval(() => { void refresh() }, busy ? 400 : 5000)
     return () => clearInterval(timer)
-  }, [refresh, poll])
+  }, [refresh, poll, busy])
   return { state, error, refresh }
 }
 
 const row: React.CSSProperties = { display: 'grid', gridTemplateColumns: '18px 1fr auto', alignItems: 'center', gap: 10, padding: '7px 0', fontSize: 13 }
 const dim: React.CSSProperties = { opacity: 0.55, fontSize: 12 }
 
+const STEP_LABEL: Record<Job['step'], string> = { download: 'Downloading', install: 'Installing', done: 'Installed', failed: 'Failed' }
+
+function Progress({ job }: { job: Job }) {
+  const pct = Math.round(job.fraction * 100)
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 160, justifyContent: 'flex-end' }}>
+      <span style={dim}>{STEP_LABEL[job.step]}{job.step === 'download' ? ` ${pct}%` : ''}</span>
+      <span style={{ width: 90, height: 4, borderRadius: 2, background: 'var(--dsw-color-border-subtle, #8883)', overflow: 'hidden', position: 'relative' }}>
+        {job.step === 'install'
+          // The install step (installer / ditto) reports no bytes: a sweeping segment, not a stuck number.
+          ? <span style={{ position: 'absolute', top: 0, bottom: 0, width: '35%', borderRadius: 2, background: 'var(--dsw-alias-state-business-primary, #3b82f6)', animation: 'dsh-app-setup-sweep 1.1s ease-in-out infinite alternate' }} />
+          : <span style={{ display: 'block', height: '100%', width: `${job.step === 'download' ? pct : 100}%`, background: job.step === 'failed' ? 'var(--dsh-color-danger, #d9534f)' : 'var(--dsw-alias-state-business-primary, #3b82f6)', transition: 'width .3s' }} />}
+      </span>
+      <style>{'@keyframes dsh-app-setup-sweep { from { left: 0 } to { left: 65% } }'}</style>
+    </span>
+  )
+}
+
 function Rows({ state, onAct, busy }: { state: State, onAct: (item: Item) => void, busy: string | null }) {
   const visible = state.items.filter(item => item.kind !== 'paid' || item.installed)
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {visible.map(item => (
-        <div key={item.id} style={{ ...row, borderTop: '1px solid var(--dsw-color-border-subtle, #8882)' }}>
-          <span aria-hidden style={{ textAlign: 'center', color: item.installed ? 'var(--dsw-color-success, #2e9e57)' : 'var(--dsw-color-text-tertiary, #999)' }}>{item.installed ? '●' : '○'}</span>
-          <span>
-            <span>{item.label}</span>
-            {item.detail && <span style={{ ...dim, marginLeft: 8 }}>{item.detail}</span>}
-            {!item.installed && item.kind === 'paid' && <span style={{ ...dim, marginLeft: 8 }}>not installed</span>}
-          </span>
-          <span>
-            {item.action === 'open' && <Button variant="outline" disabled={busy !== null} onClick={() => onAct(item)}>Get…</Button>}
-            {item.action === 'launch' && <Button variant="outline" disabled={busy !== null} onClick={() => onAct(item)}>Open</Button>}
-          </span>
-        </div>
-      ))}
+      {visible.map(item => {
+        const job = state.jobs?.[item.id]
+        const running = job !== undefined && !job.done
+        return (
+          <div key={item.id} style={{ ...row, borderTop: '1px solid var(--dsw-color-border-subtle, #8882)' }}>
+            <span aria-hidden style={{ textAlign: 'center', color: item.installed ? 'var(--dsw-color-success, #2e9e57)' : 'var(--dsw-color-text-tertiary, #999)' }}>{item.installed ? '●' : '○'}</span>
+            <span>
+              <span>{item.label}</span>
+              {item.detail && <span style={{ ...dim, marginLeft: 8 }}>{item.detail}</span>}
+              {!item.installed && item.kind === 'paid' && <span style={{ ...dim, marginLeft: 8 }}>not installed</span>}
+              {job?.error && <div role="alert" style={{ color: 'var(--dsh-color-danger, #d9534f)', fontSize: 12 }}>{job.error}</div>}
+            </span>
+            <span>
+              {running && <Progress job={job} />}
+              {!running && item.action === 'install' && <Button variant="primary" disabled={busy !== null} onClick={() => onAct(item)}>Install</Button>}
+              {!running && item.action === 'open' && <Button variant="outline" disabled={busy !== null} onClick={() => onAct(item)}>Get…</Button>}
+              {!running && item.action === 'launch' && <Button variant="outline" disabled={busy !== null} onClick={() => onAct(item)}>Open</Button>}
+            </span>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -129,12 +156,12 @@ function SetupDialog() {
   }, [dismissed])
   const open = clear && !dismissed && state?.firstRun === true
   useDialogDefaultAction(open)
-  if (!open || !state) return null
   // WKWebView delivers a trusted click to whatever sits under the pointer when the
   // freshly centred window becomes key; twice that landed on Done ~4 s after launch
   // (recipe). A dismissal inside the first second of the dialog's life is ignored.
   const openedAt = useRef(0)
   useEffect(() => { if (open) openedAt.current = performance.now() }, [open])
+  if (!open || !state) return null
   const close = (): void => {
     if (performance.now() - openedAt.current < 1000) return
     setDismissed(true); void call('dismiss')

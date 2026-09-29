@@ -19,6 +19,7 @@
  *   POST ?action=dismiss           first-run seen (state.json under $DSH_HOME/app-setup/)
  *   POST ?action=open&item=<id>    `open` the item's download page (free apps only)
  *   POST ?action=launch&item=<id>  `open -a` an installed app (Tailscale after install: log in)
+ *   POST ?action=install&item=<id> best-effort install (install.mjs); progress in `state.jobs`
  *   POST ?action=refresh           re-detect
  *
  * Item = { id, label, kind: 'required'|'optional'|'paid', installed: bool,
@@ -34,6 +35,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { promisify } from 'node:util'
+import { INSTALLERS, firstLine, runInstaller } from './install.mjs'
 
 const execFileAsync = promisify(execFile)
 
@@ -91,7 +93,7 @@ async function detect() {
       item.detail = ts?.detail
       if (ts && !ts.connected) item.action = 'launch'
     }
-    if (!installed && entry.kind !== 'paid' && entry.url) item.action = 'open'
+    if (!installed && entry.kind !== 'paid' && entry.url) item.action = INSTALLERS[entry.id] ? 'install' : 'open'
     items.push(item)
   }
   return items
@@ -108,6 +110,26 @@ export function apply(ctx) {
   async function writeState(patch) {
     await mkdir(join(home, 'app-setup'), { recursive: true })
     await writeFile(stateFile, JSON.stringify({ ...(await readState()), ...patch }, null, 2) + '\n')
+  }
+
+  /** Running / finished install jobs by item id: { step, fraction, error?, done? } */
+  const jobs = new Map()
+  function startInstall(id) {
+    if (jobs.get(id) && !jobs.get(id).done) return
+    const job = { step: 'download', fraction: 0, startedAt: Date.now() }
+    jobs.set(id, job)
+    runInstaller(id, {
+      home,
+      report: (step, fraction) => { job.step = step; job.fraction = fraction },
+    }).then(result => {
+      job.done = true; job.step = 'done'; job.fraction = 1; job.result = result
+      setTimeout(() => { if (jobs.get(id) === job) jobs.delete(id) }, 60_000).unref()
+    }).catch(error => {
+      const full = error instanceof Error ? error.message : String(error)
+      ctx.logger?.warn?.(`app-setup: install ${id} failed: ${full}`)
+      job.done = true; job.step = 'failed'; job.error = firstLine(full)
+      setTimeout(() => { if (jobs.get(id) === job) jobs.delete(id) }, 60_000).unref()
+    })
   }
 
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
@@ -127,7 +149,7 @@ export function apply(ctx) {
         try {
           if (action === 'state' || action === 'refresh') {
             const state = await readState()
-            return json({ firstRun: !state.dismissed, items: await detect(), version: process.env.DSH_APP_VERSION ?? '' })
+            return json({ firstRun: !state.dismissed, items: await detect(), version: process.env.DSH_APP_VERSION ?? '', jobs: Object.fromEntries(jobs) })
           }
           if (request.method !== 'POST') return json({ error: 'POST required' }, 405)
           if (action === 'dismiss') { await writeState({ dismissed: new Date().toISOString() }); return json({ ok: true }) }
@@ -136,6 +158,11 @@ export function apply(ctx) {
           if (action === 'open') {
             if (entry.kind === 'paid' || !entry.url) return json({ error: 'not offered' }, 403)
             await execFileAsync('/usr/bin/open', [entry.url])
+            return json({ ok: true })
+          }
+          if (action === 'install') {
+            if (!INSTALLERS[entry.id]) return json({ error: 'no installer' }, 404)
+            startInstall(entry.id)
             return json({ ok: true })
           }
           if (action === 'launch') {
