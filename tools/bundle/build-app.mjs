@@ -197,6 +197,32 @@ async function layoutDmgWindow(mount, appName) {
   await execFileAsync('/usr/bin/osascript', ['-e', script], { timeout: 60000 })
 }
 
+/**
+ * The .dmg FILE's own icon — what Downloads and the Desktop show before the
+ * double-click. Embedded INSIDE the UDIF container with `hdiutil udifrez`
+ * (the slot license agreements live in), as resource type `icns` id -16455,
+ * which Finder reads as the file's custom icon. Being file bytes it survives
+ * HTTP downloads, VirtioFS shares and every copy — unlike a resource-fork
+ * icon (`NSWorkspace.setIcon`), which is an xattr and is stripped by all of
+ * those (measured 2026-09-29: xattr -c + byte copy, icon stays).
+ */
+async function embedDmgIcon(dmg, icns) {
+  const plist = join(OUT, 'dmg-icon-rez.plist')
+  const data = await readFile(icns)
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>icns</key><array><dict>
+<key>Attributes</key><string>0x0000</string>
+<key>Data</key><data>${data.toString('base64')}</data>
+<key>ID</key><string>-16455</string>
+<key>Name</key><string>${NAME}</string>
+</dict></array></dict></plist>
+`
+  await writeFile(plist, xml)
+  await execFileAsync('/usr/bin/hdiutil', ['udifrez', '-xml', plist, '', '-quiet', dmg], { maxBuffer: 16 * 1024 * 1024 })
+  await rm(plist, { force: true })
+}
+
 /** SetFile is Xcode's (CLT lacks it); without it the icon file is still there, just not shown on the volume. */
 async function setVolumeIconFlag(mount) {
   const setFile = await execFileAsync('/usr/bin/xcrun', ['--find', 'SetFile']).then(r => r.stdout.trim()).catch(() => null)
@@ -337,7 +363,7 @@ async function main() {
     }
     await execFileAsync('/usr/bin/hdiutil', ['convert', rw, '-format', 'ULMO', '-o', dmg, '-ov'], { maxBuffer: 16 * 1024 * 1024 })
     await rm(rw, { force: true })
-    await execFileAsync(await swiftTool('make-dmg-icon'), ['stamp', dmgIcon, dmg])
+    await embedDmgIcon(dmg, dmgIcon)
     await rm(staging, { recursive: true, force: true })
     const dmgSize = (await stat(dmg)).size
     log(`dmg ready: ${dmg} (${(dmgSize / 1024 / 1024).toFixed(0)} MB)`)
