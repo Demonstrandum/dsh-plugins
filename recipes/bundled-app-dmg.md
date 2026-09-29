@@ -1,11 +1,12 @@
 # The bundled macOS app: `DSH.app` in a DMG, nothing installed globally
 
-**Status (2026-09-24): milestones 1 and 3 done** — a self-hosting `DSH
-Canary.app` that carries Node, the fork, and all 22 plugins, runs its own
-server, ships in a ~90 MB DMG (268 MB installed), ad-hoc signed, and
+**Status (2026-09-29): all three milestones done** — a self-hosting `DSH
+Canary.app` that carries Node, the fork, and all 24 plugins, runs its own
+server, ships in a ~90 MB DMG (260 MB installed), ad-hoc signed,
 **updates itself from GitHub Releases** (`pnpm release-app` publishes; the
-app checks on launch and every 6 h). Milestone 2 (first-run dialog offering
-Tailscale / STP / Chrome / afm) is designed at the end but not built.
+app checks on launch and every 6 h), and on first launch shows a
+**companion-apps checklist** (Tailscale / STP / Chrome / afm; `app-setup`
+plugin) instead of installing anything.
 
 ## Why
 
@@ -275,15 +276,67 @@ after the PR merges); an app built with `--build 2026092500 --update-repo
 swapped and relaunched in 19 s. Rate limit: unauthenticated 60/h per IP; one
 check per launch + one per 6 h is far below it.
 
+## First run (milestone 2): `plugins/app-setup`
+
+Both halves; README in the plugin. Host: detection (bundles under
+`/Applications` + `~/Applications` + Setapp; commands on PATH + Homebrew bins;
+`Tailscale status --json` for the connection state), a `./api/app-setup`
+route (`state` / `dismiss` / `open` / `launch`), `__DSH_APP_SETUP__` global.
+Browser: a `shell.overlay` Modal — one row per item, ● / ○, **Get…** (opens
+the download page) or **Open** (installed Tailscale not connected), **Done**
+— and the same rows as the bundle's `plugins.bundle.config` card. Armed only
+under `DSH_APP_BUNDLE`. Design rule applied: no explanatory text; the
+one-line status ("2 optional apps are not installed") is the whole copy.
+
+Facts found building it:
+
+- **The Plugins page hides installation-supplied bundles.** `listBundles`
+  returns them, but `PluginManagerPage` lists only `installed` (in the
+  profile's `dependencies`) or `optional` packages; installation bundles are
+  meant for Settings ▸ Plugins ▸ Plugin list. So *no* bundled plugin's card
+  (brand-kit's profiles, tailscale-remote's, this one) was reachable in the
+  app. Fix: the profile template lists the plugins under `dependencies` by
+  version — pnpm never installs them (they resolve from the installation
+  anchor first), the entry only makes them visible. Side effect: the page
+  offers **Uninstall**, which would edit the profile and is undone by the
+  next launch's template merge.
+- **Sequencing behind the shipped onboarding.** `WelcomeNotice` and the API
+  key step render through `OnboardingModal`, which sets `#root.inert = true`
+  while showing. The dialog polls that flag (400 ms) and opens only when the
+  root is not inert; a one-shot check passes too early because the notice
+  mounts after this component's first render. On a fresh home the chain is
+  notice → API key (the latter re-shows every load until a key is saved or
+  "Configure later") → this dialog.
+- **A dropped plugin must not brick existing installs.** `~/.dsh/profiles/app`
+  from the 09-25 release still listed `tali-wolfram-kernel-supervisor` (since
+  moved to `extras/`); the new build failed to boot with `cannot resolve
+  profile bundle`. `EmbeddedServer.mergeBundles` now reconciles: bundles the
+  template previously wrote (`dsh.app.templateBundles`; a profile without the
+  record is treated as all-template, since only this app ever created it) and
+  no longer lists are removed; user-added ones stay. Measured: the stale
+  profile repaired itself on launch.
+- Testing the plugin from an agent shell: `env -i … | node bin.js app` with
+  `DSH_APP_BUNDLE` set needs stdin held open (`sleep 3600 |`), or the
+  lifeline plugin exits the server at once; and the stripped env breaks the
+  Tailscale CLI ("The Tailscale GUI failed to start") — a test artefact, the
+  real app's login-shell environment is fine. `launchctl setenv DSH_HOME`
+  does not reach an `open`ed app either; the real-app trial ran against the
+  live `~/.dsh` (only `profiles/app`, `logs/dsh-app.log`, `app-setup/` are
+  touched). Twice, in the wrapper only, the dialog was dismissed ~4 s after
+  launch by a **trusted click** on the Done button (logged with
+  `isTrusted=true` at its exact coordinates); a third identical launch did
+  not reproduce it and the instrumentation found no synthetic events. Left
+  unexplained; if it recurs, the profile's `app-setup/state.json` is the
+  thing to delete.
+
 ## Known gaps / next
 
-- **Milestone 2 — first-run dialog** inside DSH (a host+client plugin,
-  `app-setup`): detect Tailscale.app / STP / Chrome / afm / Dash / Mathematica,
-  offer the free ones as "open download page / install", never install paid
-  apps; port-conflict handling when 3090 is taken; the tailscale-remote
-  plugin's default proxy ports vs a dev instance on the same Mac; the relay
-  LaunchAgent as an *opt-in* (boot-on-demand tailnet access), registered via
-  `SMAppService`, not a Homebrew-installed node.
+- Still open from the milestone-2 design: port-conflict handling when 3090
+  is taken; the tailscale-remote plugin's proxy ports beside a dev instance
+  on the same Mac; the relay LaunchAgent as an *opt-in* (boot-on-demand
+  tailnet access) registered via `SMAppService` rather than a
+  Homebrew-installed node; an in-dialog "download office support" for the
+  LibreOffice engine the prune drops.
 - Updater follow-ups: a GitHub Actions release job (the fork build on a
   `macos-14` arm64 runner is ~15 min; `release.mjs` is written to run there
   unchanged given `gh` auth); Developer ID signing + notarization in

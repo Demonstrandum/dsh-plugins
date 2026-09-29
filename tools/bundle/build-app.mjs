@@ -175,7 +175,9 @@ async function main() {
   const bundles = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...stagePkg.dshBundle.plugins.map(p => p.name)]
   await mkdir(join(resources, 'profile-template'), { recursive: true })
   await writeFile(join(resources, 'profile-template', 'package.json'), JSON.stringify({
-    name: 'dsh-profile-app', private: true, dependencies: {}, dsh: { profile: { bundles } },
+    // `dependencies` lists the bundled plugins by version (never installed by pnpm: they resolve
+    // from the installation anchor) so the Plugins page shows them and their cards.
+    name: 'dsh-profile-app', private: true, dependencies: Object.fromEntries(stagePkg.dshBundle.plugins.map(p => [p.name, p.version])), dsh: { profile: { bundles }, app: { templateBundles: bundles } },
   }, null, 2) + '\n')
   await writeFile(join(resources, 'profile-template', 'cordis.patch.yml'), '# Your overrides for the bundled DSH app (applied after every bundle layer).\n[]\n')
 

@@ -433,7 +433,13 @@ can reproduce or maintain it:
   notes, download → SHA-256 → hdiutil → `cp -R` beside the bundle → Trash →
   rename → relaunch after the old pid exits; translocation/unwritable
   preflight; `dsh.update.autoInstall` default for headless tests; measured
-  with a local fake feed). Milestone 2 (first-run dialog) still designed only.
+  with a local fake feed). **First run** (2026-09-29, `app-setup` plugin):
+  companion-apps checklist after the shipped onboarding (waits on
+  `#root.inert`), Get…/Open buttons, the bundle's Plugins card; why no
+  bundled plugin's card showed (the Plugins page lists only profile
+  `dependencies` → the template now lists them by version), and the
+  template merge reconciling *dropped* bundles (`dsh.app.templateBundles`)
+  after a moved plugin bricked the existing `profiles/app`.
 - `browser-automation-plugin.md` — per-chat Safari Technology Preview /
   Chrome windows and the isolated page reader (`browser-automation` plugin):
   why a plugin and not MCP config, the STP `--mcp` facts that shape it, the

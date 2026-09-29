@@ -24,3 +24,4 @@ brand-kit
 chat-title
 import-sessions
 app-lifeline
+app-setup
