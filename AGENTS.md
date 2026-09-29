@@ -422,8 +422,10 @@ can reproduce or maintain it:
   Then the row `config` was retired: a brand is only ever a profile
   (`cli.mjs import <dir|zip> --name X --apply` for provisioning; none active
   = shipped look).
-- `bundled-app-dmg.md` — the self-hosting `DSH Canary.app` (red whale) in a
-  DMG (2026-09-23/24, milestones 1 + 3): why not `bootstrap-mac.sh`'s global installs and why the
+- `bundled-app-dmg.md` — the self-hosting `DSH.app` in a DMG — plain name and
+  black whale for the release, red `DSH <branch> <commit>` for canaries; the
+  full colleague flow from a pristine macOS 26 VM, screenshot by screenshot,
+  in `docs/bundled-app/README.md` (2026-09-23 → 29): why not `bootstrap-mac.sh`'s global installs and why the
   Swift wrapper rather than upstream's Electron shell; `pnpm build-app`
   (`tools/bundle/`: sha256-verified Node 24 LTS, `stage-dsh.mjs` packing all
   304 fork packages + the plugins of `plugins.txt` and installing with

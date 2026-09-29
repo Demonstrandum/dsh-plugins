@@ -1,12 +1,14 @@
 # The bundled macOS app: `DSH.app` in a DMG, nothing installed globally
 
-**Status (2026-09-29): all three milestones done** — a self-hosting `DSH
-Canary.app` that carries Node, the fork, and all 24 plugins, runs its own
-server, ships in a ~90 MB DMG (260 MB installed), ad-hoc signed,
-**updates itself from GitHub Releases** (`pnpm release-app` publishes; the
-app checks on launch and every 6 h), and on first launch shows a
-**companion-apps checklist** (Tailscale / STP / Chrome / afm; `app-setup`
-plugin) instead of installing anything.
+**Status (2026-09-29): shipped and tested on a fresh OS** — a self-hosting
+`DSH.app` (plain name, black whale; `pnpm canary --app` builds the red
+**DSH <branch> <commit>**) carrying Node, the fork and all 24 plugins, a
+52 MB DMG with the app icon on a disk-image drive and a proper install
+window, **in-app updates from GitHub Releases** with one continuous progress
+bar, and a **first-run checklist** that installs Tailscale / Safari
+Technology Preview / Chrome / afm from vendor downloads through macOS's own
+admin dialog. The whole flow, screenshot by screenshot, from a pristine
+macOS 26 VM: [docs/bundled-app/README.md](../docs/bundled-app/README.md).
 
 ## Why
 
@@ -401,6 +403,35 @@ enabled); Tailscale in the guest is a new tailnet node (one login). Homebrew's
 `cirruslabs/cli/tart` tap is refused by Homebrew 6 (`depends_on macos:` form);
 the release tarball in `~/Applications/tart.app` works. 16 GB host RAM: give
 the guest 6 GB (`DSH_VM_MEM`); the image needs ~28 GB free.
+
+### Rename and icons (2026-09-29, late)
+
+- The release is plain **DSH** (`--name` default; `--glyph-color` default
+  `#000000`, which the wrapper's identity script treats as "stock whale in
+  the page"). Red + "DSH <branch> <commit>" is what `pnpm canary --app`
+  passes. Release tags stay `canary-<build>`; the updater parses them and
+  the fork's history depends on them.
+- **Volume icon**: `.VolumeIcon.icns` on the mounted image + `SetFile -a C`
+  on the root. Three traps, measured in order: `hdiutil create -srcfolder`
+  drops a root-level `.VolumeIcon.icns`; Finder's view-settings pass
+  (the layout osascript) drops it again, so it is copied *after* the
+  layout; and Finder ignores it while the file carries
+  `com.apple.provenance` (which `cp` adds) — `xattr -c` first, then the
+  classic `icns`/`MACS` type on the file.
+- **The icon artwork** (`Tools/make-dmg-icon.swift`): the system's own
+  disk-image drive with the app tile on its face. On macOS 26 every API
+  route to that artwork (`UTType.diskImage`, the `kGeneric*Icon` type
+  codes, CoreTypes' loose `.icns`) returns a placeholder — the coloured
+  icons live in asset catalogs — so the renderer creates a 1 MB throwaway
+  image, mounts it, takes `NSWorkspace.icon(forFile:)` of the volume, and
+  composites onto that.
+- **The `.dmg` file's own icon** is also stamped (`stamp` mode,
+  `NSWorkspace.setIcon`) but that is a resource fork: **it does not
+  survive an HTTP download or Tart's VirtioFS share** — the file shows
+  the generic image icon in the VM and in anyone's Downloads. Kept because
+  it is free; not something to promise.
+- Volume name `DSH <version>` so a mounted image is never confused with the
+  installed app.
 
 ## Known gaps / next
 
