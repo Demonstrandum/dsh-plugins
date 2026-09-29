@@ -21,8 +21,10 @@
  * sessionProjectionCache, workspaceRegistry) — host/importer.mjs.
  */
 import { stat } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { scanDshSelection, importDshFamily } from './host/dsh-source.mjs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import Schema from '@deepseek-ai/schemastery'
 import { readClaudeSession } from './host/claude-reader.mjs'
 import { ImportJobs, importTranscript } from './host/importer.mjs'
@@ -64,7 +66,7 @@ function readBody(req, limit) {
   })
 }
 
-const isSource = value => value === 'claude' || value === 'pi'
+const isSource = value => value === 'claude' || value === 'pi' || value === 'dsh'
 
 /**
  * @param {import('@deepseek-ai/cordis').Context} ctx
@@ -73,6 +75,9 @@ const isSource = value => value === 'claude' || value === 'pi'
 export function apply(ctx, config) {
   const log = line => ctx.logger.info(line)
   const roots = { claude: expandHome(config.claudeRoot), pi: expandHome(config.piRoot) }
+  const activeHome = resolve(process.env.DSH_HOME ?? join(homedir(), '.dsh'))
+  /** @type {Map<string, any>} */
+  const dshScans = new Map()
   const jobs = new ImportJobs()
   const uploads = new UploadStore(join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'import-sessions', 'uploads'))
   void uploads.sweep().then(n => { if (n > 0) log(`import-sessions: swept ${n} stale upload${n === 1 ? '' : 's'}`) }).catch(() => {})
@@ -100,13 +105,22 @@ export function apply(ctx, config) {
     const estimatedTokens = read.builder.surfaceTokens(estimate)
     return { turns: read.builder.stats.turns, toolCalls: read.builder.stats.toolCalls, estimatedTokens, large: estimatedTokens > config.largeTokens }
   }
-  const scan = async (source, path) => {
-    const result = await decorateTree(await scanSelection(source, roots[source], path, { probe, measure: measureFor(source) }))
-    result.uploaded = uploads.owns(result.path)
-    result.largeTokens = config.largeTokens
-    // One session, however it was reached (single file, one-transcript folder,
-    // one uploaded transcript) → the single-session card, not a one-row table.
-    if (result.workspaces.length === 1 && result.workspaces[0].sessions.length === 1) result.kind = 'session'
+  const scan = async (source, path, signal) => {
+    const raw = source === 'dsh'
+      ? await scanDshSelection(path, activeHome, { signal, probe: async id => (await ctx.sessionPersistence.stat(id, { signal })) !== undefined })
+      : await scanSelection(source, roots[source], path, { probe, measure: measureFor(source) })
+    const result = await decorateTree(raw)
+    result.uploaded = source === 'dsh' ? false : uploads.owns(result.path)
+    result.largeTokens = source === 'dsh' ? Number.MAX_SAFE_INTEGER : config.largeTokens
+    if (source !== 'dsh' && result.workspaces.length === 1 && result.workspaces[0].sessions.length === 1) result.kind = 'session'
+    if (source === 'dsh') {
+      const token = `dsh-scan-${randomUUID()}`
+      dshScans.set(token, raw)
+      ctx.effect(() => async () => { const held = dshScans.get(token); if (held?.selection !== undefined) await held.selection.cleanup(); dshScans.delete(token) }, `import-sessions: release ${token}`)
+      result.scanToken = token
+      delete result.families
+      delete result.selection
+    }
     return result
   }
 
@@ -168,14 +182,17 @@ export function apply(ctx, config) {
   }
 
   // ---- host slash commands -------------------------------------------------------------
-  for (const source of ['claude', 'pi']) {
+  for (const source of ['claude', 'pi', 'dsh']) {
     ctx.effect(() => ctx.commands.register({
       name: `import-${source}`,
-      description: `Import ${SOURCES[source].label} sessions from this machine into DSH: bare = what the store holds (the web GUI opens a chooser instead), "<path>" = import that transcript / workspace folder / store headlessly (archive mode)`,
+      description: source === 'dsh'
+        ? 'Import sessions from another DSH home, one DSH workspace/session directory, or a backup/rollback .dsh.zip (the web GUI opens a chooser)'
+        : `Import ${SOURCES[source].label} sessions from this machine into DSH: bare = what the store holds (the web GUI opens a chooser instead), "<path>" = import that transcript / workspace folder / store headlessly (archive mode)`,
       input: { hint: 'path' },
       handler: async ({ rawInput, signal }) => {
         const path = rawInput.trim()
         try {
+          if (source === 'dsh') return { kind: path === '' ? 'success' : 'error', text: path === '' ? 'Use the web GUI chooser to import another DSH home, workspace/session directory, or backup ZIP.' : 'Headless /import-dsh is not supported yet; use the web GUI chooser.' }
           if (path === '') return { kind: 'success', text: await storeSummary(source) }
           return await headlessImport(source, path, signal)
         } catch (error) {
@@ -202,12 +219,13 @@ export function apply(ctx, config) {
         }
         const who = requestClient(req)
         const client = { sameMachine: who.sameMachine, host: who.sameMachine ? serverHost() : await peerHost(who.address).catch(() => undefined) }
+        sources.dsh = { label: 'DSH', root: activeHome, defaultRoot: '~', exists: true }
         return ok({ platform: process.platform, pickerAvailable: capability.available, pickerKind: capability.kind, sources, workspaces: workspaceOptions(), defaults: { keepTurns: config.keepTurns, resultCap: config.resultCap }, server: { host: serverHost() }, client })
       }
       case 'pick': {
-        if (!isSource(args.source)) return fail('bad-request', 'source must be "claude" or "pi"')
+        if (!isSource(args.source)) return fail('bad-request', 'source must be "claude", "pi", or "dsh"')
         try {
-          const path = await pickPath({ initialDirectory: roots[args.source], message: `Import ${SOURCES[args.source].label} sessions into DSH: choose one transcript, one workspace folder, or the whole store`, signal })
+          const path = await pickPath({ initialDirectory: args.source === 'dsh' ? homedir() : roots[args.source], message: args.source === 'dsh' ? 'Import DSH sessions: choose another DSH home, a workspace/session directory, or a backup ZIP' : `Import ${SOURCES[args.source].label} sessions into DSH: choose one transcript, one workspace folder, or the whole store`, signal })
           return ok({ path })
         } catch (error) {
           if (error?.code === 'picker-unavailable') return fail('picker-unavailable', error.message)
@@ -215,16 +233,16 @@ export function apply(ctx, config) {
         }
       }
       case 'scan': {
-        if (!isSource(args.source)) return fail('bad-request', 'source must be "claude" or "pi"')
+        if (!isSource(args.source)) return fail('bad-request', 'source must be "claude", "pi", or "dsh"')
         if (typeof args.path !== 'string' || args.path.trim() === '') return fail('bad-request', 'path is required')
         try {
-          return ok(await scan(args.source, args.path.trim()))
+          return ok(await scan(args.source, args.path.trim(), signal))
         } catch (error) {
           return fail('scan', String(error?.message ?? error))
         }
       }
       case 'upload-begin': {
-        if (!isSource(args.source)) return fail('bad-request', 'source must be "claude" or "pi"')
+        if (!isSource(args.source) || args.source === 'dsh') return fail('bad-request', 'DSH imports use a server-side path, not transcript upload')
         const upload = await uploads.begin(args.source)
         log(`import-sessions: upload ${upload.id} started (${SOURCES[args.source].label})`)
         return ok({ uploadId: upload.id, chunkBytes: 4 * 1024 * 1024 })
@@ -252,7 +270,25 @@ export function apply(ctx, config) {
         return ok({ discarded: await uploads.discard(args.uploadId) })
       }
       case 'import': {
-        if (!isSource(args.source)) return fail('bad-request', 'source must be "claude" or "pi"')
+        if (!isSource(args.source)) return fail('bad-request', 'source must be "claude", "pi", or "dsh"')
+        if (args.source === 'dsh') {
+          const scan = dshScans.get(String(args.scanToken ?? ''))
+          if (scan === undefined) return fail('bad-request', 'DSH scan expired; choose the source again')
+          const selections = Array.isArray(args.selections) ? args.selections : []
+          if (selections.length === 0 || selections.length > 500) return fail('bad-request', 'select between 1 and 500 DSH sessions')
+          const results = []
+          for (const selection of selections) {
+            try {
+              const imported = await importDshFamily(ctx, scan, selection.file, selection.destination, signal)
+              results.push({ file: selection.file, ok: true, sessionId: imported.result.sessionId, title: selection.file, workspace: { id: imported.workspace.id, title: imported.workspace.title }, counts: { turns: imported.family.root.events.filter(event => event.type === 'turn/start').length, steps: 0, toolCalls: imported.family.root.events.filter(event => event.type === 'tool/call').length, toolResults: 0, images: 0, imagesImported: 0, truncatedResults: 0, droppedRecords: 0, orphanResults: 0, children: imported.family.children.length } })
+            } catch (error) { results.push({ file: selection.file, ok: false, error: String(error?.message ?? error) }) }
+          }
+          await scan.selection.cleanup()
+          dshScans.delete(String(args.scanToken))
+          const jobId = `dsh-${randomUUID()}`
+          dshScans.set(jobId, { jobId, total: results.length, done: results.length, finished: true, results })
+          return ok({ jobId, total: results.length })
+        }
         const normalizeMode = (mode) => {
           if (mode?.kind === 'working') {
             return { kind: 'working', keepTurns: Math.max(1, Math.floor(Number(mode.keepTurns) || config.keepTurns)), resultCap: Math.max(0, Math.floor(Number(mode.resultCap) || config.resultCap)) }
@@ -279,7 +315,8 @@ export function apply(ctx, config) {
         return ok(started)
       }
       case 'progress': {
-        const progress = jobs.progress(String(args.jobId ?? ''))
+        const id = String(args.jobId ?? '')
+        const progress = id.startsWith('dsh-') ? dshScans.get(id) : jobs.progress(id)
         return progress === undefined ? fail('unknown-job', `unknown job ${String(args.jobId)}`) : ok(progress)
       }
       default:
@@ -319,5 +356,5 @@ export function apply(ctx, config) {
     },
   }), 'import-sessions: control channel')
 
-  log(`import-sessions: /import-claude (${collapseHome(roots.claude)}) and /import-pi (${collapseHome(roots.pi)}) ready`)
+  log(`import-sessions: /import-claude (${collapseHome(roots.claude)}), /import-pi (${collapseHome(roots.pi)}), and /import-dsh ready`)
 }

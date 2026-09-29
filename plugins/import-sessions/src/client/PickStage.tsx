@@ -18,7 +18,7 @@ import type { Source, SourcesResult } from './protocol.ts'
 import type { UploadProgress } from './upload.ts'
 import { borderColor, brandColor, codeChip, dangerColor, hoverBg, megabytesText, mono, small } from './format.ts'
 
-const STORE_HINT: Record<Source, string> = { claude: '~/.claude/projects', pi: '~/.pi/agent/sessions' }
+const STORE_HINT: Record<Source, string> = { claude: '~/.claude/projects', pi: '~/.pi/agent/sessions', dsh: '~' }
 
 
 /**
@@ -102,6 +102,7 @@ export function PickStage({ source, label, sources, upload, deviceError, error, 
   const serverHasStore = sources?.sources[source].exists === true
 
   const openChooser = (): void => {
+    if (source === 'dsh') { onServerStore(); return }
     const input = folderInput.current
     if (input === null) return
     hintDockAppPicker(store, `Import ${label} sessions into DSH: choose the whole store, one workspace folder, or one transcript`)
@@ -115,8 +116,11 @@ export function PickStage({ source, label, sources, upload, deviceError, error, 
         ref={(node) => {
           folderInput.current = node
           // Folder chooser; the Dock app's panel also accepts a single file.
-          node?.setAttribute('webkitdirectory', '')
-          node?.setAttribute('directory', '')
+          // DSH may be a backup ZIP, so its native open panel stays file-or-folder.
+          if (source !== 'dsh') {
+            node?.setAttribute('webkitdirectory', '')
+            node?.setAttribute('directory', '')
+          }
         }}
         type="file"
         multiple
@@ -145,8 +149,17 @@ export function PickStage({ source, label, sources, upload, deviceError, error, 
       {error !== undefined && <Banner tone="danger">{error}</Banner>}
       <ul style={{ ...small, margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
         <li>The file browser will open at <code style={codeChip}>{store}</code> on your machine.</li>
-        <li>Click Open to upload the entire folder for a selective bulk import.</li>
-        <li>Select a session folder or a <code style={codeChip}>.jsonl</code> file for a single import.</li>
+        {source === 'dsh' ? (
+          <>
+            <li>Choose another DSH home, one workspace or session directory, or a backup/rollback <code style={codeChip}>.dsh.zip</code>.</li>
+            <li>The active DSH home cannot be imported into itself.</li>
+          </>
+        ) : (
+          <>
+            <li>Click Open to upload the entire folder for a selective bulk import.</li>
+            <li>Select a session folder or a <code style={codeChip}>.jsonl</code> file for a single import.</li>
+          </>
+        )}
       </ul>
     </div>
   )

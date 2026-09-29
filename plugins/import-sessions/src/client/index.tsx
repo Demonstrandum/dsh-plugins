@@ -43,8 +43,9 @@ const PROGRESS_POLL_MS = 500
 const COMMANDS: ReadonlyArray<{ name: string, source: Source }> = [
   { name: 'import-claude', source: 'claude' },
   { name: 'import-pi', source: 'pi' },
+  { name: 'import-dsh', source: 'dsh' },
 ]
-const SOURCE_LABEL: Record<Source, string> = { claude: 'Claude Code', pi: 'pi' }
+const SOURCE_LABEL: Record<Source, string> = { claude: 'Claude Code', pi: 'pi', dsh: 'DSH' }
 /** Used until `sources` answers (its `defaults` win). */
 const FALLBACK_CHOICE: LargeChoice = { mode: 'working', keepTurns: 20, resultCap: 4096 }
 
@@ -183,6 +184,13 @@ function ImportFlow({ source, rpc, onClose }: { source: Source, rpc: ClientConne
   // -- device chooser → filter → upload → scan --------------------------------
   const onFiles = useCallback(async (list: FileList): Promise<void> => {
     setDeviceError(undefined)
+    if (source === 'dsh') {
+      const file = list.item(0) as (File & { path?: string }) | null
+      const localPath = file?.path
+      if (typeof localPath === 'string' && localPath !== '') { void startScan(localPath); return }
+      setDeviceError('This DSH import chooser requires the DSH Dock app so it can pass the selected file or directory path to the local DSH server.')
+      return
+    }
     setError(undefined)
     const { kept } = filterTranscripts(source, Array.from(list))
     if (kept.length === 0) {
@@ -287,7 +295,7 @@ function ImportFlow({ source, rpc, onClose }: { source: Source, rpc: ClientConne
     setProgress(undefined)
     setJob(undefined)
     setStage('running')
-    const args: ImportArgs = { source, selections, ...uploadId.current !== undefined ? { uploadId: uploadId.current } : {} }
+    const args: ImportArgs = { source, selections, ...uploadId.current !== undefined ? { uploadId: uploadId.current } : {}, ...scan?.scanToken !== undefined ? { scanToken: scan.scanToken } : {} }
     try {
       const started = await call<ImportResult>('import', args)
       if (!alive.current) return
@@ -366,7 +374,11 @@ function ImportFlow({ source, rpc, onClose }: { source: Source, rpc: ClientConne
           deviceError={deviceError}
           error={error}
           onFiles={(files) => { void onFiles(files) }}
-          onServerStore={() => { if (root !== undefined) void startScan(root) }}
+          onServerStore={() => {
+            if (source === 'dsh') {
+              void call<{ path: string | null }>('pick', { source }).then(result => { if (result.path !== null) void startScan(result.path) }).catch(failure => setDeviceError(`Could not open chooser: ${errorText(failure)}`))
+            } else if (root !== undefined) void startScan(root)
+          }}
           onCancelUpload={cancelUpload}
         />
       )

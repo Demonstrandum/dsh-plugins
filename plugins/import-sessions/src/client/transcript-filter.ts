@@ -37,6 +37,7 @@ export function isTranscriptPath(source: Source, relative: string): boolean {
   if (segments.length === 0 || segments.length > MAX_SEGMENTS || segments.includes('..')) return false
   const name = segments[segments.length - 1] as string
   if (name.endsWith('.backup')) return false
+  if (source === 'dsh') return /\.(?:backup|rollback)\.dsh\.zip$/i.test(name) || /^session(?:\.v\d+)?\.jsonl(?:\.zstd)?$/i.test(name)
   if (source === 'pi') return PI_SESSION_FILE.test(name)
   if (segments.includes('memory')) return false
   if (CLAUDE_SESSION_FILE.test(name)) return true
@@ -48,9 +49,11 @@ export function isTranscriptPath(source: Source, relative: string): boolean {
 
 /** What the filter looks for, for the "nothing matched" error. */
 export function expectedTranscriptText(source: Source): string {
-  return source === 'pi'
-    ? 'pi transcripts named <timestamp>_<uuid>.jsonl'
-    : 'Claude Code transcripts named <uuid>.jsonl (plus <uuid>/subagents/agent-*.jsonl)'
+  return source === 'dsh'
+    ? 'a DSH home/session folder or a .backup.dsh.zip/.rollback.dsh.zip archive'
+    : source === 'pi'
+      ? 'pi transcripts named <timestamp>_<uuid>.jsonl'
+      : 'Claude Code transcripts named <uuid>.jsonl (plus <uuid>/subagents/agent-*.jsonl)'
 }
 
 /**

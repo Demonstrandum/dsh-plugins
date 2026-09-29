@@ -8,7 +8,7 @@ import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/cli
 
 export const CHANNEL = '/import-sessions'
 
-export type Source = 'claude' | 'pi'
+export type Source = 'claude' | 'pi' | 'dsh'
 
 /** `sources` — `{}` */
 export interface SourcesResult {
@@ -85,6 +85,7 @@ export interface ScanResult {
   uploaded: boolean
   largeTokens: number
   workspaces: ScanWorkspace[]
+  scanToken?: string
 }
 
 export type ImportMode =
@@ -99,7 +100,7 @@ export type ImportDestination =
 export interface ImportSelection { file: string, destination: ImportDestination, mode: ImportMode }
 
 /** `import` — `{ source, selections, uploadId? }` */
-export interface ImportArgs { source: Source, selections: ImportSelection[], uploadId?: string }
+export interface ImportArgs { source: Source, selections: ImportSelection[], uploadId?: string, scanToken?: string }
 export interface ImportResult { jobId: string, total: number }
 
 export interface ImportCounts {
