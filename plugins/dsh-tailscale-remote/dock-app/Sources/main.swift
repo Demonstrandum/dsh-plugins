@@ -313,6 +313,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     @objc func checkForUpdates() { updater?.checkNow() }
 
+    /// AppKit asks before showing the menu: the update item is live only with a feed configured.
+    @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(checkForUpdates) { return updater != nil }
+        return true
+    }
+
     // MARK: embedded server
 
     func startEmbedded(_ spec: EmbeddedSpec) {
@@ -1188,8 +1194,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         main.addItem(appItem)
         let app = NSMenu()
         app.addItem(withTitle: "About \(config.name)", action: #selector(showAbout), keyEquivalent: "")
-        if config.update != nil {
-            app.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        // Bundled app: always list the item so the feature is discoverable; a build
+        // without an update feed (a `pnpm canary --app` build) shows it disabled.
+        if config.embedded != nil || config.update != nil {
+            let item = app.addItem(withTitle: config.update != nil ? "Check for Updates…" : "Check for Updates… (off in this build)", action: #selector(checkForUpdates), keyEquivalent: "u")
+            item.keyEquivalentModifierMask = [.command, .shift]
+            item.target = self   // enabled state comes from validateMenuItem below
         }
         app.addItem(.separator())
         // The standard macOS chord. Safari cannot give ⌘, to a page (it is Safari's own Settings…);
