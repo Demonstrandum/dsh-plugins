@@ -1,10 +1,10 @@
-// make-dmg-icon — the disk-image icon: the system's removable-disk icon with the
-// app's icon badged on its face, written as .icns, plus a mode that stamps any
-// .icns onto a file as its Finder custom icon (resource fork).
+// make-dmg-icon — the disk-image icon: the system's disk-image drive with the
+// app's icon on its face, written as .icns. build-app.mjs uses it twice: as the
+// volume's .VolumeIcon.icns and embedded into the .dmg file with `hdiutil
+// udifrez` (inside the file bytes, so it survives downloads).
 //
 //   xcrun swiftc -O -o build/make-dmg-icon Tools/make-dmg-icon.swift -framework Cocoa
-//   build/make-dmg-icon render <AppIcon.icns> <out.icns>     # drive + app badge
-//   build/make-dmg-icon stamp  <icon.icns> <file>            # custom icon on a file (the .dmg)
+//   build/make-dmg-icon render <AppIcon.icns> <out.icns>
 //
 // The drive is macOS's own disk-image icon, captured from a throwaway mounted
 // image at render time so it matches whatever the running OS draws; the app
@@ -12,7 +12,7 @@
 import Cocoa
 
 let args = Array(CommandLine.arguments.dropFirst())
-guard args.count == 3 else { fputs("usage: make-dmg-icon render <app.icns> <out.icns> | stamp <icon.icns> <file>\n", stderr); exit(2) }
+guard args.count == 3 else { fputs("usage: make-dmg-icon render <app.icns> <out.icns>\n", stderr); exit(2) }
 
 func icnsData(from image: NSImage) -> Data {
     // iconutil needs an iconset directory; build one in a temp dir at the standard sizes.
@@ -80,9 +80,6 @@ case "render":
     }
     try! icnsData(from: canvas).write(to: URL(fileURLWithPath: args[2]))
     print("wrote \(args[2])")
-case "stamp":
-    guard let icon = NSImage(contentsOfFile: args[1]) else { fputs("cannot read \(args[1])\n", stderr); exit(1) }
-    exit(NSWorkspace.shared.setIcon(icon, forFile: args[2], options: []) ? 0 : 1)
 default:
     fputs("unknown mode \(args[0])\n", stderr); exit(2)
 }
