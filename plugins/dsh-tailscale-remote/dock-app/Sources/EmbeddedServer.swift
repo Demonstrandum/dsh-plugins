@@ -155,10 +155,14 @@ final class EmbeddedServer {
 
         let child = Process()
         child.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        // `-l` for the operator's login-shell environment; `exec "$@"` keeps node as the direct child (signals reach it).
-        child.arguments = ["-lc", "exec \"$@\"", "dsh-app", nodeURL.path, dshURL.path, spec.profile, "--no-open", "--port", String(spec.port)]
+        // `-l` for the operator's login-shell environment; the app's own bin dir is
+        // prepended AFTER the login files ran (they may reset PATH); `exec "$@"` keeps
+        // node as the direct child (signals reach it).
+        child.arguments = ["-lc", "export PATH=\"$DSH_APP_BIN:$PATH\"; exec \"$@\"", "dsh-app", nodeURL.path, dshURL.path, spec.profile, "--no-open", "--port", String(spec.port)]
         var env = ProcessInfo.processInfo.environment
         env["DSH_HOME"] = dshHome.path
+        // Binaries the app-setup plugin installs for the app (afm) live in the home, on the server's PATH.
+        env["DSH_APP_BIN"] = dshHome.appendingPathComponent("app-setup/bin").path
         env["DSH_APP_BUNDLE"] = Bundle.main.bundlePath
         env["DSH_APP_VERSION"] = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? ""
         child.environment = env

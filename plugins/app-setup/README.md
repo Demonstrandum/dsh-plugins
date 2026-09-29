@@ -18,8 +18,24 @@ Mathematica) are listed only when present and never offered.
   wrapper's `DSH_APP_BUNDLE` environment variable is present (the host half
   publishes `__DSH_APP_SETUP__` to the page only then).
 
-Nothing is downloaded or installed by the plugin itself; installing stays with
-the user in the browser and the Finder. Homebrew is deliberately not involved.
+## Installing from the dialog
+
+Free items whose vendor ships a direct download get an **Install** button
+(`install.mjs`), Homebrew not involved:
+
+| Item | Source | Step | Admin? |
+|---|---|---|---|
+| Tailscale | `pkgs.tailscale.com/stable/Tailscale-latest-macos.pkg` | `installer -pkg -target /` | yes |
+| Safari Technology Preview | the current DMG linked from developer.apple.com/safari/download | mount → `installer -pkg` | yes |
+| Google Chrome | `dl.google.com/…/googlechrome.dmg` | mount → `ditto` to a staging name → rename into `/Applications` | only if `/Applications` is not writable |
+| afm | latest arm64 tarball of scouzi1966/maclocal-api | unpacked into `$DSH_HOME/app-setup/bin`, which the app's server has on `PATH` | no |
+
+Admin steps go through `osascript … with administrator privileges`: macOS
+shows its own password dialog; DSH never sees the password. The row shows
+**Downloading N %** (bytes over Content-Length) then **Installing** with a
+sweeping segment (`installer`/`ditto` report nothing), then re-detects. An
+existing app is never overwritten (the row says so). Failures show one line;
+the full text is in the server log. Paid apps have no Install button.
 
 ## Route
 
