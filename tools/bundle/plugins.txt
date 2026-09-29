@@ -22,7 +22,5 @@ wait-tool
 reboot-command
 brand-kit
 chat-title
-# import-sessions: NOT bundled until its host modules are committed — index.js imports
-# ./lib/{claude-reader,importer,pi-reader,picker,sources,uploads,hosts}.mjs, which the root
-# .gitignore's `lib/` rule swallowed; a fresh clone (and therefore this bundle) fails to import it.
+import-sessions
 app-lifeline
