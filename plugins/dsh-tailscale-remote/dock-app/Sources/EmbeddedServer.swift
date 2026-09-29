@@ -55,12 +55,16 @@ final class EmbeddedServer {
         self.log = log
     }
 
-    /// `$DSH_HOME` from the environment, else the spec's (`~` expanded), else `~/.dsh`.
+    /// The spec's home when the build pinned one (a canary app: `--dsh-home`), else
+    /// `$DSH_HOME` from the environment, else `~/.dsh`. The pin outranks the
+    /// environment: `open` from a shell that itself runs inside a DSH session
+    /// forwards that session's `DSH_HOME`, which is the live home — exactly what
+    /// a canary must not touch (measured 2026-09-29).
     var dshHome: URL {
-        if let env = ProcessInfo.processInfo.environment["DSH_HOME"], !env.isEmpty { return URL(fileURLWithPath: env) }
         if let configured = spec.dshHome, !configured.isEmpty {
             return URL(fileURLWithPath: (configured as NSString).expandingTildeInPath)
         }
+        if let env = ProcessInfo.processInfo.environment["DSH_HOME"], !env.isEmpty { return URL(fileURLWithPath: env) }
         return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".dsh", isDirectory: true)
     }
 

@@ -7,7 +7,8 @@
  *   dock-app/build/DSH     dsh-tailscale-remote's Swift wrapper (compiled here if stale)
  *
  *   node tools/bundle/build-app.mjs [--build N] [--name "DSH Canary"] [--glyph-color "#E5484D"] [--port 3090]
- *                                   [--sign IDENTITY] [--update-repo owner/name] [--update-feed URL] [--no-dmg]
+ *                                   [--sign IDENTITY] [--update-repo owner/name] [--update-feed URL] [--no-update]
+ *                                   [--dsh-home DIR] [--bundle-id ID] [--out DIR] [--inputs DIR] [--no-dmg]
  *                                   [--version X.Y.Z] [--out dist/bundle]
  *
  * Layout (Contents/Resources): node/ (bin/node only), dsh/ (package.json +
@@ -34,8 +35,11 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '..', '..')
 const args = process.argv.slice(2)
 const opt = (name, fallback) => { const i = args.indexOf(name); return i === -1 ? fallback : args[i + 1] }
+/** Where the .app (and DMG) land; the staged inputs default to dist/bundle regardless (`--inputs DIR` to move them). */
 const OUT = resolve(opt('--out', join(REPO, 'dist', 'bundle')))
-const STAGE = join(OUT, 'stage')
+const INPUTS = resolve(opt('--inputs', join(REPO, 'dist', 'bundle')))
+const STAGE = join(INPUTS, 'stage')
+const NODE_DIR = join(INPUTS, 'node')
 // "DSH Canary" with the red whale: the bundled build is the pre-release channel
 // beside a checkout-run DSH (stock black) and DSH Preview (the same red, but
 // a different bundle id and Dock name, so the two never collide).
@@ -46,7 +50,12 @@ const SIGN = opt('--sign', '-')
 const DMG = !args.includes('--no-dmg')
 const PRUNE = !args.includes('--no-prune')
 const WITH_OFFICE = args.includes('--with-office')
-const BUNDLE_ID = 'io.github.taliesinb.dsh-app'
+/** `--bundle-id` lets a canary app coexist with the release app (separate WebKit store, no LSMultipleInstances clash). */
+const BUNDLE_ID = opt('--bundle-id', 'io.github.taliesinb.dsh-app')
+/** `--dsh-home DIR` pins the app to that DSH home (a canary's throwaway home); default: `$DSH_HOME` / `~/.dsh` at run time. */
+const DSH_HOME = opt('--dsh-home') ?? null
+/** `--no-update` leaves the update block out (a canary must not replace itself with the release). */
+const UPDATES = !args.includes('--no-update')
 /** GitHub owner/repo whose Releases the app polls for updates (Updater.swift). */
 const REPO_SLUG = opt('--update-repo', 'taliesinb/dsh-plugins')
 
@@ -139,7 +148,7 @@ async function prune(root) {
 
 async function main() {
   const stagePkg = await readJson(join(STAGE, 'package.json'))
-  const nodeInfo = await readJson(join(OUT, 'node', 'current.json'))
+  const nodeInfo = await readJson(join(NODE_DIR, 'current.json'))
   const ver = await version()
   const app = join(OUT, `${NAME}.app`)
   const contents = join(app, 'Contents')
@@ -154,11 +163,13 @@ async function main() {
   await cp(executable, join(contents, 'MacOS', 'DSH'))
   await chmod(join(contents, 'MacOS', 'DSH'), 0o755)
   await cp(icns, join(resources, 'AppIcon.icns'))
+  // main.swift's identityScript() loads this from Resources: without it the page keeps the stock whale and 'DSH'.
+  await cp(dockApp.BRANDING_SCRIPT, join(resources, 'desktop-branding.js'))
 
   log('copying node')
   await mkdir(join(resources, 'node', 'bin'), { recursive: true })
-  await cp(join(OUT, 'node', nodeInfo.dir, 'bin', 'node'), join(resources, 'node', 'bin', 'node'))
-  await cp(join(OUT, 'node', nodeInfo.dir, 'LICENSE'), join(resources, 'node', 'LICENSE'))
+  await cp(join(NODE_DIR, nodeInfo.dir, 'bin', 'node'), join(resources, 'node', 'bin', 'node'))
+  await cp(join(NODE_DIR, nodeInfo.dir, 'LICENSE'), join(resources, 'node', 'LICENSE'))
   if (PRUNE) {
     // The official binary carries local symbols (121 → 97 MB). Stripping invalidates its
     // signature (SIGKILL on launch) — it is re-signed with everything else below.
@@ -191,9 +202,9 @@ async function main() {
       profile: 'app',
       port: PORT,
       profileTemplate: 'profile-template',
-      dshHome: null,
+      dshHome: DSH_HOME,
     },
-    update: { repo: REPO_SLUG, intervalHours: 6, feed: opt('--update-feed') ?? null },
+    ...(UPDATES ? { update: { repo: REPO_SLUG, intervalHours: 6, feed: opt('--update-feed') ?? null } } : {}),
   }
   await writeFile(join(resources, 'dsh-dock-app.json'), JSON.stringify(config, null, 2) + '\n')
   await writeFile(join(resources, 'dsh-app-release.json'), JSON.stringify({

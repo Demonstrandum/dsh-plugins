@@ -11,6 +11,8 @@
 #   pnpm canary list                 # every canary: branch, commit, port, pid, url
 #   pnpm canary logs                 # tail this branch's dsh log
 #   pnpm canary url                  # print the tokened URL again
+#   pnpm canary --app                # the BUNDLED app instead (DSH Canary built from this branch,
+#                                    #   its own home under the canary dir; recipes/bundled-app-dmg.md)
 #
 # Options for start:
 #   --plugin NAME      load plugins/NAME too (repeatable)
@@ -22,6 +24,12 @@
 #   --no-build         do not (re)build the plugins' lib/client.js
 #   --browser-picker   in-browser directory picker (SSH_TTY trick) instead of the native one
 #   --fresh            wipe this branch's canary home first (sessions, workspaces)
+#   --app              build tools/bundle's self-contained app from this branch (all of
+#                      tools/bundle/plugins.txt, not the branch diff) and run THAT: node + fork
+#                      + plugins inside the .app, EmbeddedServer, first-run dialog, profile
+#                      merge — everything the DMG does except the updater, which is left out
+#                      so the canary never replaces itself with a release. ~1.5 min warm.
+#                      --skip-pack reuses the last fork tarballs (plugins are always repacked).
 #
 # WHAT IT DOES
 #   1. Plugins = the plugins/<dir> touched on this branch relative to
@@ -41,6 +49,11 @@
 #      dsh`: pnpm 12's packageManager temp dir fails under the sandbox),
 #      detached, log in <root>/<branch>/dsh.log; the token goes to
 #      <root>/<branch>/token.json.
+#   6. (--app) Builds `<root>/<branch>/bundle/DSH <label>.app` with tools/bundle/build-app.mjs
+#      (--dsh-home <root>/<branch>/home, --no-update, its own bundle id) and
+#      launches it; the app runs its own server on the first free port, so
+#      steps 3, 5 and the wrapper below do not apply. stop/remove/logs/list
+#      work the same (pid = the wrapper's; log = home/logs/dsh-app.log).
 #   6. Installs ~/Applications/DSH <branch> <commit>.app — the
 #      dsh-tailscale-remote WKWebView wrapper (red whale icon) pointed at the
 #      loopback URL, reading the token from token.json on every connect
@@ -58,6 +71,8 @@
 set -euo pipefail
 
 ROOT="${DSH_CANARY_ROOT:-/tmp/dsh-canary}"
+# Processes launched from under $ROOT report its realpath (/tmp → /private/tmp on macOS); match on that.
+ROOT_REAL="$(cd "$ROOT" 2>/dev/null && pwd -P || printf '%s' "$ROOT")"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 IDENTITY_PLUGIN="instance-identity"
 # Infrastructure plugins never auto-loaded from the branch diff: they publish
@@ -116,7 +131,11 @@ stop_dir() {
   # by bundle path: an Apple-events `quit` is refused from a sandboxed shell.
   local app
   app="$(cat "$dir/app" 2>/dev/null || true)"
-  [ -n "$app" ] && pkill -f "Applications/$app.app/Contents/MacOS/" 2>/dev/null || true
+  if [ "$(cat "$dir/kind" 2>/dev/null)" = bundled ]; then
+    [ -n "$app" ] && pkill -f "$ROOT_REAL/$(basename "$dir")/bundle/$app.app/Contents/MacOS/" 2>/dev/null || true
+  else
+    [ -n "$app" ] && pkill -f "Applications/$app.app/Contents/MacOS/" 2>/dev/null || true
+  fi
 }
 
 cmd_remove() {
@@ -124,7 +143,9 @@ cmd_remove() {
   [ -d "$dir" ] || die "no canary for this branch"
   stop_dir "$dir"
   app="$(cat "$dir/app" 2>/dev/null || true)"
-  [ -n "$app" ] && node "$DOCK_CLI" dock-app:uninstall --name "$app" >/dev/null 2>&1 || true
+  if [ "$(cat "$dir/kind" 2>/dev/null)" != bundled ]; then
+    [ -n "$app" ] && node "$DOCK_CLI" dock-app:uninstall --name "$app" >/dev/null 2>&1 || true
+  fi
   rm -rf "$dir"
   note "removed $dir${app:+ and ~/Applications/$app.app}"
 }
@@ -151,9 +172,11 @@ changed_plugins() {
 }
 
 cmd_start() {
-  local plugins=() only=0 port="" creds=1 open=1 app=1 build=1 picker=0 fresh=0
+  local plugins=() only=0 port="" creds=1 open=1 app=1 build=1 picker=0 fresh=0 bundled=0 skip_pack=0
   while [ $# -gt 0 ]; do
     case "$1" in
+      --app) bundled=1; shift ;;
+      --skip-pack) skip_pack=1; shift ;;
       --plugin) plugins+=("$2"); shift 2 ;;
       --plugin=*) plugins+=("${1#--plugin=}"); shift ;;
       --only) only=1; shift ;;
@@ -191,14 +214,14 @@ cmd_start() {
     note "WARNING: running from the main checkout — rebuilding a plugin here hot-swaps the LIVE GUI if that plugin is installed there. Prefer a worktree." ;;
   esac
 
-  if [ $only -eq 0 ]; then
+  if [ $only -eq 0 ] && [ $bundled -eq 0 ]; then
     while IFS= read -r p; do
       [ -n "$p" ] || continue
       case " $INFRA_PLUGINS " in *" $p "*) note "skipping $p (infrastructure; pass --plugin $p to force)"; continue ;; esac
       plugins+=("$p")
     done < <(changed_plugins)
   fi
-  [ ${#plugins[@]} -gt 0 ] || die "no plugin changed on this branch and no --plugin given"
+  [ ${#plugins[@]} -gt 0 ] || [ $bundled -eq 1 ] || die "no plugin changed on this branch and no --plugin given"
   # de-duplicate, verify
   local uniq=() p seen=" "
   for p in "${plugins[@]}"; do
@@ -215,12 +238,14 @@ cmd_start() {
   [ -d "$dir" ] && stop_dir "$dir" || true
   local previous_app
   previous_app="$(cat "$dir/app" 2>/dev/null || true)"
-  if [ -n "$previous_app" ] && [ "$previous_app" != "$label" ]; then
+  if [ -n "$previous_app" ] && [ "$previous_app" != "$label" ] && [ "$(cat "$dir/kind" 2>/dev/null)" != bundled ]; then
     node "$DOCK_CLI" dock-app:uninstall --name "$previous_app" >/dev/null 2>&1 && note "retired ~/Applications/$previous_app.app" || true
     rm -f "$dir/app"
   fi
   if [ $fresh -eq 1 ] && [ -d "$dir" ]; then rm -rf "$dir"; note "wiped $dir"; fi
   mkdir -p "$dir/home" "$dir/scratch"
+
+  if [ $bundled -eq 1 ]; then start_bundled "$dir" "$label" "$slug" "$commit$dirty" "$creds" "$open" "$skip_pack" "$port"; return; fi
 
   # Build the plugins.
   for p in "${plugins[@]}"; do
@@ -312,6 +337,57 @@ cmd_start() {
     fi
   else
     [ $open -eq 1 ] && open "$url" || true
+  fi
+}
+
+# --app: the self-contained bundle from this branch, pinned to this canary's home.
+# The app's own server picks its port; `pid` is the wrapper's (its server dies
+# with it: SIGTERM → quit, or the app-lifeline plugin on a kill -9).
+start_bundled() {
+  local dir="$1" label="$2" slug="$3" commit="$4" creds="$5" open="$6" skip_pack="$7" port="$8"
+  local appdir="$dir/bundle" name="$label" out
+  [ -n "$port" ] || port="$(free_port)"
+  if [ $creds -eq 1 ]; then
+    for f in settings.yaml .credentials.yaml; do
+      [ -f "$HOME/.dsh/$f" ] && { cp "$HOME/.dsh/$f" "$dir/home/$f"; chmod 600 "$dir/home/$f"; }
+    done
+  fi
+  # Plugin tarballs always follow the branch; the 300 fork tarballs are what --skip-pack keeps.
+  local stage_args=()
+  [ $skip_pack -eq 1 ] && stage_args+=(--skip-pack)
+  export npm_config_manage_package_manager_versions=false
+  note "building the bundled app from this branch as '$name' (node + fork + tools/bundle/plugins.txt)"
+  node "$HERE/tools/bundle/fetch-node.mjs" >/dev/null
+  node "$HERE/tools/bundle/stage-dsh.mjs" ${stage_args[@]+"${stage_args[@]}"} 2>&1 | grep -E '^\[stage-dsh\] (verified|anchored|done|installing|building)|Error|omits' || true
+  rm -rf "$appdir"; mkdir -p "$appdir"
+  out="$(node "$HERE/tools/bundle/build-app.mjs" --no-dmg --out "$appdir" --name "$name" --port "$port" \
+      --dsh-home "$dir/home" --no-update --bundle-id "io.github.taliesinb.dsh-app.canary-$slug" 2>&1 | tee "$dir/build-app.log" | grep -E 'app ready|rror')" || true
+  printf '%s\n' "$out"
+  [ -d "$appdir/$name.app" ] || die "build failed; see $dir/build-app.log"
+  printf '%s' "$commit" > "$dir/commit"
+  printf '%s' "$port" > "$dir/port"
+  printf '%s' "$name" > "$dir/app"
+  printf 'bundled' > "$dir/kind"
+  rm -f "$dir/url"
+  ln -sfn "$dir/home/logs/dsh-app.log" "$dir/dsh.log"
+  if [ $open -eq 1 ]; then
+    open "$appdir/$name.app"
+    local i pid=""
+    for i in $(seq 1 40); do
+      pid="$(pgrep -f "$ROOT_REAL/$(basename "$dir")/bundle/$name.app/Contents/MacOS/DSH" | head -1 || true)"
+      [ -n "$pid" ] && break; sleep 0.5
+    done
+    [ -n "$pid" ] && printf '%s' "$pid" > "$dir/pid"
+    for i in $(seq 1 120); do
+      local url
+      url="$(grep -o 'dsh web: http://[^ ]*' "$dir/home/logs/dsh-app.log" 2>/dev/null | tail -1 | sed 's/^dsh web: //' || true)"
+      [ -n "$url" ] && { printf '%s' "$url" > "$dir/url"; break; }
+      sleep 0.5
+    done
+    note "launched $appdir/$name.app (pid ${pid:-?}) — home $dir/home · log $dir/home/logs/dsh-app.log"
+    [ -f "$dir/url" ] && note "$(cat "$dir/url")"
+  else
+    note "built $appdir/$name.app (not launched) — home $dir/home"
   fi
 }
 

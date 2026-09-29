@@ -19,7 +19,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { DIALOG_DEFAULT, useDialogDefaultAction } from './dialog-keys.ts'
 
 export const name = 'app-setup'
@@ -42,7 +42,12 @@ interface State { firstRun: boolean, items: Item[], version: string }
 declare global {
   // eslint-disable-next-line no-var
   var __DSH_APP_SETUP__: { bundle: string, version: string } | undefined
+  // eslint-disable-next-line no-var
+  var __DSH_DOCK__: { name?: string } | undefined
 }
+
+/** The wrapper's app name (`DSH Canary`, or a canary's `DSH <branch> <commit>`), published by its identity script. */
+const appName = (): string => globalThis.__DSH_DOCK__?.name || 'DSH Canary'
 
 async function call(action: string, item?: string): Promise<State | { ok: true }> {
   const query = new URLSearchParams({ action })
@@ -125,10 +130,18 @@ function SetupDialog() {
   const open = clear && !dismissed && state?.firstRun === true
   useDialogDefaultAction(open)
   if (!open || !state) return null
-  const close = (): void => { setDismissed(true); void call('dismiss') }
+  // WKWebView delivers a trusted click to whatever sits under the pointer when the
+  // freshly centred window becomes key; twice that landed on Done ~4 s after launch
+  // (recipe). A dismissal inside the first second of the dialog's life is ignored.
+  const openedAt = useRef(0)
+  useEffect(() => { if (open) openedAt.current = performance.now() }, [open])
+  const close = (): void => {
+    if (performance.now() - openedAt.current < 1000) return
+    setDismissed(true); void call('dismiss')
+  }
   const missing = state.items.filter(i => i.kind !== 'paid' && !i.installed).length
   return (
-    <Modal open title="Set up DSH Canary" closeLabel="Done" onClose={close} width={520}
+    <Modal open title={`Set up ${appName()}`} closeLabel="Done" onClose={close} width={520}
       footer={<Button variant="primary" {...DIALOG_DEFAULT} onClick={close}>Done</Button>}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={dim}>{missing === 0 ? 'Everything DSH can use is installed.' : `${missing} optional ${missing === 1 ? 'app is' : 'apps are'} not installed.`}</div>
@@ -150,7 +163,7 @@ function SetupCard() {
         <Button variant="outline" onClick={() => { void refresh() }}>Refresh</Button>
       </div>
       {state && <Rows state={state} onAct={act} busy={busy} />}
-      {globalThis.__DSH_APP_SETUP__?.version && <div style={dim}>DSH Canary {globalThis.__DSH_APP_SETUP__.version}</div>}
+      {globalThis.__DSH_APP_SETUP__?.version && <div style={dim}>{appName()} {globalThis.__DSH_APP_SETUP__.version}</div>}
       {(error ?? actError) && <div role="alert" style={{ color: 'var(--dsh-color-danger, #d9534f)', fontSize: 12 }}>{error ?? actError}</div>}
     </div>
   )
