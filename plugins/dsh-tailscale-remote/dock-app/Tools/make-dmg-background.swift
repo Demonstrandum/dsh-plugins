@@ -19,10 +19,12 @@ guard args.count >= 2 else { fputs("usage: make-dmg-background <glyph.svg> <out.
 let svgPath = args.removeFirst()
 let outPath = args.removeFirst()
 var glyphHex = "#E5484D"
+var appName = "DSH"
 var width: CGFloat = 660, height: CGFloat = 400, scale: CGFloat = 2
 while !args.isEmpty {
     switch args.removeFirst() {
     case "--glyph-color": glyphHex = args.removeFirst()
+    case "--name": appName = args.removeFirst()
     case "--width": width = CGFloat(Double(args.removeFirst()) ?? 660)
     case "--height": height = CGFloat(Double(args.removeFirst()) ?? 400)
     case "--scale": scale = CGFloat(Double(args.removeFirst()) ?? 2)
@@ -68,7 +70,7 @@ color("#B4B4BA").setStroke()
 arrow.stroke()
 
 // Caption, small and grey, in the system font like the app's status lines.
-let caption = "Drag DSH Canary to Applications"
+let caption = "Drag \(appName) to Applications"
 let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13, weight: .regular), .foregroundColor: color("#8E8E93")]
 let text = NSAttributedString(string: caption, attributes: attrs)
 let textSize = text.size()

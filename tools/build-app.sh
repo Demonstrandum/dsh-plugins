@@ -2,7 +2,7 @@
 #
 # build-app.sh — build the self-contained macOS app (DSH.app) and its DMG.
 #
-#   pnpm build-app [--skip-pack] [--no-dmg] [--no-prune] [--with-office] [--build N] [--update-feed URL] [--name "DSH Canary"] [--glyph-color "#E5484D"] [--port 3090] [--sign IDENTITY]
+#   pnpm build-app [--skip-pack] [--no-dmg] [--no-prune] [--with-office] [--build N] [--update-feed URL] [--name "DSH"] [--glyph-color "#000000"] [--port 3090] [--sign IDENTITY]
 #
 # Three steps, each its own script under tools/bundle/ (run them by hand to iterate on one):
 #   1. fetch-node.mjs  — official Node 24 LTS macOS build, sha256-verified, trimmed to bin/node
