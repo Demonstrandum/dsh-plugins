@@ -93,22 +93,46 @@ final class EmbeddedServer {
         }
     }
 
+    /// Reconcile the profile with the template: bundles the template lists and
+    /// the profile lacks are appended; bundles the template PREVIOUSLY put there
+    /// and no longer lists are removed (a release that stops carrying a plugin
+    /// must not leave a bundle behind that app-boot cannot resolve — that is a
+    /// fatal boot, measured 2026-09-29 with a plugin moved to a private layer).
+    /// User-added bundles are told apart by `dsh.app.templateBundles`, the set
+    /// this app wrote last time; the same for `dependencies`.
     private func mergeBundles(into manifest: URL, from templateManifest: URL) throws {
         guard var profile = try JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any],
               let template = try JSONSerialization.jsonObject(with: Data(contentsOf: templateManifest)) as? [String: Any] else { return }
         let templateBundles = ((template["dsh"] as? [String: Any])?["profile"] as? [String: Any])?["bundles"] as? [String] ?? []
+        let templateDeps = template["dependencies"] as? [String: String] ?? [:]
         var dsh = profile["dsh"] as? [String: Any] ?? [:]
         var section = dsh["profile"] as? [String: Any] ?? [:]
+        var app = dsh["app"] as? [String: Any] ?? [:]
         var bundles = section["bundles"] as? [String] ?? []
-        let missing = templateBundles.filter { !bundles.contains($0) }
-        guard !missing.isEmpty else { return }
-        bundles.append(contentsOf: missing)
+        var deps = profile["dependencies"] as? [String: String] ?? [:]
+        // A profile written before this bookkeeping existed was created by an earlier
+        // build of this app and nothing else, so everything in it is template-origin.
+        let previous = Set(app["templateBundles"] as? [String] ?? bundles)
+        let stale = previous.subtracting(templateBundles)
+        let removedBundles = bundles.filter { stale.contains($0) }
+        bundles.removeAll { stale.contains($0) }
+        for name in stale where templateDeps[name] == nil { deps.removeValue(forKey: name) }
+        let added = templateBundles.filter { !bundles.contains($0) }
+        bundles.append(contentsOf: added)
+        var depsChanged = false
+        for (name, version) in templateDeps where deps[name] != version { deps[name] = version; depsChanged = true }
+        let recorded = app["templateBundles"] as? [String] ?? []
+        guard !added.isEmpty || !removedBundles.isEmpty || depsChanged || recorded != templateBundles else { return }
+        app["templateBundles"] = templateBundles
         section["bundles"] = bundles
         dsh["profile"] = section
+        dsh["app"] = app
         profile["dsh"] = dsh
+        profile["dependencies"] = deps
         let data = try JSONSerialization.data(withJSONObject: profile, options: [.prettyPrinted, .sortedKeys])
         try (String(data: data, encoding: .utf8)! + "\n").write(to: manifest, atomically: true, encoding: .utf8)
-        log("embedded: added bundles \(missing.joined(separator: ", ")) to \(manifest.path)")
+        if !added.isEmpty { log("embedded: added bundles \(added.joined(separator: ", ")) to \(manifest.path)") }
+        if !removedBundles.isEmpty { log("embedded: removed bundles no longer carried: \(removedBundles.joined(separator: ", "))") }
     }
 
     // MARK: process
