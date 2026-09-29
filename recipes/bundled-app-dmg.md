@@ -388,11 +388,13 @@ open the DMG, drag to Applications, right-click → Open (Gatekeeper on an
 ad-hoc signed app), log in to the API key step, etc. Nothing else — no ssh,
 no bootstrap script — enters the machine.
 
-Update test: install the **old** release's DMG first (the fork's current
-`releases/latest`), confirm ⇧⌘U says up to date, then `pnpm release-app
---repo <fork> --notes "update test"` publishes a build whose only difference
-is its number; ⇧⌘U in the guest now offers it, and Install and Relaunch
-should leave the newer build running from `/Applications`.
+Update test: put the **latest** DMG in the share (the first-install
+experience should be the current one — seeding an old build to give the
+updater something to do was tried and regretted), install it, confirm ⇧⌘U
+says up to date, *then* `pnpm release-app --repo <fork> --notes "update
+test"` publishes a build whose only difference is its number; ⇧⌘U in the
+guest now offers it, and Install and Relaunch should leave the newer build
+running from `/Applications`.
 
 Limits: Apple Intelligence is off in VMs (afm installs but reports not
 enabled); Tailscale in the guest is a new tailnet node (one login). Homebrew's
