@@ -167,6 +167,12 @@ the misleading `create failed - Directory not empty` even for a 3-file folder
 
 ## Testing without touching the live DSH
 
+**The standard way (2026-09-29): `pnpm canary --app`** from the branch's
+worktree — builds the app from the branch into `/tmp/dsh-canary/<branch>/`,
+pinned to a throwaway home there, labelled `DSH <branch> <commit>`, no
+updater; `pnpm canary stop|remove|logs|url` as for a source canary
+(`canary-instances.md`). Everything below is the manual form it automates.
+
 - The staged tree alone: `DSH_HOME=/tmp/x dist/bundle/node/*/bin/node dist/bundle/stage/node_modules/@deepseek-ai/dsh/lib/bin.js app --no-open --port 3099`
   after writing `/tmp/x/profiles/app/package.json` with the bundle list;
   `--dump-config` instead of `app` to check row resolution. (`web --no-open`

@@ -182,6 +182,8 @@ pnpm canary            # builds the plugins changed on this branch, starts a sep
                        # on /tmp/dsh-canary/<branch>/home, credentials copied in, and launches
                        # a Dock app "DSH <branch> <commit>" (red whale) pointed at it
 pnpm canary stop | remove | list | logs | url
+pnpm canary --app      # the BUNDLED app (DSH Canary) built from this branch instead — its own
+                       # home, all bundled plugins, no updater (recipes/canary-instances.md)
 ```
 
 One instance per branch (first free port from 3091), independent of the live
