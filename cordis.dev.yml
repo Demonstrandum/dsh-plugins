@@ -116,3 +116,8 @@
     # recipes/import-claude-code-sessions.md
     - id: tali-import-sessions
       name: '/Users/USER/github/tali-dash-plugins/plugins/import-sessions/index.js'
+
+    # Backup/restore trial: bare /restore opens the backup selector; /backup
+    # writes a complete preview-home ZIP under ~/.dsh-preview-backups.
+    - id: tali-backup-restore
+      name: '/Users/USER/github/tali-dash-plugins/plugins/backup-restore/index.js'

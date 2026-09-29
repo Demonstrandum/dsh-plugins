@@ -733,6 +733,8 @@ can reproduce or maintain it:
   with `signal.reason` logs `Error: [object Object]`); the throwaway-home +
   Chrome trial that exercised all four settlements.
 
+- `backup-restore-plugin.md` — full-home `/backup` and `/restore` ZIPs, pre-restore rollback, detached post-shutdown swap, relay restart, archive safety checks and limitations of live snapshots.
+
 Recipes of the private plugins live in `extras/recipes/` and are indexed in
 the extras README.
 
