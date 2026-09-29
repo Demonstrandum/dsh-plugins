@@ -337,6 +337,30 @@ Facts found building it:
   unexplained; if it recurs, the profile's `app-setup/state.json` is the
   thing to delete.
 
+## Fresh-OS test in a VM (2026-09-29)
+
+`pnpm vm-test fresh` (`tools/vm-test.sh`) boots a pristine macOS 26 guest
+with a window — Tart on Virtualization.framework, the Cirrus Labs vanilla
+Tahoe image pulled once (28 GB, ~7 min) as `dsh-fresh-base`, each `fresh` a
+copy-on-write `tart clone` of it. The host folder `/tmp/dsh-vm-share` is the
+**only** channel into the guest: mounted read-only as the volume "DSH Share".
+Drop the DMG there, then in the guest do exactly what a colleague would:
+open the DMG, drag to Applications, right-click → Open (Gatekeeper on an
+ad-hoc signed app), log in to the API key step, etc. Nothing else — no ssh,
+no bootstrap script — enters the machine.
+
+Update test: install the **old** release's DMG first (the fork's current
+`releases/latest`), confirm ⇧⌘U says up to date, then `pnpm release-app
+--repo <fork> --notes "update test"` publishes a build whose only difference
+is its number; ⇧⌘U in the guest now offers it, and Install and Relaunch
+should leave the newer build running from `/Applications`.
+
+Limits: Apple Intelligence is off in VMs (afm installs but reports not
+enabled); Tailscale in the guest is a new tailnet node (one login). Homebrew's
+`cirruslabs/cli/tart` tap is refused by Homebrew 6 (`depends_on macos:` form);
+the release tarball in `~/Applications/tart.app` works. 16 GB host RAM: give
+the guest 6 GB (`DSH_VM_MEM`); the image needs ~28 GB free.
+
 ## Known gaps / next
 
 - Still open from the milestone-2 design: port-conflict handling when 3090
