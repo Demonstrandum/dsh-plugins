@@ -12,8 +12,9 @@ Per-branch throwaway instances for testing: [recipes/canary-instances.md](../../
 
 ## 1. Install
 
-The DMG (≈ 52 MB) mounts as **DSH <version>** with the app icon on a
-disk-image drive; the window is the usual drag-to-Applications layout.
+The DMG (≈ 52 MB) wears the app icon on a disk-image drive — embedded in
+the file itself, so it looks the same in Downloads — mounts as
+**DSH <version>**, and opens the usual drag-to-Applications window.
 
 ![DMG on the desktop](https://github.com/Demonstrandum/dsh-plugins/releases/download/canary-2026092907/01-dmg-on-desktop.png)
 ![Install window](https://github.com/Demonstrandum/dsh-plugins/releases/download/canary-2026092907/02-install-window.png)

@@ -425,11 +425,14 @@ the guest 6 GB (`DSH_VM_MEM`); the image needs ~28 GB free.
   icons live in asset catalogs — so the renderer creates a 1 MB throwaway
   image, mounts it, takes `NSWorkspace.icon(forFile:)` of the volume, and
   composites onto that.
-- **The `.dmg` file's own icon** is also stamped (`stamp` mode,
-  `NSWorkspace.setIcon`) but that is a resource fork: **it does not
-  survive an HTTP download or Tart's VirtioFS share** — the file shows
-  the generic image icon in the VM and in anyone's Downloads. Kept because
-  it is free; not something to promise.
+- **The `.dmg` file's own icon** — what Downloads shows — is embedded
+  *inside the UDIF container* with `hdiutil udifrez` (resource type `icns`,
+  id −16455, the slot license agreements use). File bytes, so it survives
+  HTTP downloads, VirtioFS shares and any copy. The first attempt used
+  `NSWorkspace.setIcon` (a resource-fork xattr) and was wrongly declared
+  the best possible: that one *is* stripped by downloads and by Tart's
+  share, which is why the VM showed a generic icon. Verified: `xattr -c` +
+  byte copy, the udifrez icon stays.
 - Volume name `DSH <version>` so a mounted image is never confused with the
   installed app.
 
