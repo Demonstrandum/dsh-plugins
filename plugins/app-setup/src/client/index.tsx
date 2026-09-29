@@ -47,8 +47,8 @@ declare global {
   var __DSH_DOCK__: { name?: string } | undefined
 }
 
-/** The wrapper's app name (`DSH Canary`, or a canary's `DSH <branch> <commit>`), published by its identity script. */
-const appName = (): string => globalThis.__DSH_DOCK__?.name || 'DSH Canary'
+/** The wrapper's app name (`DSH`, or a canary's `DSH <branch> <commit>`), published by its identity script. */
+const appName = (): string => globalThis.__DSH_DOCK__?.name || 'DSH'
 
 async function call(action: string, item?: string): Promise<State | { ok: true }> {
   const query = new URLSearchParams({ action })
@@ -115,7 +115,10 @@ function Rows({ state, onAct, busy }: { state: State, onAct: (item: Item) => voi
             </span>
             <span>
               {running && <Progress job={job} />}
-              {!running && item.action === 'install' && <Button variant="primary" disabled={busy !== null} onClick={() => onAct(item)}>Install</Button>}
+              {!running && item.action === 'install' && <span style={{ display: 'inline-flex', gap: 6 }}>
+                <Button variant="outline" disabled={busy !== null} onClick={() => onAct({ ...item, action: 'open' })}>Get…</Button>
+                <Button variant="primary" disabled={busy !== null} onClick={() => onAct(item)}>Install</Button>
+              </span>}
               {!running && item.action === 'open' && <Button variant="outline" disabled={busy !== null} onClick={() => onAct(item)}>Get…</Button>}
               {!running && item.action === 'launch' && <Button variant="outline" disabled={busy !== null} onClick={() => onAct(item)}>Open</Button>}
             </span>

@@ -360,7 +360,7 @@ start_bundled() {
   node "$HERE/tools/bundle/fetch-node.mjs" >/dev/null
   node "$HERE/tools/bundle/stage-dsh.mjs" ${stage_args[@]+"${stage_args[@]}"} 2>&1 | grep -E '^\[stage-dsh\] (verified|anchored|done|installing|building)|Error|omits' || true
   rm -rf "$appdir"; mkdir -p "$appdir"
-  out="$(node "$HERE/tools/bundle/build-app.mjs" --no-dmg --out "$appdir" --name "$name" --port "$port" \
+  out="$(node "$HERE/tools/bundle/build-app.mjs" --no-dmg --out "$appdir" --name "$name" --port "$port" --glyph-color "$BRAND_COLOR" \
       --dsh-home "$dir/home" --no-update --bundle-id "io.github.taliesinb.dsh-app.canary-$slug" 2>&1 | tee "$dir/build-app.log" | grep -E 'app ready|rror')" || true
   printf '%s\n' "$out"
   [ -d "$appdir/$name.app" ] || die "build failed; see $dir/build-app.log"

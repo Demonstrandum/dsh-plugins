@@ -6,7 +6,7 @@
  *   dist/bundle/node/      tools/bundle/fetch-node.mjs  (official Node LTS build)
  *   dock-app/build/DSH     dsh-tailscale-remote's Swift wrapper (compiled here if stale)
  *
- *   node tools/bundle/build-app.mjs [--build N] [--name "DSH Canary"] [--glyph-color "#E5484D"] [--port 3090]
+ *   node tools/bundle/build-app.mjs [--build N] [--name "DSH"] [--glyph-color "#000000"] [--port 3090]
  *                                   [--sign IDENTITY] [--update-repo owner/name] [--update-feed URL] [--no-update]
  *                                   [--dsh-home DIR] [--bundle-id ID] [--out DIR] [--inputs DIR] [--no-dmg]
  *                                   [--version X.Y.Z] [--out dist/bundle]
@@ -43,8 +43,10 @@ const NODE_DIR = join(INPUTS, 'node')
 // "DSH Canary" with the red whale: the bundled build is the pre-release channel
 // beside a checkout-run DSH (stock black) and DSH Preview (the same red, but
 // a different bundle id and Dock name, so the two never collide).
-const NAME = opt('--name', 'DSH Canary')
-const GLYPH = opt('--glyph-color', '#E5484D')
+/** Plain `DSH` for the release; `pnpm canary --app` passes its own label. Tags stay `canary-N` (release.mjs). */
+const NAME = opt('--name', 'DSH')
+/** Black whale for the plain `DSH` release, like the shipped GUI; `pnpm canary --app` passes the red. */
+const GLYPH = opt('--glyph-color', '#000000')
 const PORT = Number(opt('--port', '3090'))
 const SIGN = opt('--sign', '-')
 const DMG = !args.includes('--no-dmg')
@@ -146,14 +148,14 @@ async function prune(root) {
   log(`pruned ${files} entries, ${(bytes / 1024 / 1024).toFixed(0)} MB`)
 }
 
-/** Compile Tools/make-dmg-background.swift on demand (cached by mtime), like buildDockApp does for the icon renderer. */
-async function dmgBackgroundTool() {
+/** Compile a dock-app/Tools/*.swift helper on demand (cached by mtime), like buildDockApp does for the icon renderer. */
+async function swiftTool(name) {
   const toolsDir = join(REPO, 'plugins', 'dsh-tailscale-remote', 'dock-app')
-  const source = join(toolsDir, 'Tools', 'make-dmg-background.swift')
-  const binary = join(toolsDir, 'build', 'make-dmg-background')
+  const source = join(toolsDir, 'Tools', `${name}.swift`)
+  const binary = join(toolsDir, 'build', name)
   const mtime = async p => (await stat(p).catch(() => null))?.mtimeMs ?? 0
   if (await mtime(binary) < await mtime(source)) {
-    log('compiling the DMG background renderer')
+    log(`compiling ${name}`)
     await mkdir(join(toolsDir, 'build'), { recursive: true })
     await execFileAsync('/usr/bin/xcrun', ['swiftc', '-O', '-o', binary, source, '-framework', 'Cocoa'], { maxBuffer: 8 * 1024 * 1024 })
   }
@@ -193,8 +195,15 @@ async function layoutDmgWindow(mount, appName) {
       end tell
     end tell`
   await execFileAsync('/usr/bin/osascript', ['-e', script], { timeout: 60000 })
-  // Finder keeps .fseventsd / .Trashes out of the way; make the backdrop folder invisible in older Finders too.
-  await execFileAsync('/usr/bin/SetFile', ['-a', 'V', join(mount, '.background')]).catch(() => {})
+}
+
+/** SetFile is Xcode's (CLT lacks it); without it the icon file is still there, just not shown on the volume. */
+async function setVolumeIconFlag(mount) {
+  const setFile = await execFileAsync('/usr/bin/xcrun', ['--find', 'SetFile']).then(r => r.stdout.trim()).catch(() => null)
+  if (!setFile) { log('SetFile not found (needs Xcode): the volume icon flag is not set'); return }
+  await execFileAsync(setFile, ['-t', 'icns', '-c', 'MACS', join(mount, '.VolumeIcon.icns')])
+  await execFileAsync(setFile, ['-a', 'C', mount])                       // custom icon on the volume root
+  await execFileAsync(setFile, ['-a', 'V', join(mount, '.background')])  // invisible in older Finders too
 }
 
 async function main() {
@@ -295,21 +304,40 @@ async function main() {
     // converted to the compressed read-only DMG. The coordinates match
     // Tools/make-dmg-background.swift.
     await mkdir(join(staging, '.background'), { recursive: true })
-    await execFileAsync(await dmgBackgroundTool(), [join(REPO, 'plugins', 'dsh-tailscale-remote', 'dock-app', 'icon.svg'), join(staging, '.background', 'backdrop.png'), '--glyph-color', GLYPH])
+    await execFileAsync(await swiftTool('make-dmg-background'), [join(REPO, 'plugins', 'dsh-tailscale-remote', 'dock-app', 'icon.svg'), join(staging, '.background', 'backdrop.png'), '--glyph-color', GLYPH, '--name', NAME])
+    // The disk-image icon (a drive slab wearing the app tile): the volume's icon and,
+    // stamped as a Finder custom icon, the .dmg file's own — what Downloads shows.
+    const dmgIcon = join(OUT, 'dmg-icon.icns')
+    await execFileAsync(await swiftTool('make-dmg-icon'), ['render', icns, dmgIcon])
     log('creating the DMG')
     const rw = join(OUT, 'dmg-rw.dmg')
     await rm(rw, { force: true })
-    await execFileAsync('/usr/bin/hdiutil', ['create', '-volname', NAME, '-srcfolder', staging, '-ov', '-format', 'UDRW', '-fs', 'APFS', rw], { maxBuffer: 16 * 1024 * 1024 })
+    // Volume name carries the version so a mounted image is never confused with the installed app.
+    const volume = `${NAME} ${ver.short}`
+    await execFileAsync('/usr/bin/hdiutil', ['create', '-volname', volume, '-srcfolder', staging, '-ov', '-format', 'UDRW', '-fs', 'APFS', rw], { maxBuffer: 16 * 1024 * 1024 })
     const attach = await execFileAsync('/usr/bin/hdiutil', ['attach', '-readwrite', '-noverify', '-nobrowse', rw])
     const mount = attach.stdout.split('\n').map(l => l.split('\t').pop()?.trim()).find(p => p?.startsWith('/Volumes/'))
     if (!mount) throw new Error(`hdiutil attach: no mount point in\n${attach.stdout}`)
     try {
       await layoutDmgWindow(mount, `${NAME}.app`)
+      // The mounted volume (Desktop, sidebar, and the .dmg file once Finder has seen
+      // it) wears the app icon. Copied onto the mounted image AFTER the Finder layout:
+      // both `hdiutil create -srcfolder` and Finder's view-settings pass drop a
+      // root-level .VolumeIcon.icns (measured 2026-09-29, in that order).
+      await cp(dmgIcon, join(mount, '.VolumeIcon.icns'))
+      // Finder ignores the icon while the file carries com.apple.provenance (added by
+      // the copy) — strip xattrs, then the classic type/creator on the file and the
+      // custom-icon flag on the root. Measured 2026-09-29: with provenance → generic
+      // drive; without → the whale.
+      await execFileAsync('/usr/bin/xattr', ['-c', join(mount, '.VolumeIcon.icns')])
+      await setVolumeIconFlag(mount)
+      if (!(await stat(join(mount, '.VolumeIcon.icns')).catch(() => null))) throw new Error('.VolumeIcon.icns did not survive on the mounted image')
     } finally {
       await execFileAsync('/usr/bin/hdiutil', ['detach', mount, '-quiet']).catch(async () => { await new Promise(r => setTimeout(r, 2000)); await execFileAsync('/usr/bin/hdiutil', ['detach', mount, '-force', '-quiet']) })
     }
     await execFileAsync('/usr/bin/hdiutil', ['convert', rw, '-format', 'ULMO', '-o', dmg, '-ov'], { maxBuffer: 16 * 1024 * 1024 })
     await rm(rw, { force: true })
+    await execFileAsync(await swiftTool('make-dmg-icon'), ['stamp', dmgIcon, dmg])
     await rm(staging, { recursive: true, force: true })
     const dmgSize = (await stat(dmg)).size
     log(`dmg ready: ${dmg} (${(dmgSize / 1024 / 1024).toFixed(0)} MB)`)

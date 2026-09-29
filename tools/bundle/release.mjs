@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Cut a DSH Canary release: build number → DMG → sha256 → GitHub Release.
+ * Cut a release of the bundled app (plain `DSH`; tags stay `canary-N`): build number → DMG → sha256 → GitHub Release.
  *
  *   node tools/bundle/release.mjs [--repo owner/name] [--notes "text"] [--draft] [--dry-run]
  *                                 [--skip-pack] [--no-build] [--build N]
@@ -11,7 +11,7 @@
  * `canary-<build>`, the release is NOT a prerelease and IS marked latest, so
  * `GET /repos/<repo>/releases/latest` (the app's feed) returns it.
  *
- * Assets: `DSH-Canary-<version>-<build>.dmg` and `<same>.sha256` (hex digest +
+ * Assets: `DSH-<version>-<build>.dmg` and `<same>.sha256` (hex digest +
  * two spaces + filename, `shasum -a 256` format; Updater reads the first word).
  * Notes: --notes, else the subject lines since the previous canary tag.
  *
@@ -60,6 +60,7 @@ async function main() {
     const today = tags.filter(t => t.startsWith(`canary-${day}`)).length
     build = Number(`${day}${String(today + 1).padStart(2, '0')}`)
   }
+  const appName = args.includes('--name') ? args[args.indexOf('--name') + 1] : 'DSH'
   const tag = `canary-${build}`
   if (tags.includes(tag)) throw new Error(`tag ${tag} already exists`)
   const previous = tags.map(t => Number(t.slice('canary-'.length))).filter(n => n < build).sort((a, b) => b - a)[0]
@@ -68,11 +69,11 @@ async function main() {
   if (!args.includes('--no-build')) {
     await run('node', [join(HERE, 'fetch-node.mjs')])
     await run('node', [join(HERE, 'stage-dsh.mjs'), ...(args.includes('--skip-pack') ? ['--skip-pack'] : [])])
-    await run('node', [join(HERE, 'build-app.mjs'), '--build', String(build), '--update-repo', REPO])
+    await run('node', [join(HERE, 'build-app.mjs'), '--build', String(build), '--update-repo', REPO, '--name', appName])
   }
-  const manifest = JSON.parse(await readFile(join(OUT, 'DSH Canary.app', 'Contents', 'Resources', 'dsh-app-release.json'), 'utf8'))
+  const manifest = JSON.parse(await readFile(join(OUT, `${appName}.app`, 'Contents', 'Resources', 'dsh-app-release.json'), 'utf8'))
   if (manifest.build !== build) throw new Error(`built app carries build ${manifest.build}, expected ${build} (pass --no-build only after building with --build ${build})`)
-  const dmg = join(OUT, `DSH-Canary-${manifest.version}-${build}.dmg`)
+  const dmg = join(OUT, `${appName.replace(/\s+/g, '-')}-${manifest.version}-${build}.dmg`)
   const digest = createHash('sha256').update(await readFile(dmg)).digest('hex')
   const shaFile = `${dmg}.sha256`
   await writeFile(shaFile, `${digest}  ${basename(dmg)}\n`)
@@ -83,7 +84,7 @@ async function main() {
     const range = previous ? `canary-${previous}..HEAD` : 'HEAD~20..HEAD'
     const subjects = await sh('git', ['log', '--no-merges', '--format=- %s', range]).catch(() => '')
     notes = [
-      `DSH Canary ${manifest.version} — build ${build}`,
+      `${appName} ${manifest.version} — build ${build}`,
       '',
       `dsh ${manifest.dsh} · node ${manifest.node} · ${manifest.plugins.length} plugins · ad-hoc signed (first launch: right-click → Open)`,
       '',
@@ -96,7 +97,7 @@ async function main() {
   const head = await sh('git', ['rev-parse', 'HEAD'])
   const onRemote = await sh('git', ['branch', '-r', '--contains', head]).catch(() => '')
   if (!onRemote && !DRY) throw new Error(`HEAD ${head.slice(0, 7)} is not on any remote branch; git push first so the release tag can point at it`)
-  const title = `DSH Canary ${manifest.version}`
+  const title = `${appName} ${manifest.version}`
   const ghArgs = ['release', 'create', tag, dmg, shaFile, '--repo', REPO, '--target', head, '--title', title, '--notes', notes, '--latest', ...(DRAFT ? ['--draft'] : [])]
   if (DRY) {
     log(`dry run — would execute:\n  gh ${ghArgs.map(a => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')}`)
