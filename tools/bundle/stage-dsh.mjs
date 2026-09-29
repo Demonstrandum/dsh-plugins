@@ -126,6 +126,30 @@ async function ensurePluginBuilt(dir) {
   if (pkg.dsh?.client && mtime(bundle) < newestSource) { log(`building ${pkg.name}`); await pnpm(dir, ['build']) }
 }
 
+/**
+ * Every relative `./x.mjs` / `./x.js` import inside a plugin tarball's shipped
+ * JavaScript must itself be in the tarball. A `files` list that names modules
+ * one by one goes stale the first time a new module is added, and the dev
+ * `link:` install (whole directory) never notices — found three times so far
+ * (browser-automation, dash-docsets, remote-workspaces), each as "failed to
+ * import" only in the bundle. Files under lib/client.js (the browser bundle,
+ * self-contained) are skipped.
+ */
+async function verifyTarballImports(name, tarball) {
+  const list = (await execFileAsync('tar', ['-tzf', tarball])).stdout.split('\n').filter(Boolean).map(p => p.replace(/^package\//, ''))
+  const shipped = new Set(list)
+  const missing = []
+  for (const rel of list) {
+    if (!/\.(?:m?js)$/.test(rel) || rel.startsWith('lib/client')) continue
+    const { stdout } = await execFileAsync('tar', ['-xOzf', tarball, `package/${rel}`], { maxBuffer: 16 * 1024 * 1024 })
+    for (const m of stdout.matchAll(/(?:from|import\s*\()\s*['"](\.\.?\/[^'"]+)['"]/g)) {
+      const target = join(rel, '..', m[1]).replace(/^\.\//, '')
+      if (!shipped.has(target) && !shipped.has(`${target}.js`) && !shipped.has(`${target}/index.js`)) missing.push(`${rel} → ${m[1]}`)
+    }
+  }
+  if (missing.length) throw new Error(`${name}: package.json "files" omits modules its code imports:\n  ${[...new Set(missing)].join('\n  ')}`)
+}
+
 function newestUnder(path) {
   let st
   try { st = statSync(path) } catch { return 0 }
@@ -179,6 +203,7 @@ async function main() {
     const out = await pnpm(dir, ['pack', '--pack-destination', TARBALLS, '--json'], { capture: true })
     const info = parsePackJson(out)
     const file = info.filename.split('/').pop()
+    await verifyTarballImports(info.name, join(TARBALLS, file))
     dependencies[info.name] = `file:tarballs/${file}`
     plugins.push({ name: info.name, version: info.version, file })
     log(`packed plugin ${info.name}@${info.version}`)
