@@ -74,6 +74,44 @@ reboot — a canary is throwaway by design). The directory is keyed by
 the previous canary of that branch first and reuses the home. The commit
 lives only in the label.
 
+## `--app`: the bundled app as a canary (2026-09-29)
+
+`pnpm canary --app [--skip-pack] [--fresh]` tests the *other* kind of
+instance — the self-contained `DSH Canary.app` of `bundled-app-dmg.md` —
+under the same lifecycle. Instead of a source `dsh web` + wrapper it runs
+`tools/bundle/{fetch-node,stage-dsh,build-app}.mjs` from the branch and
+launches the result:
+
+- **Plugins** = all of `tools/bundle/plugins.txt` (what the DMG ships), not
+  the branch diff; the fork tarballs are reused with `--skip-pack` (~30 s
+  warm), plugins are always repacked.
+- The app is built into `<root>/<branch>/bundle/DSH <label>.app` — inside the
+  canary dir, so no `~/Applications` write (works from a sandboxed shell) and
+  `remove` deletes it with everything else. Its own bundle id
+  (`io.github.taliesinb.dsh-app.canary-<branch>`) keeps it apart from an
+  installed release app (WebKit store, `LSMultipleInstancesProhibited`).
+- **Pinned home**: `build-app.mjs --dsh-home <root>/<branch>/home` writes
+  `embedded.dshHome`, and the wrapper now lets that pin outrank `$DSH_HOME`.
+  Necessary: `open` from a shell inside a DSH session forwards that session's
+  `DSH_HOME=~/.dsh`, and the first trial happily created its profile in the
+  live home. Credentials are copied in like the source canary.
+- **No updater** (`--no-update` drops the `update` block): a canary must not
+  replace itself with the fork's latest release.
+- `pid` is the wrapper's (the server dies with it), `dsh.log` a symlink to
+  `home/logs/dsh-app.log`, `kind` = `bundled` so `stop`/`remove` use the
+  in-dir path (as a realpath: processes under `/tmp` report `/private/tmp`).
+
+What it exercises that the source canary cannot: the production tree
+(pruned, tarball-resolved), `EmbeddedServer` (profile creation and the
+template merge), the `app-setup` first-run dialog, `app-lifeline`, the
+wrapper as the DMG ships it. What it cannot: the updater (off by design;
+test that with a fork release, see `bundled-app-dmg.md`).
+
+Found on the first run: `build-app.mjs` assembled the bundle by hand and
+missed `desktop-branding.js`, which upstream had meanwhile split out of
+`main.swift` — the app came up with the stock whale and "DSH". `dock-app.mjs`
+now exports `BRANDING_SCRIPT` and the bundle build copies it.
+
 ## Why these choices
 
 - **Not `pnpm dsh`**: pnpm 12's `packageManager` handling creates a temp

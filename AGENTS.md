@@ -282,7 +282,8 @@ or in a throwaway home with forwarded credentials (PREVIEWING.md).
 Full procedure, the ad-hoc `/tmp`-home alternative, credential forwarding and
 HMR gotchas: [PREVIEWING.md](PREVIEWING.md). **To try a feature branch as a
 user, run `pnpm canary` from its worktree** — a separate instance with its own
-red-whale Dock app `DSH <branch> <commit>` and the branch's plugins
+red-whale Dock app `DSH <branch> <commit>` and the branch's plugins; `pnpm
+canary --app` does the same with the self-contained bundled app instead
 (`recipes/canary-instances.md`).
 
 ### Verifying a client change without a GUI login
@@ -476,7 +477,10 @@ can reproduce or maintain it:
   branch vs `origin/main` (+ `--plugin`; `INFRA_PLUGINS` skipped),
   credentials copied in, home under `/tmp/dsh-canary/<branch>/`,
   `stop|remove|list|logs|url`; why not `pnpm dsh` (pnpm-12 temp dir), not
-  the standing preview, not the DMG; the worktree + submodule-symlink rule;
+  the standing preview, not the DMG; `--app` (2026-09-29): the bundled app
+  built from the branch into the canary dir, `--dsh-home` pin outranking the
+  forwarded `$DSH_HOME`, own bundle id, `--no-update`, the missing
+  `desktop-branding.js`; the worktree + submodule-symlink rule;
   the sandbox vs `~/Applications`, `pkill`-not-osascript, pnpm `-s` and
   32-char-label traps.
 - `chat-title-plugin.md` — the agent as reviewer of the automatic chat title
