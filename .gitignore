@@ -4,3 +4,5 @@ lib/
 .DS_Store
 cordis.dev.local.yml
 dist/
+.pnpm-store/
+.worktrees/
