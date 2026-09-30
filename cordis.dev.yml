@@ -121,3 +121,21 @@
     # writes a complete preview-home ZIP under ~/.dsh-preview-backups.
     - id: tali-backup-restore
       name: '/Users/USER/github/tali-dash-plugins/plugins/backup-restore/index.js'
+
+    # OAuth and billing family (live set since 2026-10-01): passive Anthropic
+    # OAuth evidence (observe only), provider-scoped prompt excision, and the
+    # billing pill. The preview has no cloud providers, so these mostly stay
+    # idle here. Recipes: anthropic-oauth-audit.md, provider-scoped-prompt-excision.md,
+    # billing-status-plugin.md
+    - id: tali-anthropic-oauth-audit
+      name: '/Users/USER/github/tali-dash-plugins/plugins/anthropic-oauth-audit/index.js'
+      config:
+        mode: observe
+    - id: tali-prompt-excision
+      name: '/Users/USER/github/tali-dash-plugins/plugins/prompt-excision/index.js'
+      config:
+        providers:
+          anthropic-oauth:
+            - DeepSeek Harness
+    - id: tali-billing-status
+      name: '/Users/USER/github/tali-dash-plugins/plugins/billing-status/index.js'

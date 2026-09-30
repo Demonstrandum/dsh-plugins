@@ -81,6 +81,9 @@ PLUGINS=(
   chat-title
   import-sessions
   backup-restore
+  anthropic-oauth-audit
+  prompt-excision
+  billing-status
 )
 
 log() { printf '\033[1;34m▸\033[0m %s\n' "$*"; }

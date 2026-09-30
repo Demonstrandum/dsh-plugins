@@ -150,7 +150,7 @@ generated API in `docs/cordis-api/`):
    `dsh plugin --profile <name> add ./plugins/<dir>` (pnpm-links the local
    directory; `remove` undoes it). Layer order, git installs, and the pnpm
    `allowBuilds` catch: `docs/user/develop/basic/publish.md`.
-   **All twenty-two live plugins at once:** `pnpm install-plugins [--profile web]`
+   **All twenty-seven live plugins at once:** `pnpm install-plugins [--profile web]`
    (`tools/install-plugins.sh`; `pnpm remove-plugins` undoes it). Rows then
    resolve by package name from the profile's hoisted `node_modules`, so no
    patch carries an absolute path. A "superplugin" package that merely lists
@@ -331,7 +331,7 @@ can reproduce or maintain it:
 
 ### Recipe index
 
-- [billing-status-plugin.md](recipes/billing-status-plugin.md) — first isolated provider-neutral billing implementation: passive native receipts and OAuth quota evidence, explicit token estimates, durable decimal accounting, shared optional passive capture with the audit, a compact shield footer, offline/provider/browser tests, and explicit session-to-login authorization bindings with fail-closed lifecycle handling; not installed live.
+- [billing-status-plugin.md](recipes/billing-status-plugin.md) — first isolated provider-neutral billing implementation: passive native receipts and OAuth quota evidence, explicit token estimates, durable decimal accounting, shared optional passive capture with the audit, a compact shield footer, offline/provider/browser tests, session-to-login authorization bindings with fail-closed lifecycle handling (the node operator reads every session), token estimates from the custom fork's resolved-model `pricing` (pi-ai catalog), and failed-versus-unpriced counting; in the live set since 2026-10-01.
 - [provider-neutral-billing-status-plan.md](recipes/provider-neutral-billing-status-plan.md) — original research and broader roadmap for provider-neutral billing: Tau cost versus quota UI, provider contracts, accounting scopes, optional integrations, placement, and remaining no-fork integration gaps.
 
 - [oauth-flow-names-and-routes.md](recipes/oauth-flow-names-and-routes.md) — short `/oauth` flow names versus isolated `-oauth` provider routes for every supported catalog flow, the command-oauth rename, prerequisite questions and device codes, credential isolation, offline verification, and explicit rollout.

@@ -1,3 +1,8 @@
+# Installed bundles observe only: passive subscription evidence and /oauth-billing
+# reports, no request enforcement. Enforcing `mode: audit` stays an explicit
+# profile override (see README).
 - insert:
     - id: tali-anthropic-oauth-audit
       name: tali-anthropic-oauth-audit
+      config:
+        mode: observe

@@ -53,13 +53,13 @@ When the optional `sessionOwners` attribution service is present, cross-session 
 
 ## Install and configure
 
-Obtain explicit approval for the target instance before installation or any live configuration change. To enable passive observation without briefly activating the default audit policy, prepare the bundle and the observe-mode override while that instance is stopped, then start it only after both are ready. From the DSH source checkout:
+The plugin is part of the live set installed by `tools/install-plugins.sh` (since 2026-10-01). Its bundle row carries `config: { mode: observe }`, so an installed bundle observes from its first load and never briefly activates the enforcing default; the code default stays `mode: audit` for explicit rows without a mode. From the DSH source checkout, a single profile:
 
 ```sh
 pnpm dsh plugin --profile web add ../plugins/anthropic-oauth-audit
 ```
 
-No live install, restart, configuration change, or paid validation is part of the development tests. Do not add the plugin to the general install roster or cloud credentials to a preview home.
+No live install, restart, configuration change, or paid validation is part of the development tests. Do not add cloud credentials to a preview home.
 
 Passive profile override (the whole config is replaced, not deep-merged):
 

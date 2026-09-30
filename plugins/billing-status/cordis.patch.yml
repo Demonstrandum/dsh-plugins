@@ -1,4 +1,6 @@
-# Opt-in only: do not add this package to live profiles without approval.
+# Part of the live set (tools/install-plugins.sh). Estimates need the custom
+# fork's resolved-model `pricing`; remote readers other than the node operator
+# need dsh-tailscale-remote `billingSessionOwners` bindings.
 - insert:
     - id: tali-billing-status
       name: tali-billing-status
