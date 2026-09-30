@@ -66,9 +66,20 @@ async function main() {
   const previous = tags.map(t => Number(t.slice('canary-'.length))).filter(n => n < build).sort((a, b) => b - a)[0]
   log(`build ${build} (tag ${tag}${previous ? `, previous canary-${previous}` : ', first release'})`)
 
+  // The harness the bundle packs must be the commit this repo pins, not whatever
+  // the checkout happens to sit on: plugins on main are written against the pin
+  // (import-sessions' storeSessionLogs import, 2026-09-29). `--checkout DIR`
+  // (a worktree at the pin; see the recipe) is forwarded to stage-dsh.
+  const checkout = opt('--checkout', join(REPO_DIR, 'deepseek-harness'))
+  const pinned = (await sh('git', ['ls-tree', 'HEAD', 'deepseek-harness'])).split(/\s+/)[2]
+  const actual = (await sh('git', ['-C', checkout, 'rev-parse', 'HEAD'])).trim()
+  if (pinned && actual !== pinned) {
+    throw new Error(`the harness checkout at ${checkout} is at ${actual.slice(0, 10)} but this repo pins ${pinned.slice(0, 10)}; build from a worktree at the pin (--checkout) or update the pin`)
+  }
+
   if (!args.includes('--no-build')) {
     await run('node', [join(HERE, 'fetch-node.mjs')])
-    await run('node', [join(HERE, 'stage-dsh.mjs'), ...(args.includes('--skip-pack') ? ['--skip-pack'] : [])])
+    await run('node', [join(HERE, 'stage-dsh.mjs'), '--checkout', checkout, ...(args.includes('--skip-pack') ? ['--skip-pack'] : [])])
     await run('node', [join(HERE, 'build-app.mjs'), '--build', String(build), '--update-repo', REPO, '--name', appName])
   }
   const manifest = JSON.parse(await readFile(join(OUT, `${appName}.app`, 'Contents', 'Resources', 'dsh-app-release.json'), 'utf8'))
