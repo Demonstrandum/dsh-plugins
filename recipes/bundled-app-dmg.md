@@ -452,8 +452,16 @@ the guest 6 GB (`DSH_VM_MEM`); the image needs ~28 GB free.
   **worktree** of the submodule at the pinned commit (`git -C
   deepseek-harness worktree add .worktrees/harness-<sha> <sha>`, `pnpm
   install --frozen-lockfile && pnpm build` there, then `stage-dsh.mjs
-  --checkout <worktree>`). `release.mjs` should refuse a checkout whose
-  HEAD differs from the repo's submodule pin — added as a check.
+  --checkout <worktree>`). `release.mjs` refuses a checkout whose HEAD
+  differs from the repo's submodule pin.
+- **A clean harness tree does not build with `pnpm build` alone**: the host
+  `tsc -b` includes client files importing `@…/remote`, the Typert
+  artifacts (`lib/typert.remote-client.*`) that the host *tsdown* pass emits
+  afterwards — a cycle a long-lived checkout never sees because it was
+  built incrementally before those imports existed. Run `pnpm exec tsdown
+  --env.DSH_BUILD_FACE host` once first (emits the artifacts without
+  typechecking), then `pnpm build`. Worth a fix upstream; noted here so
+  the CI release job does not rediscover it.
 
 ## Known gaps / next
 
