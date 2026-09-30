@@ -463,6 +463,22 @@ the guest 6 GB (`DSH_VM_MEM`); the image needs ~28 GB free.
   typechecking), then `pnpm build`. Worth a fix upstream; noted here so
   the CI release job does not rediscover it.
 
+## Release pipeline (`.github/workflows/release-app.yml`)
+
+`pnpm release-app` in a `macos-15` runner. Triggers: **Run workflow** (notes
++ draft inputs) or a push to `main` whose head commit subject starts with
+`release:` (the rest of the subject is the notes). Checkout with tags; the
+harness submodule initialised **by hand over HTTPS** (`.gitmodules` carries
+SSH URLs and `extras` is private, so `submodules: true` would fail); pnpm
+11.7 (the harness's `packageManager`), Node 24; the Typert-first harness
+build; then `release.mjs --repo $GITHUB_REPOSITORY`, which enforces the
+pin. `permissions: contents: write` is all `gh release create` needs; the
+release's DMG + `.sha256` are what installed apps update from.
+
+Testing it needs the file on the repo's **default branch** (GitHub only
+registers `workflow_dispatch` there) — on the fork the default was
+temporarily switched to the PR branch for the trial run, then back.
+
 ## Known gaps / next
 
 - Still open from the milestone-2 design: port-conflict handling when 3090
@@ -471,10 +487,8 @@ the guest 6 GB (`DSH_VM_MEM`); the image needs ~28 GB free.
   tailnet access) registered via `SMAppService` rather than a
   Homebrew-installed node; an in-dialog "download office support" for the
   LibreOffice engine the prune drops.
-- Updater follow-ups: a GitHub Actions release job (the fork build on a
-  `macos-14` arm64 runner is ~15 min; `release.mjs` is written to run there
-  unchanged given `gh` auth); Developer ID signing + notarization in
-  `build-app.mjs --sign` (the swap itself needs neither); an x64 lane.
+- Developer ID signing + notarization in `build-app.mjs --sign` (the swap
+  itself needs neither); an x64 lane.
 - Multi-arch: only `darwin-arm64` is staged (`OTHER_PLATFORM` filter + the
   Node tarball); an x64 build needs the build to run on x64 or a lipo pass.
 - The `.pkg` idea was dropped: with everything inside the `.app` there is
