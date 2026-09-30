@@ -454,20 +454,23 @@ the guest 6 GB (`DSH_VM_MEM`); the image needs ~28 GB free.
   install --frozen-lockfile && pnpm build` there, then `stage-dsh.mjs
   --checkout <worktree>`). `release.mjs` refuses a checkout whose HEAD
   differs from the repo's submodule pin.
-- **A clean harness tree does not build at the pinned commit** (`fc92737`):
-  `build:lib:host` — the very first gate upstream's own CI runs — fails
-  with 55 TS errors, all in `session-controller` / `workspace-files`
-  `src/client/*` importing `@…/remote`, the Typert artifacts
-  (`lib/typert.remote-client.*`) that the same build's tsdown pass emits
-  *afterwards*. A long-lived checkout never sees it: its stale `lib/` from
-  before those imports existed breaks the cycle, and `tsc -b` is
-  incremental. Verified twice from scratch (local worktree under Node 24,
-  and the GitHub runner). The local worktree build only succeeded because
-  a partial earlier run had left the artifacts behind. This is a harness
-  build-graph defect (`tsconfig.host.json` reaches the client sources
-  through a reference chain), to be fixed upstream; until then the CI
-  release job fails at "Build the harness" and releases are cut locally
-  from a worktree that has been built once (`.worktrees/harness-<sha>`).
+- **A clean harness tree needs a two-pass build** at the pinned commit
+  (`fc92737`; verified from scratch under Node 24): `build:lib:host` fails
+  with 55 TS errors — `session-controller` / `workspace-files`
+  `src/client/*` import `@…/remote`, the Typert artifacts
+  (`lib/typert.remote-client.*`) that the same build's *tsdown* pass emits
+  afterwards — but `tsc -b` has by then emitted every project not
+  downstream of those two, which is enough for `pnpm exec tsdown
+  --env.DSH_BUILD_FACE host` to generate the artifacts; a second
+  `pnpm build` is then clean. A long-lived checkout never sees any of
+  this: its stale `lib/` breaks the cycle and `tsc -b` is incremental.
+  So: `pnpm install --frozen-lockfile; pnpm run build:lib:host || true;
+  pnpm exec tsdown --env.DSH_BUILD_FACE host; pnpm build`. The CI job does
+  exactly that. (Running tsdown *without* the first failing pass does not
+  work — `cordis-plugin-hmr` has no entries yet; that was the false trail
+  that briefly made this look unbuildable.) The real fix — the host
+  tsconfig reference chain must not reach client sources — belongs
+  upstream.
 
 ## Release pipeline (`.github/workflows/release-app.yml`)
 
