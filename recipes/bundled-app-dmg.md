@@ -454,14 +454,20 @@ the guest 6 GB (`DSH_VM_MEM`); the image needs ~28 GB free.
   install --frozen-lockfile && pnpm build` there, then `stage-dsh.mjs
   --checkout <worktree>`). `release.mjs` refuses a checkout whose HEAD
   differs from the repo's submodule pin.
-- **A clean harness tree does not build with `pnpm build` alone**: the host
-  `tsc -b` includes client files importing `@…/remote`, the Typert
-  artifacts (`lib/typert.remote-client.*`) that the host *tsdown* pass emits
-  afterwards — a cycle a long-lived checkout never sees because it was
-  built incrementally before those imports existed. Run `pnpm exec tsdown
-  --env.DSH_BUILD_FACE host` once first (emits the artifacts without
-  typechecking), then `pnpm build`. Worth a fix upstream; noted here so
-  the CI release job does not rediscover it.
+- **A clean harness tree does not build at the pinned commit** (`fc92737`):
+  `build:lib:host` — the very first gate upstream's own CI runs — fails
+  with 55 TS errors, all in `session-controller` / `workspace-files`
+  `src/client/*` importing `@…/remote`, the Typert artifacts
+  (`lib/typert.remote-client.*`) that the same build's tsdown pass emits
+  *afterwards*. A long-lived checkout never sees it: its stale `lib/` from
+  before those imports existed breaks the cycle, and `tsc -b` is
+  incremental. Verified twice from scratch (local worktree under Node 24,
+  and the GitHub runner). The local worktree build only succeeded because
+  a partial earlier run had left the artifacts behind. This is a harness
+  build-graph defect (`tsconfig.host.json` reaches the client sources
+  through a reference chain), to be fixed upstream; until then the CI
+  release job fails at "Build the harness" and releases are cut locally
+  from a worktree that has been built once (`.worktrees/harness-<sha>`).
 
 ## Release pipeline (`.github/workflows/release-app.yml`)
 
