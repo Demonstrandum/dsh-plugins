@@ -80,7 +80,11 @@ Examples (illustrative values):
 …  Cache hit 96%    ◔ 69%    Billing unknown
 ```
 
-`Plan` is shorthand for observed plan-claim evidence, not a billing certification. Click details should label it `Plan claim`. API estimates and subscription usage must not be presented as a common bill. For mixed sessions, preserve the monetary buckets and unpriced/subscription count. Explicit overage becomes `Extra usage`; absent amounts remain absent.
+Use the **same shield-with-person OAuth glyph as the model picker** for subscription usage, scaled to the dock's icon size and subdued styling. The exact glyph is currently an inline SVG in [ModelSelect](../deepseek-harness/packages/client/ui-model-selection/src/client/ModelSelect.tsx#L57-L59), not the generic permission shield. Reproduce that small glyph in the out-of-tree client with a source reference rather than importing another client plugin's runtime component or patching core merely to extract an icon.
+
+For Anthropic, the meaningful success signal is a **fresh positive subscription-window claim on an accepted response**, not merely an OAuth-selected route, quota fields existing, or the absence of a dollar amount. The compact positive state can be the OAuth shield followed by `5h 3% · 7d 1%`; click details label the evidence `Plan claim`. This indicates that the observed request received subscription-window treatment, not an unconditional invoice guarantee or a promise about future requests. The same glyph may identify OAuth in other states only with an explicit `Unobserved`, `Unknown`, `Stale`, or `Extra usage` label; never silently reuse a prior successful state across account/provider switches.
+
+API estimates and subscription usage must not be presented as a common bill. For mixed sessions, preserve the monetary buckets and unpriced/subscription count. Explicit overage becomes `Extra usage`; absent amounts remain absent.
 
 Click opens short labelled rows, not explanatory blurbs:
 
