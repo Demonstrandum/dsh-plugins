@@ -36,6 +36,7 @@ The existing audit policy remains the backward-compatible default: preflight vio
 For reporting alone, explicitly use `mode: observe`. `/oauth-billing` reports the last response evidence for loaded Anthropic OAuth sessions in this Host; `current` and `recent` narrow to the caller or include retained unloaded sessions. It reports observation time, model, stale state, and utilization rather than dollars or a promise of plan-only coverage. The report is bounded and in-memory; no old HTTP evidence can be recovered from trajectories. The [README](../plugins/anthropic-oauth-audit/README.md#billing-report) owns precise scope and ownership rules.
 
 The command is `/oauth-billing`, not `/oauth billing`: the in-tree OAuth command owns that name and has no subcommand-extension seam. An out-of-tree sibling command avoids shadowing sign-in/logout behavior or patching the fork. A status-bar projection is deferred until this evidence source has been observed on real traffic; it must not turn OAuth authentication or catalog token-cost estimates into a claim about actual charges.
+Optional removal of branding paragraphs is a separate [provider-scoped prompt-excision plugin](provider-scoped-prompt-excision.md). It transforms initial-system assembly before logging and does not change this observer's request-preservation policy or provide billing guarantees.
 ## Reproduce offline
 
 From the plugins checkout:

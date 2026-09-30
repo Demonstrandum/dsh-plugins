@@ -1,0 +1,7 @@
+- insert:
+    - id: tali-prompt-excision
+      name: tali-prompt-excision
+      config:
+        providers:
+          anthropic-oauth:
+            - DeepSeek Harness

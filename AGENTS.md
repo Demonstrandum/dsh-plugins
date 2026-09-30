@@ -333,6 +333,7 @@ can reproduce or maintain it:
 
 - [oauth-flow-names-and-routes.md](recipes/oauth-flow-names-and-routes.md) — short `/oauth` flow names versus isolated `-oauth` provider routes for every supported catalog flow, the command-oauth rename, prerequisite questions and device codes, credential isolation, offline verification, and explicit rollout.
 
+- [provider-scoped-prompt-excision.md](recipes/provider-scoped-prompt-excision.md) — standalone literal whole-paragraph removal from selected providers' initial system prompts, the opt-in Anthropic OAuth mapping, pre-admission logging fidelity, interpolation and verbatim-persona limits, and offline replay/pi-ai wire verification.
 - [anthropic-oauth-audit.md](recipes/anthropic-oauth-audit.md) — Pi's identity prefix versus preserved DSH prompt, Rho's OAuth footer versus header evidence, passive `/oauth-billing` reports with scope/staleness/privacy controls, optional enforcing wire audit, and why routing headers cannot certify billing; offline Loader/pi-ai tests and explicit live rollout.
 
 - `nixos-thin-client.md` — the root Nix flake and Linux Electron wrapper:

@@ -1,0 +1,18 @@
+{
+  "name": "tali-prompt-excision",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Provider-scoped literal paragraph excision from DSH initial system prompts",
+  "type": "module",
+  "main": "index.js",
+  "exports": { ".": "./index.js", "./package.json": "./package.json" },
+  "files": ["index.js", "excision.mjs", "cordis.patch.yml", "README.md"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "scripts": {
+    "check": "node --check index.js && node --check excision.mjs && node --test tests/*.test.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-system-prompt": "link:../../deepseek-harness/packages/core/system-prompt"
+  }
+}
