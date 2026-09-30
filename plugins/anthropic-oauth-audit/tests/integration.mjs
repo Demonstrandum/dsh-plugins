@@ -160,3 +160,78 @@ test('real DSH adapter + installed pi-ai: OAuth wire format, native tool roundtr
     await rm(home, { recursive: true, force: true })
   }
 })
+
+
+test('real Loader observer mode preserves OAuth transport and reports without additional requests', async () => {
+  const original = globalThis.fetch
+  const requests = []
+  const { default: Commands } = await import('../../../deepseek-harness/packages/interaction/commands/src/index.ts')
+  let claim = 'overage'; let status = 200
+  const ctx = new Context()
+  const home = await mkdtemp(join(tmpdir(), 'dsh-oauth-observe-test-'))
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url: String(url), headers: new Headers(options.headers), body: JSON.parse(options.body) })
+    return status === 200
+      ? new Response(sse(true), { headers: { 'content-type': 'text/event-stream', [H + 'representative-claim']: claim, [H + 'status']: 'allowed' } })
+      : new Response(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'fixture observer rejection' } }), {
+        status, headers: { 'content-type': 'application/json', [H + 'representative-claim']: claim },
+      })
+  }
+  try {
+    const profiles = resolveProfiles({ 'anthropic-oauth': {} })
+    const adapter = new PiAiAdapter({ profiles: () => profiles,
+      auth: memoryAuth({ 'anthropic-oauth': { type: 'oauth', access: 'sk-ant-oat01-observer-fixture', refresh: 'offline', expires: Date.now() + 3_600_000 } }),
+      resolveApiKey: async () => undefined,
+    })
+    const modules = new Map([
+      ['test-llm', LlmRuntime],
+      ['test-provider', { name: 'test-provider', inject: ['llm'], apply(scoped) { scoped.llm.registerAdapter(['anthropic-oauth'], adapter) } }],
+      ['test-commands', Commands],
+      ['tali-anthropic-oauth-audit', Audit],
+    ])
+    const path = join(home, 'cordis.yml')
+    await writeFile(path, '- id: llm\n  name: test-llm\n- id: provider\n  name: test-provider\n- id: commands\n  name: test-commands\n- id: billing\n  name: tali-anthropic-oauth-audit\n  config:\n    mode: observe\n')
+    ctx.baseUrl = pathToFileURL(home).href + '/'
+    await ctx.plugin(Loader)
+    ctx.loader.builtins.include = Include
+    ctx.loader.internal = { version: 'v2', async import(specifier) { assert.ok(modules.has(specifier)); return modules.get(specifier) } }
+    await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(path).href } })
+    await ctx.loader.await()
+    assert.ok([...ctx.registry.values()].every(runtime => [...runtime.fibers].every(fiber => fiber.state === 2)), 'all Loader fibers must activate')
+    const agent = { ctx, session: { id: 'session-observer-fixture', requestHeader: () => ({ config: { provider: 'anthropic-oauth', model } }) } }
+    const call = () => collect(ctx.llm.stream({ provider: 'anthropic-oauth', model, maxTokens: 16, sessionId: agent.session.id,
+      system: 'You are an AI agent powered by DeepSeek Harness.',
+      messages: [createUserMessage({ content: [{ type: 'text', text: 'fixture only' }], source: { kind: 'plugin', plugin: 'test' } })],
+      tools: [{ name: 'bash', description: 'Never executed fixture', parameters: { type: 'object', properties: { command: { type: 'string' } } } }],
+    }))
+    for (const value of ['overage', 'five_hour', 'future_claim']) {
+      claim = value
+      const chunks = await call()
+      assert.equal(chunks.at(-1).reason.kind, 'tool-calls')
+      assert.equal(chunks.find(c => c.type === 'block-end').block.name, 'bash')
+      const count = requests.length
+      const report = await ctx.commands.find(agent, 'oauth-billing').handler({ agent, rawInput: 'current' })
+      assert.equal(report.kind, 'success')
+      assert.match(report.text, value === 'overage' ? /extra usage/ : value === 'five_hour' ? /subscription claim/ : /unknown/)
+      assert.equal(requests.length, count, 'billing command must not probe or refresh')
+      assert.doesNotMatch(report.text, /sk-ant-oat01|future_claim|fixture only/)
+    }
+    const wire = requests[0]
+    assert.match(wire.headers.get('user-agent'), /^deepseek-harness\//)
+    assert.equal(wire.headers.has('x-api-key'), false)
+    assert.equal(wire.headers.get('x-app'), 'cli')
+    assert.equal(wire.body.system[0].text, IDENTITY)
+    assert.equal(wire.body.system[1].text, 'You are an AI agent powered by DeepSeek Harness.')
+    assert.equal(wire.body.tools[0].name, 'Bash')
+    status = 429; claim = 'overage'
+    const failed = await call()
+    assert.match(failed.at(-1).reason.failure.message, /fixture observer rejection/)
+    assert.notEqual(failed.at(-1).reason.failure.code, 'ANTHROPIC_OAUTH_AUDIT')
+    assert.match((await ctx.commands.find(agent, 'oauth-billing').handler({ agent, rawInput: '' })).text, /rejected/)
+  } finally {
+    await ctx.fiber.dispose()
+    assert.equal(ctx.get('commands'), undefined)
+    globalThis.fetch = original
+    await rm(home, { recursive: true, force: true })
+  }
+})

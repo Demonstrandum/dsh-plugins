@@ -1,4 +1,5 @@
 import { describe } from './evidence.mjs'
+import { billingResult } from './billing.mjs'
 import { installTransport } from './transport.mjs'
 
 export const name = 'anthropic-oauth-audit'
@@ -7,17 +8,25 @@ export const inject = ['llm']
 /** Deployment settings; only the dedicated OAuth route is audited by default. */
 export function resolveConfig(config = {}) {
   if (config === null || typeof config !== 'object' || Array.isArray(config)) throw new Error('anthropic-oauth-audit: config must be an object')
-  const value = { providers: ['anthropic-oauth'], cliUserAgent: 'claude-cli/2.1.280',
-    onUnverified: 'error', maxSessions: 256, ...config }
+  const value = { mode: 'audit', providers: ['anthropic-oauth'], maxSessions: 256, staleAfterMs: 300_000,
+    ...(config.mode === 'observe' ? {} : { cliUserAgent: 'claude-cli/2.1.280', onUnverified: 'error' }), ...config }
   if (!Array.isArray(value.providers) || !value.providers.length || value.providers.some(p => typeof p !== 'string' || !p)) {
     throw new Error('anthropic-oauth-audit: providers must be a nonempty list of route ids')
   }
-  if (!/^claude-cli\/[0-9]+\.[0-9]+\.[0-9]+$/.test(value.cliUserAgent)) {
+  if (value.mode !== 'observe' && !/^claude-cli\/[0-9]+\.[0-9]+\.[0-9]+$/.test(value.cliUserAgent)) {
     throw new Error('anthropic-oauth-audit: cliUserAgent must be claude-cli/<major.minor.patch>')
   }
-  if (!['warn', 'error'].includes(value.onUnverified)) throw new Error('anthropic-oauth-audit: onUnverified must be warn or error')
+  if (value.mode !== 'observe' && !['warn', 'error'].includes(value.onUnverified)) throw new Error('anthropic-oauth-audit: onUnverified must be warn or error')
   if (!Number.isSafeInteger(value.maxSessions) || value.maxSessions < 1) throw new Error('anthropic-oauth-audit: maxSessions must be positive')
-  const known = new Set(['providers', 'cliUserAgent', 'onUnverified', 'maxSessions'])
+  if (!['audit', 'observe'].includes(value.mode)) throw new Error('anthropic-oauth-audit: mode must be audit or observe')
+  if (value.mode === 'observe' && (value.providers.length !== 1 || value.providers[0] !== 'anthropic-oauth')) {
+    throw new Error('anthropic-oauth-audit: observe mode currently supports only anthropic-oauth')
+  }
+  if (value.mode === 'observe' && ('cliUserAgent' in config || 'onUnverified' in config)) {
+    throw new Error('anthropic-oauth-audit: cliUserAgent and onUnverified apply only to audit mode')
+  }
+  if (!Number.isSafeInteger(value.staleAfterMs) || value.staleAfterMs < 1) throw new Error('anthropic-oauth-audit: staleAfterMs must be positive')
+  const known = new Set(['mode', 'providers', 'cliUserAgent', 'onUnverified', 'maxSessions', 'staleAfterMs'])
   if (Object.keys(config).some(key => !known.has(key))) throw new Error('anthropic-oauth-audit: unknown configuration key')
   return value
 }
@@ -33,13 +42,13 @@ export const Config = {
     },
   },
 }
-/** Host-only plugin: audited streaming calls, redacted logs, and /oauth-audit. */
+/** Host-only stream observation/audit, redacted logs, and read-only evidence commands. */
 export function apply(ctx, rawConfig) {
   const config = resolveConfig(rawConfig)
   const providers = new Set(config.providers)
   const latest = new Map()
   let active = true
-  const publish = (state, report) => {
+  const publishReport = (state, report) => {
     if (!active) return
     const key = state.sessionId
     const previous = key === undefined ? undefined : latest.get(key)
@@ -62,9 +71,14 @@ export function apply(ctx, rawConfig) {
     if (entry.outcome === 'plan-evidence' && !increased) ctx.logger.info(line)
     else ctx.logger.warn(line)
   }
+  const publish = (state, report) => {
+    if (config.mode === 'observe') {
+      try { publishReport(state, report) } catch { /* telemetry never fails an inference */ }
+    } else publishReport(state, report)
+  }
   let transport
   ctx.effect(() => {
-    transport = installTransport({ cliUserAgent: config.cliUserAgent, report: publish })
+    transport = installTransport({ mode: config.mode, cliUserAgent: config.cliUserAgent, report: publish })
     return () => { active = false; transport.dispose(); latest.clear() }
   }, 'anthropic-oauth-audit: scoped fetch')
 
@@ -75,6 +89,7 @@ export function apply(ctx, rawConfig) {
       const iterator = transport.run(state, () => next()[Symbol.asyncIterator]())
       let done = false
       const failure = () => {
+        if (config.mode === 'observe') return
         const report = state.report
         if (report?.outcome === 'blocked' || (config.onUnverified === 'error'
           && report && ['extra-usage', 'unknown', 'unobserved'].includes(report.outcome))) {
@@ -114,6 +129,26 @@ export function apply(ctx, rawConfig) {
   }, { global: true })
 
   ctx.inject(['commands'], (commandsCtx) => {
+    commandsCtx.effect(() => commandsCtx.commands.register({
+      name: 'oauth-billing',
+      description: 'Show observed Anthropic OAuth billing-route evidence',
+      input: { hint: '[current|recent]' },
+      recordInput: false,
+      handler: ({ agent, rawInput }) => {
+        const owners = ctx.get?.('sessionOwners')
+        const canSeeSession = owners === undefined ? undefined : (id) => {
+          if (id === agent.session.id) return true
+          try {
+            const caller = owners.of(agent.session.id)
+            const other = owners.of(id)
+            return typeof caller?.owner === 'string' && !['', 'token', 'local'].includes(caller.owner)
+              && caller.actor === caller.owner && other?.owner === caller.owner
+              && other.actor === caller.owner
+          } catch { return false }
+        }
+        return billingResult({ latest, agent, rawInput, agents: ctx.get?.('agents'), canSeeSession, staleAfterMs: config.staleAfterMs })
+      },
+    }), 'anthropic-oauth-audit: billing report')
     commandsCtx.effect(() => commandsCtx.commands.register({
       name: 'oauth-audit',
       description: 'Show this session’s latest Anthropic OAuth request and routing evidence',

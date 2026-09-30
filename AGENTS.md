@@ -333,7 +333,7 @@ can reproduce or maintain it:
 
 - [oauth-flow-names-and-routes.md](recipes/oauth-flow-names-and-routes.md) — short `/oauth` flow names versus isolated `-oauth` provider routes for every supported catalog flow, the command-oauth rename, prerequisite questions and device codes, credential isolation, offline verification, and explicit rollout.
 
-- [anthropic-oauth-audit.md](recipes/anthropic-oauth-audit.md) — out-of-tree OAuth wire checks, CLI User-Agent prefix with DSH attribution, per-response subscription/overage/unknown diagnostics, `/oauth-audit`, visible fail-closed errors, and why routing headers cannot certify billing; offline Loader/pi-ai tests and explicit live rollout.
+- [anthropic-oauth-audit.md](recipes/anthropic-oauth-audit.md) — Pi's identity prefix versus preserved DSH prompt, Rho's OAuth footer versus header evidence, passive `/oauth-billing` reports with scope/staleness/privacy controls, optional enforcing wire audit, and why routing headers cannot certify billing; offline Loader/pi-ai tests and explicit live rollout.
 
 - `nixos-thin-client.md` — the root Nix flake and Linux Electron wrapper:
   packaged runtime, saved server and desktop launcher, automatic TCP over
