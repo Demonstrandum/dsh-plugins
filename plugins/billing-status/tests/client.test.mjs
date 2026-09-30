@@ -10,7 +10,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 const result = await build({ entryPoints: [new URL('../client.tsx', import.meta.url).pathname], bundle: true, format: 'cjs', platform: 'browser', jsx: 'automatic', write: false, loader: { '.css': 'text' }, external: ['react', 'react/jsx-runtime', 'react-dom', '@deepseek-ai/dsh-client-ui-primitives'] })
 const sandbox = { module: { exports: {} }, require: name => ({ react: React, 'react/jsx-runtime': jsx, 'react-dom': {}, '@deepseek-ai/dsh-client-ui-primitives': {} })[name] }
 vm.runInNewContext(result.outputFiles[0].text, sandbox)
-const { parseSnapshot, formatAmount, exactAmount, compactLabel, billingView, windowLabel, isStale, OAuthShield, ApiIcon, apply } = sandbox.module.exports
+const { parseSnapshot, formatAmount, exactAmount, compactLabel, billingView, windowLabel, isStale, OAuthShield, ApiIcon, OpenRouterIcon, apply } = sandbox.module.exports
 const at = Date.parse('2026-01-01T12:00:00Z')
 const base = () => ({ version: 1, sessionId: 'fixture-session', totals: [], counts: { requests: 0, unpriced: 0, pending: 0, subscription: 0 }, persistence: 'ok' })
 const plan = () => ({ ...base(), latest: { provider: 'anthropic-oauth', model: 'fixture-model', at, kind: 'plan', windows: [{ label: '5h', usedPercent: 3 }, { label: '7d', usedPercent: 1 }] } })
@@ -32,7 +32,7 @@ test('compact money: two decimals below 10, one from 10, no float, never a false
   assert.equal(formatAmount('2.52', 'EUR'), '€2.52')
   assert.equal(formatAmount('0.04', 'JPY'), 'JPY 0.04')
   assert.equal(formatAmount('0.001', 'JPY'), '<JPY 0.01')
-  assert.equal(formatAmount('garbage', 'USD'), '---')
+  assert.equal(formatAmount('garbage', 'USD'), '—')
 })
 test('exact money keeps full precision and the currency', () => {
   assert.equal(exactAmount('0.042310', 'USD'), '$0.04231')
@@ -54,7 +54,14 @@ test('estimates carry ~, reported has no qualifier; gaps become notes', () => {
   same(view.notes.map(n => [n.key, n.level]), [['unpriced', 'info'], ['pending', 'info']])
   assert.equal(view.summary, 'Reported $1.23 · Estimated $0.04 · 1 unpriced request · 1 request pending')
 })
-test('unknown cost with unpriced requests reads $ --- with the count in its description', () => {
+test('money glyphs: OpenRouter for its reported charges, API for estimates and unknown API cost', () => {
+  const data = { ...base(), totals: [{ ...usd('1.24'), scope: 'openrouter-account' }, { ...usd('0.04', 'estimated'), scope: 'model-tokens' }] }
+  same(billingView(data, at).moneyIcons, ['openrouter', 'api'])
+  const routed = { ...base(), latest: { provider: 'openrouter', model: 'm', at, kind: 'unknown', windows: [] }, counts: { requests: 1, unpriced: 1, pending: 0, subscription: 0 } }
+  assert.equal(billingView(routed, at).unknownIcon, 'openrouter')
+  assert.equal(billingView({ ...routed, latest: { ...routed.latest, provider: 'anthropic' } }, at).unknownIcon, 'api')
+})
+test('unknown cost with unpriced requests reads $ — with the count in its description', () => {
   const view = billingView({ ...base(), counts: { requests: 2, unpriced: 2, pending: 0, subscription: 0 } }, at)
   assert.equal(view.unknownMoney, true)
   assert.equal(view.summary, 'Cost unknown · 2 unpriced requests')
@@ -105,9 +112,19 @@ test('OAuth shield geometry matches the picker exactly', async () => {
   assert.ok(output.includes('cx="10" cy="7.2" r="2"'))
   assert.ok(output.includes('stroke-width="1.55"'))
 })
+test('OpenRouter icon matches the picker glyph exactly', async () => {
+  const source = await readFile(new URL('../../../deepseek-harness/packages/client/ui-model-selection/src/client/ModelSelect.tsx', import.meta.url), 'utf8')
+  const glyph = source.split('function RouteIcon')[1].split("if (route === 'openrouter') return ")[1].split('\n')[0]
+  const output = renderToStaticMarkup(React.createElement(OpenRouterIcon))
+  const paths = [...glyph.matchAll(/ d="([^"]+)"/g)]
+  assert.equal(paths.length, 1)
+  assert.ok(output.includes(`d="${paths[0][1]}"`))
+  assert.ok(output.includes('stroke-width="1.65"'))
+})
 test('token-billing icon matches the picker API glyph exactly', async () => {
   const source = await readFile(new URL('../../../deepseek-harness/packages/client/ui-model-selection/src/client/ModelSelect.tsx', import.meta.url), 'utf8')
-  const glyph = source.split("if (route === 'openrouter') return ")[1].split('\n')[1]
+  const glyph = source.split('function RouteIcon')[1].split("if (route === 'openrouter') return ")[1].split('\n')[1]
+  assert.ok(glyph.includes('<rect'), 'API glyph line located')
   const output = renderToStaticMarkup(React.createElement(ApiIcon))
   for (const [, path] of glyph.matchAll(/ d="([^"]+)"/g)) assert.ok(output.includes(`d="${path}"`))
   assert.ok(output.includes('x="1.8" y="3" width="16.4" height="14" rx="3"'))

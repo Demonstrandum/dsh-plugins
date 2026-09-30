@@ -11,7 +11,7 @@ An **opt-in, out-of-tree** billing observer, request ledger, and compact compose
 | Anthropic OAuth, native HTTP | Accepted subscription-window claim; utilization/reset headers; explicit extra usage; rejected/unknown/unobserved | No conversion of subscription tokens into dollars |
 | OpenRouter, native HTTP SSE/JSON | Provider `usage.cost` and generation identity | Reported OpenRouter-account charge, not upstream BYOK charges |
 | OpenAI Codex OAuth, HTTP | Primary/secondary windows and credit facts where returned | No dollar conversion; quota observation is **not** an Anthropic-style plan claim |
-| API-key routes with an explicit rate card | Normalized token usage | Versioned **model-token estimate**; tools, media and contract discounts aren't priced |
+| API-key routes whose model DSH's catalog prices | Normalized token usage × `ctx.llm.resolveModelInfo(provider, model).pricing` | Versioned **model-token estimate** (`~$`); tools, media and contract discounts aren't priced |
 | Unsupported/custom transports, including Codex WebSocket | Explicit unobserved evidence | Unknown, never an invented zero |
 
 Only scoped inference requests are observed. No quota/credit snapshot is shared across sessions or persisted. The most recently started request invalidates the previous claim, including a new request on the same provider. Staleness is based on server time. A claim describes that observed response, not whether future requests will use the same billing route.
@@ -20,9 +20,9 @@ Only scoped inference requests are observed. No quota/credit snapshot is shared 
 
 | State | Pill |
 |---|---|
-| Provider-reported cost | API glyph + `$1.24` (no qualifier: reported is the default meaning) |
-| Configured token-price estimate | API glyph + `~$2.52` |
-| Cost unknown or not observable | API glyph + `$ ---`; the reason (for example `2 unpriced requests`) is in the tooltip and card |
+| OpenRouter-reported cost | OpenRouter glyph + `$1.24` (no qualifier: reported is the default meaning) |
+| Token-price estimate from DSH's model catalog | API glyph `[</>]` + `~$2.52` |
+| Cost unknown or not observable | API (or OpenRouter) glyph + `$ —`; the reason (for example `2 unpriced requests`) is in the tooltip and card |
 | Subscription windows | shield + `5h` ring `7d` ring (ContextMeter ring geometry); the percentages are in the tooltip and card |
 | Single unnamed quota (Codex `primary` without a duration) | shield + `20%`; windows with durations get `5h`/`7d` rings |
 | Extra usage | shield + orange `Extra`, never a percentage |
@@ -30,7 +30,7 @@ Only scoped inference requests are observed. No quota/credit snapshot is shared 
 | Gaps (unpriced beside a known cost, pending, incomplete) | trailing orange info icon; hover lists them |
 | Storage failure, rejected request, access failure | trailing red warning icon; hover lists them |
 
-Amounts are compact display rounding over the host's exact decimals: at most two decimals below 10, one from 10 up, trailing zeros dropped, leading zero omitted after a symbol (`$0`, `$.04`, `$1.24`, `$52.4`, `$1024.1`); a positive amount that rounds to zero reads `<$.01`. `$` means USD: OpenRouter's `usage.cost` carries no currency field and OpenRouter documents USD as its billing currency; configured rate cards name their ISO currency. `EUR`/`GBP` use their symbols, other currencies a code prefix; buckets are never converted or summed across currencies. Money is session history and does not go stale; only quota readings age (default five minutes, server clock).
+Amounts are compact display rounding over the host's exact decimals: at most two decimals below 10, one from 10 up, trailing zeros dropped, leading zero omitted after a symbol (`$0`, `$.04`, `$1.24`, `$52.4`, `$1024.1`); a positive amount that rounds to zero reads `<$.01`. `$` means USD: OpenRouter's `usage.cost` carries no currency field and OpenRouter documents USD as its billing currency; estimates use DSH's resolved-model `pricing` (list prices from the installed pi-ai catalog, published by the custom fork's `llm-pi-ai` adapter; see below), which is USD. `EUR`/`GBP` use their symbols, other currencies a code prefix; buckets are never converted or summed across currencies. Money is session history and does not go stale; only quota readings age (default five minutes, server clock).
 
 Clicking opens a card in ContextMeter's panel skin: headline figure, exact per-kind amounts with scope, quota windows with bars and reset times, notes, and request count/model/route/observed time. The OAuth shield and API glyph match the model picker's `RouteIcon` exactly, as local SVG code rather than a runtime import from the picker plugin. No UI help paragraphs.
 
@@ -79,7 +79,11 @@ Trusted host plugins can consume `ctx.billingStatus.snapshot(sessionId)` or publ
 
 ## Configuration
 
-All fields are optional. With no rate cards, supported native receipts and quota observations still work, while API-key requests remain unpriced. No stale catalog price or catalog zero is silently assumed correct.
+All fields are optional.
+
+### Estimates from DSH's model catalog
+
+With no rate cards, an API-key request is priced from the list prices DSH publishes on resolved model info: the custom fork's `llm-pi-ai` adapter reports the installed pi-ai catalog's rates as `pricing` (input, output, cache read/write per million tokens, optional input-size tiers, USD, source `pi-ai catalog <date>`). Subscription routes (`-oauth`, `openai-codex`) publish none and are never estimated. Each live estimate stores its catalog version (`pi-ai-catalog-<date>`); usage recorded before a price was known is priced at read time from the current catalog and not written back. Lookups are cached per route/model for ten minutes. On a DSH without the `pricing` field, API-key requests stay unpriced (`$ —`). A catalog model without rates, or cache use without a cache rate, stays unpriced rather than assumed free. Anthropic's 1-hour cache-write surcharge is not represented because usage does not distinguish it. An explicit rate card below, when configured, takes precedence.
 
 ```yaml
 config:

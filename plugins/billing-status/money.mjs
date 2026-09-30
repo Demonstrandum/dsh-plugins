@@ -29,7 +29,10 @@ export function priceUsage(usage, card) {
   const uncached = card.inputMode === 'inclusive' ? input - read - write : input
   const totalInput = card.inputMode === 'inclusive' ? input : input + read + write
   if (uncached < 0 || !Number.isSafeInteger(totalInput) || (card.maxInputTokens !== undefined && totalInput > card.maxInputTokens)) return undefined
-  const pairs = [[uncached, card.inputPerMillion], [output, card.outputPerMillion], [read, card.cacheReadPerMillion], [write, card.cacheWritePerMillion]]
+  // Input-size tiers (e.g. long-context pricing): the highest exceeded threshold replaces the base rates.
+  let rates = card
+  for (const tier of card.tiers ?? []) if (totalInput > tier.inputTokensAbove && tier.inputTokensAbove >= (rates.inputTokensAbove ?? -1)) rates = tier
+  const pairs = [[uncached, rates.inputPerMillion], [output, rates.outputPerMillion], [read, rates.cacheReadPerMillion], [write, rates.cacheWritePerMillion]]
   let total = 0n
   for (const [count, rate] of pairs) {
     if (count === 0) continue
@@ -65,4 +68,17 @@ export function validateRateCards(cards = []) {
     seen.add(identity)
     return Object.freeze({ ...card })
   })
+}
+/** Rate card from DSH's resolved-model `pricing` (catalog list prices). Not persisted; its version is. */
+export function catalogCard(provider, model, pricing) {
+  if (!pricing || !/^[A-Z]{3}$/.test(pricing.currency ?? '') || typeof pricing.source !== 'string') return undefined
+  const rate = value => value === undefined || units(value) !== undefined
+  const rates = r => rate(r.inputPerMillion) && rate(r.outputPerMillion) && r.inputPerMillion !== undefined && r.outputPerMillion !== undefined && rate(r.cacheReadPerMillion) && rate(r.cacheWritePerMillion)
+  if (!rates(pricing) || !(pricing.tiers ?? []).every(t => rates(t) && Number.isSafeInteger(t.inputTokensAbove) && t.inputTokensAbove >= 0)) return undefined
+  const pick = r => ({ inputPerMillion: r.inputPerMillion, outputPerMillion: r.outputPerMillion,
+    ...(r.cacheReadPerMillion !== undefined ? { cacheReadPerMillion: r.cacheReadPerMillion } : {}),
+    ...(r.cacheWritePerMillion !== undefined ? { cacheWritePerMillion: r.cacheWritePerMillion } : {}) })
+  return Object.freeze({ provider, model, currency: pricing.currency, inputMode: 'exclusive',
+    version: pricing.source.replace(/[^a-zA-Z0-9_.:/-]+/g, '-').slice(0, 160), source: pricing.source, ...pick(pricing),
+    ...(pricing.tiers?.length ? { tiers: pricing.tiers.map(t => ({ ...pick(t), inputTokensAbove: t.inputTokensAbove })) } : {}) })
 }

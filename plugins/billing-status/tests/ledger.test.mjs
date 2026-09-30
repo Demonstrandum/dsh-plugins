@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile, writeFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BillingLedger } from '../ledger.mjs'
-import { addAmounts, priceUsage, validateRateCards } from '../money.mjs'
+import { addAmounts, priceUsage, validateRateCards, catalogCard } from '../money.mjs'
 
 const card = { provider: 'openai', model: 'fixture-model', currency: 'USD', version: 'fixture-v1', source: 'https://example.com/prices', inputMode: 'exclusive', inputPerMillion: '2', outputPerMillion: '8', cacheReadPerMillion: '0.2', cacheWritePerMillion: '3' }
 const base = { sessionId: 'session-one', requestId: 'request-one', provider: 'openai', model: 'fixture-model', at: '2026-01-01T00:00:00.000Z' }
@@ -27,6 +27,38 @@ test('money is exact and cache categories/reasoning are not double-counted', () 
   assert.equal(priceUsage({ inputTokens: 1, outputTokens: 0 }, { ...card, inputPerMillion: '0.000000000000000001' }).amount, '0.000000000000000000000001')
   assert.throws(() => validateRateCards([{ ...card, provider: 'anthropic-oauth' }]))
   assert.throws(() => validateRateCards([{ ...card, inputPerMillion: 2 }]))
+})
+const catalogPricing = { currency: 'USD', inputPerMillion: '4', outputPerMillion: '20', cacheReadPerMillion: '0.2', cacheWritePerMillion: '5', source: 'pi-ai catalog 2026-09-22' }
+test('DSH catalog pricing: tiers select by total input, malformed pricing is rejected', () => {
+  const tiered = catalogCard('anthropic', 'm', { ...catalogPricing, tiers: [{ inputTokensAbove: 200000, inputPerMillion: '8', outputPerMillion: '40', cacheReadPerMillion: '0.4', cacheWritePerMillion: '10' }] })
+  assert.equal(tiered.version, 'pi-ai-catalog-2026-09-22')
+  assert.equal(priceUsage({ inputTokens: 1000, outputTokens: 0 }, tiered).amount, '0.004')
+  assert.equal(priceUsage({ inputTokens: 1000, outputTokens: 0, cacheReadTokens: 200000 }, tiered).amount, '0.088')
+  for (const bad of [undefined, { ...catalogPricing, currency: 'usd' }, { ...catalogPricing, inputPerMillion: 4 }, { ...catalogPricing, source: 1 }, { ...catalogPricing, tiers: [{ inputTokensAbove: -1, inputPerMillion: '1', outputPerMillion: '1' }] }]) assert.equal(catalogCard('anthropic', 'm', bad), undefined)
+})
+test('catalog prices estimate new usage and, at read time, usage recorded before prices were known', async t => {
+  const lookups = []
+  let pricing
+  const { ledger, directory } = await fixture(t, { rateCards: [], pricing: async (provider, model) => { lookups.push(`${provider}/${model}`); return pricing } })
+  const request = { ...base, provider: 'anthropic', model: 'claude-opus-5-5' }
+  await ledger.record({ ...request, phase: 'usage', usage: { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 1000000 } })
+  await ledger.record({ ...request, phase: 'finish' })
+  // No price yet: unpriced, and the ledger row carries no cost.
+  assert.equal((await ledger.snapshot('session-one')).counts.unpriced, 1)
+  pricing = catalogPricing
+  ledger.catalog.clear()
+  const later = await ledger.snapshot('session-one')
+  assert.deepEqual(later.totals, [{ kind: 'estimated', currency: 'USD', scope: 'model-tokens', amount: '0.206', source: 'pi-ai-catalog-2026-09-22' }])
+  assert.equal(later.counts.unpriced, 0)
+  assert.ok(!(await readFile(join(directory, 'ledger.jsonl'), 'utf8')).includes('estimated'), 'read-time estimates are not written back')
+  await ledger.record({ ...request, requestId: 'request-two', phase: 'usage', usage: { inputTokens: 10, outputTokens: 10 } })
+  await ledger.record({ ...request, requestId: 'request-two', phase: 'finish' })
+  assert.equal((await ledger.snapshot('session-one')).totals[0].amount, '0.20624')
+  assert.ok((await readFile(join(directory, 'ledger.jsonl'), 'utf8')).includes('pi-ai-catalog-2026-09-22'), 'live estimates persist their catalog version')
+  // Subscription routes never ask for list prices.
+  await ledger.record({ ...request, provider: 'anthropic-oauth', requestId: 'oauth', phase: 'usage', usage: { inputTokens: 10, outputTokens: 10 } })
+  await ledger.snapshot('session-one')
+  assert.ok(!lookups.some(key => key.startsWith('anthropic-oauth/')))
 })
 test('cumulative samples replace, distinct attempts add, other sessions are isolated', async t => {
   const { ledger } = await fixture(t)

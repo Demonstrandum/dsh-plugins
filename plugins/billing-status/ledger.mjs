@@ -2,7 +2,7 @@ import { constants } from 'node:fs'
 import { mkdir, open, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
-import { units, decimal, priceUsage, validateRateCards } from './money.mjs'
+import { units, decimal, priceUsage, validateRateCards, catalogCard } from './money.mjs'
 
 const identifier = value => typeof value === 'string' && /^[a-zA-Z0-9_.:/-]{1,160}$/.test(value) && !/sk-|bearer|password|secret/i.test(value) ? value : undefined
 const timestamp = value => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : undefined
@@ -54,9 +54,12 @@ function cleanRow(row) {
 
 /** Append-only request states, separate from DSH history: rewind is not a refund. */
 export class BillingLedger {
-  constructor({ directory, rateCards = [], staleAfterMs = 300_000, now = () => new Date().toISOString() }) {
+  constructor({ directory, rateCards = [], staleAfterMs = 300_000, now = () => new Date().toISOString(), pricing }) {
     this.directory = directory
     this.cards = validateRateCards(rateCards)
+    // DSH's resolved-model list prices (`ctx.llm.resolveModelInfo().pricing`), looked up per route/model.
+    this.pricing = pricing
+    this.catalog = new Map()
     this.staleAfterMs = staleAfterMs
     this.now = now
     this.rows = new Map()
@@ -111,6 +114,17 @@ export class BillingLedger {
       this.persistence = 'error'
     } finally { lines.close() }
   }
+  /** Configured card first, then DSH's catalog list prices; cached for ten minutes per route/model. */
+  async cardFor(provider, model, configured) {
+    if (configured) return configured
+    if (!this.pricing || oauth(provider)) return undefined
+    const key = `${provider}/${model}`, hit = this.catalog.get(key)
+    if (hit && Date.now() - hit.at < 600_000) return hit.card
+    let card
+    try { card = catalogCard(provider, model, await this.pricing(provider, model)) } catch { card = undefined }
+    this.catalog.set(key, { card, at: Date.now() })
+    return card
+  }
   record(observation) {
     if (this.closed) return Promise.resolve()
     if (this.queueDepth >= 2048) { this.persistence = 'error'; return Promise.resolve() }
@@ -129,7 +143,7 @@ export class BillingLedger {
         const usage = usageOf(observation.usage)
         if (usage) {
           row.usage = usage // cumulative sample replaces; never add successive samples
-          if (row.cost?.kind !== 'reported' && row.authKind !== 'oauth' && !oauth(row.provider)) row.cost = priceUsage(usage, row.card)
+          if (row.cost?.kind !== 'reported' && row.authKind !== 'oauth' && !oauth(row.provider)) row.cost = priceUsage(usage, await this.cardFor(row.provider, row.model, row.card))
         }
       }
       if (observation.phase === 'evidence') {
@@ -181,7 +195,15 @@ export class BillingLedger {
   }
   async snapshot(sessionId) {
     await this.tail
-    const records = [...this.rows.values()].filter(row => row.sessionId === sessionId)
+    const stored = [...this.rows.values()].filter(row => row.sessionId === sessionId)
+    // Usage recorded before prices were known (or before this feature) is priced at read time from the
+    // same catalog; nothing is written back, so a later receipt or restart never double-counts it.
+    const records = []
+    for (const row of stored) {
+      if (row.cost || !row.usage || row.authKind === 'oauth' || oauth(row.provider) || row.outcome === 'plan') { records.push(row); continue }
+      const cost = priceUsage(row.usage, await this.cardFor(row.provider, row.model, row.card))
+      records.push(cost && !(row.incomplete && units(cost.amount) === 0n) ? { ...row, cost } : row)
+    }
     const totals = new Map(), countedReceipts = new Set()
     const counts = { requests: records.length, pending: 0, unpriced: 0, subscription: 0, incomplete: 0 }
     // Map insertion order is last observation order, reconstructed from the append log.
@@ -198,13 +220,14 @@ export class BillingLedger {
         countedReceipts.add(receipt)
       }
       const key = `${row.cost.kind}/${row.cost.currency}/${row.cost.scope}`
-      const total = totals.get(key) ?? { kind: row.cost.kind, currency: row.cost.currency, scope: row.cost.scope, units: 0n }
+      const total = totals.get(key) ?? { kind: row.cost.kind, currency: row.cost.currency, scope: row.cost.scope, units: 0n, sources: new Set() }
       total.units += units(row.cost.amount)
+      if (row.cost.kind === 'estimated' && row.cost.pricingVersion) total.sources.add(row.cost.pricingVersion)
       totals.set(key, total)
     }
     const latest = this.latest.get(sessionId)
     const now = this.now()
-    return { version: 1, sessionId, totals: [...totals.values()].map(({ units: amount, ...rest }) => ({ ...rest, amount: decimal(amount) })), counts,
+    return { version: 1, sessionId, totals: [...totals.values()].map(({ units: amount, sources, ...rest }) => ({ ...rest, amount: decimal(amount), ...(sources.size === 1 ? { source: [...sources][0] } : {}) })), counts,
       ...(latest ? { latest: { ...latest, stale: Date.parse(now) - Date.parse(latest.at) > this.staleAfterMs || Date.parse(now) < Date.parse(latest.at) } } : {}),
       persistence: this.persistence, staleAfterMs: this.staleAfterMs,
       ...(records.length ? { coverageSince: records.reduce((a, row) => a < row.startedAt ? a : row.startedAt, records[0].startedAt) } : {}),
