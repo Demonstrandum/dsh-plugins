@@ -11,7 +11,7 @@ export interface BillingSnapshot {
   version: 1
   sessionId: string
   totals: { kind: 'reported' | 'estimated'; currency: string; amount: string; scope?: 'model-tokens' | 'provider-account' | 'openrouter-account'; source?: string }[]
-  counts: { requests: number; unpriced: number; pending: number; subscription: number; incomplete?: number }
+  counts: { requests: number; unpriced: number; pending: number; subscription: number; incomplete?: number; failed?: number }
   latest?: { provider: string; model: string; at: string | number; kind: 'plan' | 'extra' | 'unknown' | 'unobserved' | 'rejected' | 'quota'; stale?: boolean; windows: { label: string; usedPercent: number; resetAt?: string | number; windowMinutes?: number }[]; credits?: { hasCredits: boolean; unlimited: boolean; balance?: string } }
   persistence: 'ok' | 'error'
   coverageSince?: string | number
@@ -33,6 +33,7 @@ export function parseSnapshot(value: unknown, sessionId: string): BillingSnapsho
   const counts = value.counts
   if (!record(counts) || !['requests', 'unpriced', 'pending', 'subscription'].every(k => count(counts[k]))) return null
   if (counts.incomplete !== undefined && !count(counts.incomplete)) return null
+  if (counts.failed !== undefined && !count(counts.failed)) return null
   if (value.recovered !== undefined && typeof value.recovered !== 'boolean') return null
   if (value.now !== undefined && !timestamp(value.now)) return null
   if (!['ok', 'error'].includes(String(value.persistence))) return null
@@ -152,6 +153,7 @@ export function billingView(snapshot: BillingSnapshot | undefined, now: number, 
   if (snapshot.counts.unpriced > 0) notes.push({ key: 'unpriced', level: 'info', text: plural(snapshot.counts.unpriced, 'unpriced request') })
   if (snapshot.counts.pending > 0) notes.push({ key: 'pending', level: 'info', text: `${plural(snapshot.counts.pending, 'request')} pending` })
   if ((snapshot.counts.incomplete ?? 0) > 0) notes.push({ key: 'incomplete', level: 'info', text: `${plural(snapshot.counts.incomplete!, 'request')} incomplete` })
+  if ((snapshot.counts.failed ?? 0) > 0) notes.push({ key: 'failed', level: 'info', text: `${plural(snapshot.counts.failed!, 'failed request')} (not billed)` })
   if (quota && stale && !quota.unknown) notes.push({ key: 'stale', level: 'info', text: `Quota reading from ${shortTime(latest!.at)} is stale` })
   if (latest?.kind === 'rejected') notes.push({ key: 'rejected', level: 'danger', text: 'Last request rejected' })
   if (snapshot.persistence === 'error') notes.push({ key: 'persistence', level: 'danger', text: 'Not saved; totals may be partial' })

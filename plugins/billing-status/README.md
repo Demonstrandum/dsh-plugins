@@ -27,7 +27,7 @@ Only scoped inference requests are observed. No quota/credit snapshot is shared 
 | Single unnamed quota (Codex `primary` without a duration) | shield + `20%`; windows with durations get `5h`/`7d` rings |
 | Extra usage | shield + orange `Extra`, never a percentage |
 | Stale quota | the previous window labels struck through, rings dimmed, orange info icon |
-| Gaps (unpriced beside a known cost, pending, incomplete) | trailing orange info icon; hover lists them |
+| Gaps (unpriced beside a known cost, pending, incomplete, failed) | trailing orange info icon; hover lists them |
 | Storage failure, rejected request, access failure | trailing red warning icon; hover lists them |
 
 Amounts are compact display rounding over the host's exact decimals: at most two decimals below 10, one from 10 up, trailing zeros dropped, leading zero omitted after a symbol (`$0`, `$.04`, `$1.24`, `$52.4`, `$1024.1`); a positive amount that rounds to zero reads `<$.01`. `$` means USD: OpenRouter's `usage.cost` carries no currency field and OpenRouter documents USD as its billing currency; estimates use DSH's resolved-model `pricing` (list prices from the installed pi-ai catalog, published by the custom fork's `llm-pi-ai` adapter; see below), which is USD. `EUR`/`GBP` use their symbols, other currencies a code prefix; buckets are never converted or summed across currencies. Money is session history and does not go stale; only quota readings age (default five minutes, server clock).
@@ -80,6 +80,8 @@ Trusted host plugins can consume `ctx.billingStatus.snapshot(sessionId)` or publ
 ## Configuration
 
 All fields are optional.
+
+Counting: a request still in flight is only **pending** (its usage has not arrived). A request that ended in an error or cancellation **before any usage** is counted as **failed (not billed)**, not unpriced: nothing was processed (for example Anthropic's "credit balance is too low" rejection). A request that did process tokens and was then cancelled keeps its usage and is priced normally; one that completed without any usage stays **unpriced**.
 
 ### Estimates from DSH's model catalog
 

@@ -61,6 +61,11 @@ test('money glyphs: OpenRouter for its reported charges, API for estimates and u
   assert.equal(billingView(routed, at).unknownIcon, 'openrouter')
   assert.equal(billingView({ ...routed, latest: { ...routed.latest, provider: 'anthropic' } }, at).unknownIcon, 'api')
 })
+test('failed requests are a separate, not-billed note', () => {
+  const view = billingView({ ...base(), totals: [usd('1.2')], counts: { requests: 3, unpriced: 0, pending: 0, subscription: 0, incomplete: 2, failed: 2 } }, at)
+  same(view.notes.map(n => n.text), ['2 requests incomplete', '2 failed requests (not billed)'])
+  assert.equal(parseSnapshot({ ...base(), counts: { ...base().counts, failed: -1 } }, 'fixture-session'), null)
+})
 test('unknown cost with unpriced requests reads $ — with the count in its description', () => {
   const view = billingView({ ...base(), counts: { requests: 2, unpriced: 2, pending: 0, subscription: 0 } }, at)
   assert.equal(view.unknownMoney, true)

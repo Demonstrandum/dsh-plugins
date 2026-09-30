@@ -60,6 +60,21 @@ test('catalog prices estimate new usage and, at read time, usage recorded before
   await ledger.snapshot('session-one')
   assert.ok(!lookups.some(key => key.startsWith('anthropic-oauth/')))
 })
+test('in-flight requests are pending not unpriced; failures before any usage are not billed', async t => {
+  const { ledger } = await fixture(t, { rateCards: [] })
+  await ledger.record({ ...base, phase: 'start' })
+  let counts = (await ledger.snapshot('session-one')).counts
+  assert.equal(counts.pending, 1)
+  assert.equal(counts.unpriced, 0)
+  await ledger.record({ ...base, phase: 'finish', finishReason: 'error' })
+  counts = (await ledger.snapshot('session-one')).counts
+  assert.deepEqual([counts.pending, counts.unpriced, counts.incomplete, counts.failed], [0, 0, 1, 1])
+  // A cancelled request that did process tokens stays an (unpriced) cost, not a free failure.
+  await ledger.record({ ...base, requestId: 'partial', phase: 'usage', usage: { inputTokens: 10, outputTokens: 1 } })
+  await ledger.record({ ...base, requestId: 'partial', phase: 'finish', finishReason: 'aborted' })
+  counts = (await ledger.snapshot('session-one')).counts
+  assert.deepEqual([counts.unpriced, counts.incomplete, counts.failed], [1, 2, 1])
+})
 test('cumulative samples replace, distinct attempts add, other sessions are isolated', async t => {
   const { ledger } = await fixture(t)
   await ledger.record({ ...base, phase: 'start' })
@@ -108,12 +123,13 @@ test('a new request invalidates an old positive claim, including same-provider a
   await ledger.record({ ...request, at: '2026-01-01T00:00:02Z', phase: 'evidence', evidence: { outcome: 'plan-evidence' } })
   assert.equal((await ledger.snapshot('session-one')).latest.kind, 'unobserved')
 })
-test('missing usage stays unpriced, never becomes a free request', async t => {
+test('a completed request without usage stays unpriced, never becomes a free request', async t => {
   const { ledger } = await fixture(t)
   await ledger.record({ ...base, phase: 'start' })
-  await ledger.record({ ...base, phase: 'finish', finishReason: 'error' })
+  await ledger.record({ ...base, phase: 'finish', finishReason: 'stop' })
   const snapshot = await ledger.snapshot('session-one')
   assert.equal(snapshot.counts.unpriced, 1)
+  assert.equal(snapshot.counts.failed, 0)
   assert.deepEqual(snapshot.totals, [])
 })
 test('reload preserves costs but not quota; history/forks do not inherit costs', async t => {

@@ -205,14 +205,21 @@ export class BillingLedger {
       records.push(cost && !(row.incomplete && units(cost.amount) === 0n) ? { ...row, cost } : row)
     }
     const totals = new Map(), countedReceipts = new Set()
-    const counts = { requests: records.length, pending: 0, unpriced: 0, subscription: 0, incomplete: 0 }
+    const counts = { requests: records.length, pending: 0, unpriced: 0, subscription: 0, incomplete: 0, failed: 0 }
     // Map insertion order is last observation order, reconstructed from the append log.
     // Newer receipt corrections replace older amounts even on a separate request ID.
     for (const row of records.slice().reverse()) {
       if (!row.finished) counts.pending++
       if (row.incomplete) counts.incomplete++
       if (row.outcome === 'plan') counts.subscription++
-      if (!row.cost) { if (row.outcome !== 'plan') counts.unpriced++; continue }
+      if (!row.cost) {
+        // In flight: counted as pending until its usage arrives. Failed before any usage (e.g. a
+        // rejected request): nothing was processed, so it is not an unknown cost.
+        if (row.outcome === 'plan' || !row.finished) continue
+        if (row.incomplete && !row.usage) counts.failed++
+        else counts.unpriced++
+        continue
+      }
       // Reconciliation of the same provider response is not another charge.
       if (row.cost.kind === 'reported' && row.responseId) {
         const receipt = `${row.provider}/${row.responseId}`
