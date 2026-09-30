@@ -493,6 +493,15 @@ the `Symbol.for` failure mode of `promotion-loop-and-duplicate-dsh-tools.md`
 at package scale. `verifyFirstParty()` caught it; `stage-dsh.mjs` now also
 refuses to run under pnpm < 12.
 
+Runner: **`macos-26`** (arm64, macOS 26 SDK) — the wrapper's Liquid Glass
+path uses `NSGlassEffectView`, and `#available` guards the call at run time
+only; on `macos-15` it does not compile. Xcode on the image supplies
+`SetFile`; the runner's logged-in session lets Finder write the DMG layout.
+Four trial runs on the fork to get here (harness build order → pnpm 12 for
+peers → the SDK → green); the fourth's DMG was downloaded, verified (sha,
+embedded icon, `codesign --verify`, layout, volume icon) and its server
+booted locally with all 25 plugins active.
+
 Testing it needs the file on the repo's **default branch** (GitHub only
 registers `workflow_dispatch` there) — on the fork the default was
 temporarily switched to the PR branch for the trial run, then back.
