@@ -69,13 +69,19 @@ jobs:
           cache: pnpm
           cache-dependency-path: deepseek-harness/pnpm-lock.yaml
 
+      # KNOWN BLOCKER (2026-09-30): at the currently pinned harness commit,
+      # `build:lib:host` fails from a CLEAN tree with 55 TS errors — the client
+      # files of session-controller / workspace-files import the `/remote`
+      # Typert artifacts that the same build emits later (a long-lived checkout
+      # never sees this; its stale lib/ breaks the cycle). Nothing in this repo
+      # can fix that; it is a harness build-graph defect. Until it is fixed
+      # upstream this job fails here, and releases are cut locally with
+      # `pnpm release-app` from a worktree at the pin (recipe). The job stays
+      # so the pipeline is one green harness commit away from working.
       - name: Build the harness (pinned commit)
         working-directory: deepseek-harness
         run: |
           pnpm install --frozen-lockfile
-          # A clean tree: the host tsdown pass emits the Typert artifacts the
-          # host tsc pass imports; run it once first (no typecheck), then build.
-          pnpm exec tsdown --env.DSH_BUILD_FACE host
           pnpm build
 
       - name: Release notes
