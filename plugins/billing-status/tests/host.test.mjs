@@ -50,3 +50,21 @@ test('host mounts without OAuth/audit/commands/connection plugins and disposes c
     assert.equal(globalThis.fetch, original)
   } finally { globalThis.fetch = original; await rm(directory, { recursive: true, force: true }) }
 })
+
+test('ownership service disappearance cannot fall back to single-user access', async () => {
+  let mounted = true
+  const handler = snapshotHandler({ get: key => mounted && key === 'sessionRequestAccess' ? { canRead: () => true } : undefined }, { snapshot: async sessionId => ({ sessionId }) })
+  assert.equal((await handler(request())).status, 200)
+  mounted = false
+  assert.equal((await handler(request())).status, 403)
+})
+
+test('ownership latch survives route and plugin context recreation within one root', async () => {
+  const root = {}, services = new Map([['sessionOwners', {}]])
+  const context = () => ({ root, get: name => services.get(name) })
+  const ledger = { snapshot: async sessionId => ({ sessionId }) }
+  assert.equal((await snapshotHandler(context(), ledger)(request())).status, 403)
+  services.clear()
+  assert.equal((await snapshotHandler(context(), ledger)(request())).status, 403)
+  assert.equal((await snapshotHandler({ root: {}, get: () => undefined }, ledger)(request())).status, 200)
+})

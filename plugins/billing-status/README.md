@@ -1,6 +1,6 @@
 # Billing status
 
-An **opt-in, out-of-tree** billing observer, request ledger, and compact composer footer. No OAuth command, audit plugin, prompt-excision plugin, or model-picker runtime dependency. No prompt changes, authentication changes, provider polling, generation lookup calls, or forced transport changes.
+An **opt-in, out-of-tree** billing observer, request ledger, and compact composer footer. No OAuth command, audit plugin, prompt-excision plugin, or model-picker runtime dependency. No prompt changes, provider-authentication changes, provider polling, generation lookup calls, or forced transport changes.
 
 **Status:** first implementation; offline adapter/transport and isolated UI verification. Not installed into a live profile. This is not an invoice or a provider-neutral subscription guarantee.
 
@@ -26,7 +26,7 @@ The plugin uses `conversation.composer.dock`, order 100 within that slot. It cur
 
 Host: normal DSH `llm` service. `connection` and `commands` are optional subcontexts. Browser: `slots` plus the normal platform React modules. No other `tali-*` plugin must be enabled. There is no dependency on the `/oauth` command's existence: OAuth transport and credential refresh remain owned by the provider adapter.
 
-The new collector uses one reference-counted passive fetch broker for its own instances. The existing Anthropic audit still has its original wrapper. Both load/unload orders are tested: wrappers compose and become inert on teardown without clobbering another owner's fetch. **They do not yet share one extracted library.** The existing audit's enforcement settings and defaults are untouched; billing never loads or enables that plugin.
+Billing and the audit's explicit `mode: observe` use one reference-counted, versioned passive fetch protocol. The [canonical library](../../libraries/passive-fetch/README.md) is shipped as identical generated copies inside each package: no sibling-directory imports or mandatory enabled plugins. They share one wrapper and response-metadata capture while retaining independent async scopes. The OpenRouter parser is selected once and multicasts receipts to billing subscribers. Packed-package and both load/unload-order tests verify this. The audit's separate enforcing branch, settings and defaults are untouched; billing never loads or enables it.
 
 ## Durable accounting
 
@@ -45,13 +45,17 @@ Files default to `$DSH_HOME/billing-status/ledger.jsonl` and `writer.lock`. This
 
 `GET /api/billing-status/snapshot?sessionId=...` is registered through DSH's authenticated Fetch API. It is document-relative in the client and uses `Cache-Control: no-store`. No HTTP ingestion or account-list endpoint exists.
 
-For a normal single-user DSH composition, the existing DSH browser authentication is the boundary. If the optional `sessionOwners` attribution service exists, the endpoint **fails closed** unless a trusted host service named `billingAccess` supplies:
+For a normal single-user DSH composition, the existing DSH browser authentication is the boundary. If the optional `sessionOwners` attribution service exists, the endpoint **fails closed** unless a trusted host service named `billingAccess` (or the optional remote adapter's `sessionRequestAccess`) supplies:
 
 ```ts
 canRead(request: Request, sessionId: string): boolean | Promise<boolean>
 ```
 
-Only literal `true` authorizes access. This must verify a real authenticated principal against ownership; raw client headers and a guessed session ID aren't proof. Attribution alone is not authorization. No verified adapter for the current remote ownership service is shipped yet, so those compositions display `Billing unavailable` rather than expose financial data. This is a rollout prerequisite, not a request to disable ownership checks.
+Only literal `true` authorizes access. Raw client headers and a guessed session ID aren't proof. Attribution alone is not authorization: the legacy session tracker can observe malformed/rejected requests, so its records are never used as financial permission.
+
+The optional remote adapter checks a verified requester against **explicit operator-configured session-to-login bindings**, not an inferred owner. Its `billingSessionOwners` configuration defaults to `{}` and denies every unbound session. See [remote authorization setup](../dsh-tailscale-remote/README.md#billing-read-authorization). An authenticated direct loopback caller is mapped to the node's known self login; a proxied caller needs an identity admission, not merely a token/QR cookie. A bounded, one-use 256-bit grant binds the exact snapshot request and expires after 15 seconds. Client-supplied copies are stripped by the proxy. No binding is learned from request bodies or historical owner labels.
+
+Once this Cordis root observes ownership-aware services (or the remote adapter marks it), loss of those services **never falls back to single-user access**, including connection/plugin remounts. Independent roots remain independent. Unknown login, unbound session, legacy-only adapter, token-only caller or unavailable authorization produces `Billing unavailable`. This narrowly protects the new snapshot route; it is not a retrofit of multi-tenant security onto all DSH APIs/tools.
 
 Trusted host plugins can consume `ctx.billingStatus.snapshot(sessionId)` or publish allowlisted observations through `ctx.billingStatus.observe(observation)`. There is no browser path to that ingestion method. The optional `/billing` command operates on the calling agent's own session.
 
@@ -99,7 +103,7 @@ pnpm test
 Real DSH/pi-ai tests, **all provider network replaced with fixtures**, from the checkout root:
 
 ```sh
-node --import tsx/esm --test ../plugins/billing-status/tests/collector-integration.mjs ../plugins/billing-status/tests/integration.mjs
+node --import tsx/esm --test ../plugins/billing-status/tests/collector-integration.mjs ../plugins/billing-status/tests/integration.mjs ../plugins/billing-status/tests/authorization-integration.mjs
 ```
 
 The browser fixture and its exact launch command are in [tests/fixture-server.mjs](tests/fixture-server.mjs). It serves mock data and a shell-shaped dock, not another production DSH. No provider credentials are needed. Run only while doing isolated verification, then stop it.
@@ -108,8 +112,8 @@ A bundle patch is supplied for a later explicitly approved install. The package 
 
 ## Limitations and next steps
 
-1. Verified multi-user ownership authorization adapter before shared/remote rollout.
-2. Optional shared-library migration with the legacy audit, preserving explicit enforcement settings.
+1. Review and explicitly configure remote session-to-login bindings before rollout. Automatic financial ownership discovery/migration is deliberately unsupported; do not copy unverified attribution records into the access policy.
+2. Activate the actual package in an isolated DSH preview before a separately authorized live install. Current browser verification is a mock fixture, not a deployed instance.
 3. Codex WebSocket telemetry through a supported hook; never force SSE to obtain billing data.
 4. OpenRouter generation-lookup reconciliation and more complete BYOK reporting; no extra network calls in this version.
 5. Maintained rate-card acquisition, actual served-model/service-tier pricing, multimodal and hosted-tool fees. Current estimates price the explicitly configured requested model's normalized tokens only.

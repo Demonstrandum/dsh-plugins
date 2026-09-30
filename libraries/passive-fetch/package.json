@@ -1,0 +1,8 @@
+{
+  "name": "tali-passive-fetch",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./index.mjs",
+  "scripts": { "sync": "node sync.mjs", "check": "node sync.mjs --check && node --test shared.test.mjs" }
+}

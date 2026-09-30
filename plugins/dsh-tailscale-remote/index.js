@@ -55,6 +55,7 @@ import { FORWARD_PATH, handleForwardUpgrade } from './forward.mjs'
 import { startProxy } from './proxy.mjs'
 import { defaultLogDir, installRelayAgent, relayStatus, restartRelayAgent, stopRelayAgent, uninstallRelayAgent } from './relay/launch-agent.mjs'
 import { SessionOwners, defaultOwnersFile, loginOf } from './owners.mjs'
+import { createSessionReadAccess, markSessionReadPolicy } from './session-read-access.mjs'
 import { attachClientTracker, performAction, processTable, workspaceOfSession } from './server.mjs'
 import { defaultStateFile, generateToken, loadState, parseUserList, saveState } from './state.mjs'
 import { createTailscaleManager, normalizeMountPath } from './tailscale.mjs'
@@ -72,6 +73,7 @@ export const Config = Schema.object({
   tailscalePath: Schema.string().default(''),
   stateFile: Schema.string().default(''),
   ownersFile: Schema.string().default(''),
+  billingSessionOwners: Schema.dict(Schema.string()).default({}),
   cookieName: Schema.string().default('dsh-tailscale-remote'),
   identityOperators: Schema.boolean().default(true),
   relayStart: Schema.string().default('pnpm dsh web --no-open'),
@@ -229,6 +231,7 @@ export function apply(ctx, config) {
       selfLogin: () => lastRoute?.selfLogin,
       selfAddresses: () => lastRoute?.selfAddresses ?? [],
       identityOperators: () => config.identityOperators,
+      sessionReadHeaders: sessionReadAccess.proxyHeaders,
       publicHosts,
       cookieName: config.cookieName,
       controlPrefix: CONTROL_CHANNEL,
@@ -429,6 +432,22 @@ export function apply(ctx, config) {
     log: warn,
   })
   ctx.effect(() => () => { void owners.dispose() }, 'tailscale-remote: session owners')
+  const sessionReadAccess = createSessionReadAccess({
+    // Explicit operator bindings only: sessionOwners is attribution, NOT authorization.
+    lookupOwner: sessionId => Object.hasOwn(config.billingSessionOwners ?? {}, sessionId) ? config.billingSessionOwners[sessionId] : undefined,
+    selfLogin: () => lastRoute?.selfLogin,
+    requestRejection: request => ctx.connection.requestRejection(request),
+  })
+  markSessionReadPolicy(ctx.root)
+  ctx.provide('sessionRequestAccess', { canRead: sessionReadAccess.canRead })
+  ctx.effect(() => {
+    // Run before DSH converts IncomingMessage into a Fetch Request.
+    httpServer?.prependListener?.('request', sessionReadAccess.localRequest)
+    return () => {
+      httpServer?.removeListener?.('request', sessionReadAccess.localRequest)
+      sessionReadAccess.dispose()
+    }
+  }, 'tailscale-remote: verified session-read grants')
   const tracker = typeof httpServer?.on === 'function'
     ? attachClientTracker(httpServer, {
       onSession: (facts, found) => {

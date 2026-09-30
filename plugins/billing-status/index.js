@@ -22,15 +22,25 @@ export const Config = { '~standard': { version: 1, vendor: 'tali-billing-status'
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'vary': 'Cookie' } })
 
 /** DSH authenticates /api before this handler. Never treat arbitrary headers as identities. */
+// Survives connection and plugin remounts, but never leaks policy across independent Cordis roots.
+const ACCESS_MODES = Symbol.for('tali-billing-status.access-modes.v1')
+const accessModes = globalThis[ACCESS_MODES] ??= new WeakMap()
 export function snapshotHandler(ctx, ledger) {
+  const root = ctx.root ?? ctx
+  let mode = accessModes.get(root)
+  if (!mode) { mode = { ownershipRequired: false }; accessModes.set(root, mode) }
+  const ownershipServices = ['billingAccess', 'sessionRequestAccess', 'sessionOwners']
+  if (ownershipServices.some(name => ctx.get(name) !== undefined)) mode.ownershipRequired = true
+  for (const name of ownershipServices) ctx.inject?.([name], () => { mode.ownershipRequired = true })
   return async request => {
     const sessionId = new URL(request.url).searchParams.get('sessionId') ?? ''
     if (!/^session-[a-zA-Z0-9_-]{1,140}$/.test(sessionId)) return json({ error: 'Invalid session' }, 400)
     try {
-      const access = ctx.get('billingAccess')
+      const access = ctx.get('billingAccess') ?? ctx.get('sessionRequestAccess')
+      if (access !== undefined || ctx.get('sessionOwners') !== undefined) mode.ownershipRequired = true
       if (access !== undefined) {
         if (typeof access.canRead !== 'function' || await access.canRead(request, sessionId) !== true) return json({ error: 'Billing unavailable' }, 403)
-      } else if (ctx.get('sessionOwners') !== undefined) {
+      } else if (mode.ownershipRequired) {
         // Attribution is not authorization. Multi-user compositions need a verified principal seam.
         return json({ error: 'Billing unavailable' }, 403)
       }
@@ -49,7 +59,7 @@ export function apply(ctx, input) {
   })
   installCollector(ctx, observation => { void ledger.record(observation) })
   ctx.inject(['connection'], web => {
-    web.effect(() => web.connection.fetch.register({ path: SNAPSHOT_PATH, methods: ['GET'], requestBody: 'buffered', fetch: snapshotHandler(ctx, ledger) }), 'billing-status: snapshot route')
+    web.effect(() => web.connection.fetch.register({ path: SNAPSHOT_PATH, methods: ['GET'], requestBody: 'buffered', fetch: snapshotHandler(web, ledger) }), 'billing-status: snapshot route')
   })
   ctx.inject(['commands'], commands => {
     commands.effect(() => commands.commands.register({

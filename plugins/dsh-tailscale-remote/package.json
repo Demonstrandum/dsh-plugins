@@ -20,6 +20,7 @@
     "desktop-branding.js",
     "server.mjs",
     "owners.mjs",
+    "session-read-access.mjs",
     "relay/relay.mjs",
     "relay/launch-agent.mjs",
     "scripts/cli.mjs",

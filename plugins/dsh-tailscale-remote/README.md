@@ -588,3 +588,26 @@ DSH_HOME=/tmp/tailscale-remote-home pnpm dsh web --patch /tmp/tailscale-remote-p
 ```
 
 System-level story, facts and troubleshooting: `recipes/tailscale-remote-plugin.md`.
+
+## Billing read authorization
+
+Optional integration with [billing-status](../billing-status/README.md); neither plugin requires the other to be enabled. This adapter is source-tested, not automatically installed or activated. It authenticates the requester but does **not** infer financial ownership from the Server pane's historical attribution labels.
+
+An operator must explicitly bind each authorized session to a login in this plugin's configuration. Merge the field into the full existing row config; DSH patch config values replace rather than deep-merge. Example placeholders only:
+
+```yaml
+billingSessionOwners:
+  session-example: user@example.com
+```
+
+Default `{}` denies all sessions. No wildcard, role expansion, actor fallback, first-view claim or automatic migration from `sessionOwners` exists. A binding is an explicit permission decision, not evidence of who paid. Review account/session association before adding it; remove it to revoke permission. Config remount disposes all outstanding grants. Do not edit a live profile without explicit approval.
+
+The admitting proxy mints a one-use 256-bit capability for the exact billing GET/session path, after identity admission. It strips client-supplied capability headers, retains grants for at most 15 seconds and bounds storage to 4096 entries. The Fetch handler consumes the capability before comparing the verified login to the explicit binding. Token/QR-cookie admission alone has no identified person and is denied. An authenticated, non-forwarded, direct loopback request uses the node's known self login; unknown/tagged-node self identity is denied. Forged ownership labels or malformed session request bodies cannot change this policy.
+
+The optional `sessionRequestAccess.canRead(Request, sessionId)` service fails closed, and the adapter marks its Cordis root as ownership-aware even before billing mounts. Billing preserves that mark across plugin/connection remounts. Only the new billing snapshot route is covered; this is not general multi-tenant DSH API isolation. The older tracker remains attribution only.
+
+Tests use ephemeral mock servers and fixture credentials; they neither run Tailscale commands nor use a real account:
+
+```sh
+node --test tests/session-read-access.test.mjs tests/proxy.test.mjs
+```

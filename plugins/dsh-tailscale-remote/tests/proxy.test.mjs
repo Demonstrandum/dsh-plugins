@@ -19,7 +19,7 @@ const seen = []
 let token = 'T0kenT0kenT0kenT0ken'
 let allowedUsers = ['alice@example.com']
 let identityOperators = false
-let selfLogin = 'the maintainer@Example.com'
+let selfLogin = 'user@Example.com'
 const SELF_ADDRESS = '100.78.174.43'
 
 function fetchProxy(path, { method = 'GET', headers = {}, body } = {}) {

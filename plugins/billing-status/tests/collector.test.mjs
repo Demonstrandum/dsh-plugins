@@ -177,24 +177,25 @@ test('SSE split unicode, CRLF, multiline, oversized frames and malformed metadat
 })
 
 for (const auditFirst of [true, false]) for (const auditUnloadsFirst of [true, false]) {
-  test(`legacy passive audit composition: auditFirst=${auditFirst}, auditUnloadsFirst=${auditUnloadsFirst}`, async () => {
+  test(`shared passive audit capture: auditFirst=${auditFirst}, auditUnloadsFirst=${auditUnloadsFirst}`, async () => {
     const target = { fetch: async () => new Response(null, { headers }) }, original = target.fetch
     const auditEvents = [], billingEvents = [], ctx = { effect: fn => fn(), on(name, fn) { this.listener = fn; return () => {} } }
     let audit, dispose
     const addAudit = () => { audit = installAudit({ target, mode: 'observe', report: (state, event) => auditEvents.push(event) }) }
     const addBilling = () => { dispose = installCollector(ctx, value => billingEvents.push(value), { target }) }
-    if (auditFirst) { addAudit(); addBilling() } else { addBilling(); addAudit() }
+    let sharedWrapper
+    if (auditFirst) { addAudit(); sharedWrapper = target.fetch; addBilling() } else { addBilling(); sharedWrapper = target.fetch; addAudit() }
+    assert.equal(target.fetch, sharedWrapper, 'second observer must join the same capture wrapper')
     try {
       await audit.run({}, () => consume(ctx.listener(options, async function* () { await target.fetch(A, init); yield finish })))
       assert.equal(auditEvents.length, 1)
       assert.equal(billingEvents.find(x => x.phase === 'evidence').evidence.outcome, 'plan-evidence')
       if (auditUnloadsFirst) { audit.dispose(); dispose() } else { dispose(); audit.dispose() }
-      // Out-of-order disposal may leave a harmless inactive wrapper, but must never
-      // restore an active disposed collector or intercept a subsequent unscoped call.
+      // Both subscribers share one owner; either disposal order restores native fetch.
       const counts = [auditEvents.length, billingEvents.length]
       assert.equal((await target.fetch(A, init)).status, 200)
       assert.deepEqual([auditEvents.length, billingEvents.length], counts)
-      if (auditFirst === !auditUnloadsFirst) assert.equal(target.fetch, original)
+      assert.equal(target.fetch, original)
     } finally { dispose(); audit.dispose() }
   })
 }

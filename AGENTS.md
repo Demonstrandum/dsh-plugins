@@ -331,7 +331,7 @@ can reproduce or maintain it:
 
 ### Recipe index
 
-- [billing-status-plugin.md](recipes/billing-status-plugin.md) — first isolated provider-neutral billing implementation: passive native receipts and OAuth quota evidence, explicit token estimates, durable decimal accounting, optional sibling-plugin coexistence, a compact shield footer, offline/provider/browser tests, and the ownership-authorization rollout gate; not installed live.
+- [billing-status-plugin.md](recipes/billing-status-plugin.md) — first isolated provider-neutral billing implementation: passive native receipts and OAuth quota evidence, explicit token estimates, durable decimal accounting, shared optional passive capture with the audit, a compact shield footer, offline/provider/browser tests, and explicit session-to-login authorization bindings with fail-closed lifecycle handling; not installed live.
 - [provider-neutral-billing-status-plan.md](recipes/provider-neutral-billing-status-plan.md) — original research and broader roadmap for provider-neutral billing: Tau cost versus quota UI, provider contracts, accounting scopes, optional integrations, placement, and remaining no-fork integration gaps.
 
 - [oauth-flow-names-and-routes.md](recipes/oauth-flow-names-and-routes.md) — short `/oauth` flow names versus isolated `-oauth` provider routes for every supported catalog flow, the command-oauth rename, prerequisite questions and device codes, credential isolation, offline verification, and explicit rollout.

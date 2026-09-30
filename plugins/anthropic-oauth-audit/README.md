@@ -8,6 +8,7 @@ Configure `mode: observe` for billing visibility without enforcement. This mode 
 
 Only scoped `anthropic-oauth` calls to the official HTTPS Messages endpoint, using POST with an OAuth Bearer token and no API-key header, can produce evidence. Authentication headers are examined transiently, never stored or logged. Native Headers and plain string-valued header records are supported; iterable/accessor/coercible metadata passes through without observation rather than risking consumption or mutation. Redirected or unsupported response metadata also remains unobserved. Refresh requests and unrelated endpoints pass unchanged. No probes, polling, token refreshes, credential reads, or account API calls are added.
 
+Observe mode now shares the [passive fetch protocol](../../libraries/passive-fetch/README.md) with the optional billing-status plugin. Each package ships an identical generated copy and works alone; when both are enabled, one wrapper captures native response metadata once and dispatches to independent async scopes. Billing does not enable this plugin, change the default mode, or weaken explicit enforcement. Edit only the canonical library and regenerate/check the copies as documented there.
 ## Audit mode
 
 - Uses the existing `/oauth` credential flow and pi-ai transport; it does not read credential files, implement login, refresh tokens itself, or fall back to API keys.

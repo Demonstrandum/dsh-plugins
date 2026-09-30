@@ -6,7 +6,7 @@
   "type": "module",
   "main": "index.js",
   "exports": { ".": "./index.js", "./package.json": "./package.json" },
-  "files": ["index.js", "transport.mjs", "evidence.mjs", "billing.mjs", "cordis.patch.yml", "README.md"],
+  "files": ["index.js", "transport.mjs", "passive-fetch.mjs", "evidence.mjs", "billing.mjs", "cordis.patch.yml", "README.md"],
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
   "scripts": {
     "check": "node --check index.js && node --check transport.mjs && node --check billing.mjs && node --test tests/*.test.mjs",

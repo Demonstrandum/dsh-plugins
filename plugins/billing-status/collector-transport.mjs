@@ -1,62 +1,6 @@
-import { AsyncLocalStorage } from 'node:async_hooks'
-import { types } from 'node:util'
+import { acquirePassiveFetch } from './passive-fetch.mjs'
 import { parseTelemetryJSON, openRouterEvidence } from './providers.mjs'
-
-const OWNER = Symbol.for('tali.billing-status.passive-fetch-broker.v1')
-function data(value) {
-  if (value === undefined) return {}
-  if (!value || typeof value !== 'object' || types.isProxy(value)
-    || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return undefined
-  const descriptors = Object.getOwnPropertyDescriptors(value)
-  if (Reflect.ownKeys(descriptors).some(key => !('value' in descriptors[key]))) return undefined
-  return Object.fromEntries(Object.entries(descriptors).map(([key, descriptor]) => [key, descriptor.value]))
-}
-const native = (Class, key, object) => Object.getOwnPropertyDescriptor(Class.prototype, key).get.call(object)
-
-/** Never coerce custom inputs or read the request body. Unsupported metadata passes through. */
-export function requestKind(input, init) {
-  if (types.isProxy(input)) return undefined
-  const options = data(init)
-  if (!options) return undefined
-  const request = input instanceof Request ? input : undefined
-  const urlText = request ? native(Request, 'url', request) : typeof input === 'string' ? input
-    : input instanceof URL ? native(URL, 'href', input) : undefined
-  if (!urlText) return undefined
-  const url = new URL(urlText)
-  const method = options.method ?? (request ? native(Request, 'method', request) : 'GET')
-  if (typeof method !== 'string' || method.toUpperCase() !== 'POST' || url.username || url.password) return undefined
-  let kind
-  if (url.origin === 'https://api.anthropic.com' && url.pathname === '/v1/messages') kind = 'anthropic'
-  else if (url.origin === 'https://openrouter.ai' && url.pathname === '/api/v1/chat/completions') kind = 'openrouter'
-  else if (url.origin === 'https://chatgpt.com' && url.pathname === '/backend-api/codex/responses') kind = 'openai-codex'
-  if (!kind) return undefined
-  const raw = options.headers ?? (request ? native(Request, 'headers', request) : undefined)
-  if (types.isProxy(raw)) return undefined
-  let headers
-  if (raw instanceof Headers) headers = raw
-  else {
-    const entries = data(raw)
-    if (!entries || Object.values(entries).some(value => typeof value !== 'string')) return undefined
-    headers = new Headers(entries)
-  }
-  const bearer = Headers.prototype.get.call(headers, 'authorization') ?? ''
-  if (kind === 'anthropic') {
-    if (/^Bearer sk-ant-oat[^\s]*$/i.test(bearer) && !Headers.prototype.has.call(headers, 'x-api-key')) kind = 'anthropic-oauth'
-    else return undefined
-  }
-  if (kind === 'openai-codex' && !/^Bearer \S+$/i.test(bearer)) return undefined
-  return { kind, origin: url.origin, pathname: url.pathname }
-}
-
-function responseMeta(response, endpoint) {
-  if (types.isProxy(response) || Object.getPrototypeOf(response) !== Response.prototype
-    || ['url', 'redirected', 'status', 'headers', 'body'].some(key => Object.hasOwn(response, key))) return undefined
-  const url = native(Response, 'url', response)
-  const destination = url ? new URL(url) : undefined
-  if (native(Response, 'redirected', response) || destination
-    && (destination.origin !== endpoint.origin || destination.pathname !== endpoint.pathname)) return undefined
-  return { status: native(Response, 'status', response), headers: native(Response, 'headers', response) }
-}
+export { requestKind } from './passive-fetch.mjs'
 
 /** Bounded parser: at most 64K UTF-16 code units per SSE event or 256K for JSON.
  * Oversized SSE events are discarded through their blank line, not truncated into fake JSON.
@@ -160,44 +104,15 @@ export function tapResponse(response, publish) {
   return tapped
 }
 
-/** A process-wide broker for this collector. Existing wrappers remain in the chain;
- * disposing out of order leaves an inert passthrough rather than clobbering another owner.
- * The legacy audit has its own ALS/wrapper; it can migrate to this broker separately.
+/** Join the shared passive capture protocol used by audit observe mode as well.
+ * Body parsing remains provider-specific; the shared broker selects one parser
+ * and multicasts its sanitized evidence to interested billing subscribers.
  */
 export function acquireBroker(target = globalThis) {
-  if (target[OWNER]) { target[OWNER].references++; return target[OWNER] }
-  const scope = new AsyncLocalStorage()
-  const original = target.fetch
-  const broker = {
-    references: 1, active: true,
-    run: (state, callback) => scope.run(state, callback),
-    release() {
-      if (--broker.references) return
-      broker.active = false
-      if (target.fetch === wrapped) target.fetch = original
-      if (target[OWNER] === broker) delete target[OWNER]
-      scope.disable()
-    },
+  const subscription = acquirePassiveFetch(target)
+  const bodyTap = Object.freeze({ key: 'openrouter-cost-v1', apply: tapResponse })
+  return {
+    run: (state, callback) => subscription.run(state ? { ...state, bodyTap } : undefined, callback),
+    release: subscription.release,
   }
-  async function wrapped(input, init) {
-    const state = scope.getStore()
-    if (!broker.active || !state?.active()) return original.call(this, input, init)
-    let endpoint, attempt
-    try { endpoint = requestKind(input, init); if (endpoint) attempt = state.beginHTTP(endpoint) } catch { /* passive only */ }
-    // Do not catch/wrap the native fetch failure or alter input/init.
-    const response = await original.call(this, input, init)
-    if (!endpoint || !attempt || !broker.active || !state.active()) return response
-    try {
-      const meta = responseMeta(response, endpoint)
-      if (!meta) return response
-      state.headers(attempt, endpoint, meta)
-      if (endpoint.kind === 'openrouter' && meta.status >= 200 && meta.status < 300) {
-        return tapResponse(response, evidence => { if (broker.active && state.active()) state.evidence(attempt, evidence) })
-      }
-    } catch { /* Metadata/tap setup failure falls back to the untouched response. */ }
-    return response
-  }
-  target[OWNER] = broker
-  target.fetch = wrapped
-  return broker
 }

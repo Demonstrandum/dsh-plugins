@@ -9,7 +9,7 @@ import { normalizeMountPath, routeUrl, isTailscaleAddress, selfIdentity } from '
 describe('self identity', () => {
   const status = {
     Self: { UserID: 6481056089841494, TailscaleIPs: ['100.78.174.43', 'fd7a:115c:a1e0::e33a:ae2c'], Tags: null },
-    User: { '6481056089841494': { LoginName: 'the maintainer@example.com' }, '7159215974098032': { LoginName: 'tagged-devices' } },
+    User: { '6481056089841494': { LoginName: 'User@Example.com' }, '7159215974098032': { LoginName: 'tagged-devices' } },
   }
   it('reads the node user login (lower-cased) and its tailnet addresses', () => {
     assert.deepEqual(selfIdentity(status), { selfLogin: 'user@example.com', selfAddresses: ['100.78.174.43', 'fd7a:115c:a1e0::e33a:ae2c'] })

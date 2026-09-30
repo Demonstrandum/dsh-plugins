@@ -1,44 +1,45 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { types } from 'node:util'
 import { inspectRequest, responseEvidence } from './evidence.mjs'
+import { acquirePassiveFetch } from './passive-fetch.mjs'
 
 const OWNER = Symbol.for('tali.anthropic-oauth-audit.fetch-owner')
 
-function dataProperties(value) {
-  if (value === undefined) return {}
-  if (value === null || typeof value !== 'object' || types.isProxy(value)
-    || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return undefined
-  const properties = Object.getOwnPropertyDescriptors(value)
-  if (Reflect.ownKeys(properties).some(key => !('value' in properties[key]))) return undefined
-  return properties
-}
-
-/** Inspect only reusable, non-coercing metadata; unsupported fetch inputs pass untouched. */
-function observedOAuthRequest(input, init) {
-  if (types.isProxy(input)) return false
-  const options = dataProperties(init)
-  if (!options) return false
-  const request = input instanceof Request ? input : undefined
-  const urlText = request ? Object.getOwnPropertyDescriptor(Request.prototype, 'url').get.call(request)
-    : typeof input === 'string' ? input
-      : input instanceof URL ? Object.getOwnPropertyDescriptor(URL.prototype, 'href').get.call(input) : undefined
-  if (urlText === undefined) return false
-  const url = new URL(urlText)
-  const method = options.method?.value ?? (request ? Object.getOwnPropertyDescriptor(Request.prototype, 'method').get.call(request) : 'GET')
-  if (typeof method !== 'string' || method.toUpperCase() !== 'POST'
-    || url.origin !== 'https://api.anthropic.com' || url.pathname !== '/v1/messages'
-    || url.username || url.password) return false
-  const rawHeaders = options.headers?.value ?? (request ? Object.getOwnPropertyDescriptor(Request.prototype, 'headers').get.call(request) : undefined)
-  if (types.isProxy(rawHeaders)) return false
-  let headers
-  if (rawHeaders instanceof Headers) headers = rawHeaders
-  else {
-    const properties = dataProperties(rawHeaders)
-    if (!properties || Reflect.ownKeys(properties).some(key => typeof key !== 'string' || typeof properties[key].value !== 'string')) return false
-    headers = new Headers(Object.fromEntries(Object.entries(properties).map(([key, descriptor]) => [key, descriptor.value])))
+/** Observe mode joins one shared passive response capture, not an enforcing wrapper. */
+function installObserver({ report, target }) {
+  const subscription = acquirePassiveFetch(target)
+  const owner = {}
+  let active = true
+  target[OWNER] = owner
+  const run = (state, callback) => subscription.run(state === undefined ? undefined : {
+    active: () => active,
+    beginHTTP: endpoint => endpoint.kind === 'anthropic-oauth' ? state : undefined,
+    headers: (_, _endpoint, { status, headers }) => {
+      const result = responseEvidence(status, headers)
+      state.report = result
+      try { return report(state, result) } catch { /* Passive observation must not change inference. */ }
+    },
+  }, callback)
+  return {
+    run,
+    async *unscoped(next) {
+      const iterator = run(undefined, () => next()[Symbol.asyncIterator]())
+      let done = false
+      try {
+        while (true) {
+          const result = await run(undefined, () => iterator.next())
+          done = result.done
+          if (done) return
+          yield result.value
+        }
+      } finally { if (!done) await run(undefined, () => iterator.return?.()) }
+    },
+    dispose() {
+      if (!active) return
+      active = false
+      subscription.release()
+      if (target[OWNER] === owner) delete target[OWNER]
+    },
   }
-  return /^Bearer sk-ant-oat[^\s]*$/i.test(Headers.prototype.get.call(headers, 'authorization') ?? '')
-    && !Headers.prototype.has.call(headers, 'x-api-key')
 }
 
 /**
@@ -49,6 +50,7 @@ function observedOAuthRequest(input, init) {
 export function installTransport({ cliUserAgent, report, mode = 'audit', target = globalThis }) {
   if (!['audit', 'observe'].includes(mode)) throw new Error('Unknown OAuth transport mode')
   if (target[OWNER]) throw new Error('anthropic-oauth-audit is already installed in this process')
+  if (mode === 'observe') return installObserver({ report, target })
   const scope = new AsyncLocalStorage()
   const original = target.fetch
   let active = true
@@ -63,30 +65,6 @@ export function installTransport({ cliUserAgent, report, mode = 'audit', target 
   const wrapped = async function (input, init) {
     const state = scope.getStore()
     if (!active || !state) return original.call(this, input, init)
-    if (mode === 'observe') {
-      // Preserve the exact arguments, body ownership, redirect policy and errors.
-      // Do not parse prompts or repair headers in this mode.
-      let eligible = false
-      try {
-        eligible = observedOAuthRequest(input, init)
-      } catch { /* Unsupported input is the underlying fetch's responsibility. */ }
-      const response = await original.call(this, input, init)
-      if (eligible) {
-        try {
-          if (types.isProxy(response) || Object.getPrototypeOf(response) !== Response.prototype
-            || ['url', 'redirected', 'status', 'headers'].some(key => Object.hasOwn(response, key))) return response
-          const property = key => Object.getOwnPropertyDescriptor(Response.prototype, key).get.call(response)
-          const url = property('url')
-          const destination = url ? new URL(url) : undefined
-          if (!property('redirected') && (!destination || (destination.origin === 'https://api.anthropic.com'
-            && destination.pathname === '/v1/messages'))) {
-            const headers = property('headers')
-            publish(state, responseEvidence(property('status'), { get: name => Headers.prototype.get.call(headers, name) }))
-          }
-        } catch { /* Unsupported response metadata must not break the stream. */ }
-      }
-      return response
-    }
     const request = input instanceof Request ? input : undefined
     const url = new URL(request?.url ?? input)
     // Token refresh belongs to pi-ai. Never inspect its body or follow redirects

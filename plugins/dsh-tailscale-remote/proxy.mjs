@@ -46,6 +46,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { createServer, request as httpRequest } from 'node:http'
 import { normalizeLogin } from './state.mjs'
+import { READ_GRANT_HEADER } from './session-read-access.mjs'
 import { isTailscaleAddress, TAILSCALE_IDENTITY_HEADERS, TAILSCALE_LOGIN_HEADER } from './tailscale.mjs'
 
 const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'trailers', 'transfer-encoding', 'upgrade'])
@@ -55,7 +56,7 @@ const DROPPED_REQUEST_HEADERS = new Set([
   'x-dsh-tailscale-remote', 'x-dsh-tailscale-remote-admitted', 'x-dsh-tailscale-remote-login', 'x-dsh-tailscale-remote-self',
   'forwarded', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-port', 'x-forwarded-proto', 'x-real-ip',
   'sec-fetch-site', 'sec-fetch-mode', 'sec-fetch-dest', 'sec-fetch-user',
-  ...TAILSCALE_IDENTITY_HEADERS,
+  ...TAILSCALE_IDENTITY_HEADERS, READ_GRANT_HEADER,
 ])
 const TOKEN_QUERY = 'token'
 /** Public shell files DSH itself serves unauthenticated; browsers fetch a manifest without cookies. */
@@ -285,6 +286,7 @@ export function bootstrapUpstreamCookie(connection, authority) {
  *   token: () => string, allowedUsers: () => string[],
  *   selfLogin?: () => string | undefined, selfAddresses?: () => string[],
  *   identityOperators?: () => boolean,
+ *   sessionReadHeaders?: (request: import('node:http').IncomingMessage, admitted: object | undefined) => Record<string, string>,
  *   publicHosts?: () => string[],
  *   cookieName: string, controlPrefix: string, mountPath?: string,
  *   log?: (line: string) => void, warn?: (line: string) => void,
@@ -442,6 +444,7 @@ export async function startProxy(spec) {
     const headers = forwardHeaders(req, backendAuthority, cookieForUpstream(), {
       ...(isIndex ? { 'accept-encoding': 'identity' } : {}),
       ...admissionHeaders(admitted, req),
+      ...spec.sessionReadHeaders?.(req, admitted),
     })
     const up = httpRequest({
       hostname: spec.backendHost,
