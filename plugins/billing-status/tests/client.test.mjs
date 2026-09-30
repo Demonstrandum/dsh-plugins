@@ -10,10 +10,12 @@ import { renderToStaticMarkup } from 'react-dom/server'
 const result = await build({ entryPoints: [new URL('../client.tsx', import.meta.url).pathname], bundle: true, format: 'cjs', platform: 'browser', jsx: 'automatic', write: false, loader: { '.css': 'text' }, external: ['react', 'react/jsx-runtime', 'react-dom', '@deepseek-ai/dsh-client-ui-primitives'] })
 const sandbox = { module: { exports: {} }, require: name => ({ react: React, 'react/jsx-runtime': jsx, 'react-dom': {}, '@deepseek-ai/dsh-client-ui-primitives': {} })[name] }
 vm.runInNewContext(result.outputFiles[0].text, sandbox)
-const { parseSnapshot, dollars, formatMoney, compactLabel, isStale, OAuthShield, apply } = sandbox.module.exports
+const { parseSnapshot, formatAmount, exactAmount, compactLabel, billingView, windowLabel, isStale, OAuthShield, ApiIcon, apply } = sandbox.module.exports
 const at = Date.parse('2026-01-01T12:00:00Z')
 const base = () => ({ version: 1, sessionId: 'fixture-session', totals: [], counts: { requests: 0, unpriced: 0, pending: 0, subscription: 0 }, persistence: 'ok' })
 const plan = () => ({ ...base(), latest: { provider: 'anthropic-oauth', model: 'fixture-model', at, kind: 'plan', windows: [{ label: '5h', usedPercent: 3 }, { label: '7d', usedPercent: 1 }] } })
+const usd = (amount, kind = 'reported') => ({ kind, currency: 'USD', amount })
+const same = (actual, expected, message) => assert.deepEqual(JSON.parse(JSON.stringify(actual)), JSON.parse(JSON.stringify(expected)), message) // vm realm arrays
 
 test('snapshot validation addresses one session and explicit schema', () => {
   assert.ok(parseSnapshot(base(), 'fixture-session'))
@@ -23,36 +25,78 @@ test('quota input is bounded and dates validated', () => {
   assert.ok(parseSnapshot(plan(), 'fixture-session'))
   for (const change of [{ windows: [{ label: '5h', usedPercent: 150 }] }, { windows: [{ label: '5h', usedPercent: NaN }] }, { at: 'invalid' }, { kind: 'oauth' }, { stale: 'yes' }]) assert.equal(parseSnapshot({ ...plan(), latest: { ...plan().latest, ...change } }, 'fixture-session'), null)
 })
-test('money rounds for display without float arithmetic or false tiny zero', () => {
-  assert.equal(dollars('0'), '$0.00')
-  assert.equal(dollars('1.23456'), '$1.2346')
-  assert.equal(dollars('0.00000001'), '<$0.0001')
-  assert.equal(dollars('999999999999999999999.99999'), '$1000000000000000000000.00')
-  assert.equal(dollars('garbage'), 'Unknown')
+test('compact money: two decimals below 10, one from 10, no float, never a false zero', () => {
+  const cases = { '0': '$0', '0.04': '$.04', '0.0423': '$.04', '1.236': '$1.24', '1.20': '$1.2', '52.4': '$52.4', '52.44': '$52.4', '520.1': '$520.1', '1024.1': '$1024.1', '9.994': '$9.99', '9.995': '$10', '9.96': '$9.96', '99.95': '$100', '0.004': '<$.01', '0.005': '$.01' }
+  for (const [amount, expected] of Object.entries(cases)) assert.equal(formatAmount(amount, 'USD'), expected, amount)
+  assert.equal(formatAmount('999999999999999999999.99', 'USD'), '$1000000000000000000000')
+  assert.equal(formatAmount('2.52', 'EUR'), '€2.52')
+  assert.equal(formatAmount('0.04', 'JPY'), 'JPY 0.04')
+  assert.equal(formatAmount('0.001', 'JPY'), '<JPY 0.01')
+  assert.equal(formatAmount('garbage', 'USD'), '---')
 })
-test('missing is not reported zero', () => {
-  assert.equal(compactLabel(base(), at), 'Billing unobserved')
-  assert.equal(compactLabel({ ...base(), totals: [{ kind: 'reported', currency: 'USD', amount: '0' }] }, at), '$0.00 reported')
+test('exact money keeps full precision and the currency', () => {
+  assert.equal(exactAmount('0.042310', 'USD'), '$0.04231')
+  assert.equal(exactAmount('2', 'CHF'), 'CHF 2')
 })
-test('money kinds stay separate, gaps and pending remain explicit', () => {
-  const data = { ...base(), totals: [{ kind: 'reported', currency: 'USD', amount: '1.23' }, { kind: 'estimated', currency: 'USD', amount: '0.04' }], counts: { requests: 4, unpriced: 1, pending: 1, subscription: 0 } }
-  assert.equal(compactLabel(data, at), '$1.23 reported · Est. $0.04 · 1 unpriced · 1 pending')
+test('missing is unknown, not reported zero', () => {
+  const empty = billingView(base(), at)
+  assert.equal(empty.unknownMoney, true)
+  same(empty.money, [])
+  const zero = billingView({ ...base(), totals: [usd('0')] }, at)
+  same(zero.money, ['$0'])
+  assert.equal(zero.unknownMoney, false)
+  assert.equal(compactLabel({ ...base(), totals: [usd('0')] }, at), 'Reported $0')
 })
-test('fresh plan windows only, stale never implies current subscription coverage', () => {
-  assert.equal(compactLabel(plan(), at), '5h 3% · 7d 1%')
+test('estimates carry ~, reported has no qualifier; gaps become notes', () => {
+  const data = { ...base(), totals: [usd('1.23'), usd('0.04', 'estimated')], counts: { requests: 4, unpriced: 1, pending: 1, subscription: 0 } }
+  const view = billingView(data, at)
+  same(view.money, ['$1.23', '~$.04'])
+  same(view.notes.map(n => [n.key, n.level]), [['unpriced', 'info'], ['pending', 'info']])
+  assert.equal(view.summary, 'Reported $1.23 · Estimated $0.04 · 1 unpriced request · 1 request pending')
+})
+test('unknown cost with unpriced requests reads $ --- with the count in its description', () => {
+  const view = billingView({ ...base(), counts: { requests: 2, unpriced: 2, pending: 0, subscription: 0 } }, at)
+  assert.equal(view.unknownMoney, true)
+  assert.equal(view.summary, 'Cost unknown · 2 unpriced requests')
+})
+test('plan windows become labelled rings; stale keeps the reading but marks it', () => {
+  const fresh = billingView(plan(), at)
+  assert.equal(fresh.unknownMoney, false)
+  same(fresh.quota.windows, [{ label: '5h', usedPercent: 3 }, { label: '7d', usedPercent: 1 }])
+  assert.equal(fresh.summary, '5h 3% used · 7d 1% used')
   assert.equal(isStale(plan(), at + 300000), true)
-  assert.equal(compactLabel(plan(), at + 300000), 'Stale')
+  const stale = billingView(plan(), at + 300000)
+  assert.equal(stale.quota.stale, true)
+  same(stale.quota.windows.map(w => w.usedPercent), [3, 1])
+  same(stale.notes.map(n => n.key), ['stale'])
   assert.equal(isStale({ ...plan(), latest: { ...plan().latest, stale: true } }, at), true)
   assert.equal(isStale(plan(), at - 120000), true)
 })
 test('stale quota does not age out historical money', () => {
-  assert.equal(compactLabel({ ...plan(), totals: [{ kind: 'reported', currency: 'USD', amount: '1.2' }] }, at + 300000), '$1.20 reported · Stale')
+  const view = billingView({ ...plan(), totals: [usd('25.2')] }, at + 300000)
+  same(view.money, ['$25.2'])
+  assert.equal(view.quota.stale, true)
 })
-test('extra and unknown never become positive plan claims', () => {
-  assert.equal(compactLabel({ ...plan(), latest: { ...plan().latest, kind: 'extra' } }, at), 'Extra usage')
-  assert.equal(compactLabel({ ...plan(), latest: { ...plan().latest, kind: 'unknown' } }, at), 'Billing unknown')
+test('extra has no percentage and unknown never becomes a plan claim', () => {
+  const extra = billingView({ ...plan(), latest: { ...plan().latest, kind: 'extra' } }, at)
+  assert.equal(extra.quota.extra, true)
+  same(extra.quota.windows, [])
+  const unknown = billingView({ ...plan(), latest: { ...plan().latest, kind: 'unknown' } }, at)
+  assert.equal(unknown.quota.unknown, true)
+  assert.equal(unknown.summary, 'Subscription usage unknown')
 })
-test('persistence failure stays visible', () => assert.equal(compactLabel({ ...base(), persistence: 'error' }, at), 'Billing unobserved · Partial · Not saved'))
+test('persistence failure and access failure are danger notes', () => {
+  same(billingView({ ...base(), persistence: 'error' }, at).notes.map(n => [n.key, n.level]), [['persistence', 'danger']])
+  const failed = billingView(undefined, at, true)
+  assert.equal(failed.unknownMoney, true)
+  assert.equal(failed.summary, 'Billing unavailable')
+})
+test('window labels come from provider labels or durations', () => {
+  assert.equal(windowLabel({ label: '5h' }), '5h')
+  assert.equal(windowLabel({ label: 'primary', windowMinutes: 300 }), '5h')
+  assert.equal(windowLabel({ label: 'secondary', windowMinutes: 10080 }), '7d')
+  assert.equal(windowLabel({ label: 'primary' }), undefined)
+})
 test('OAuth shield geometry matches the picker exactly', async () => {
   const source = await readFile(new URL('../../../deepseek-harness/packages/client/ui-model-selection/src/client/ModelSelect.tsx', import.meta.url), 'utf8')
   const glyph = source.split("if (route === 'oauth') return ")[1].split('\n')[0]
@@ -61,13 +105,20 @@ test('OAuth shield geometry matches the picker exactly', async () => {
   assert.ok(output.includes('cx="10" cy="7.2" r="2"'))
   assert.ok(output.includes('stroke-width="1.55"'))
 })
+test('token-billing icon matches the picker API glyph exactly', async () => {
+  const source = await readFile(new URL('../../../deepseek-harness/packages/client/ui-model-selection/src/client/ModelSelect.tsx', import.meta.url), 'utf8')
+  const glyph = source.split("if (route === 'openrouter') return ")[1].split('\n')[1]
+  const output = renderToStaticMarkup(React.createElement(ApiIcon))
+  for (const [, path] of glyph.matchAll(/ d="([^"]+)"/g)) assert.ok(output.includes(`d="${path}"`))
+  assert.ok(output.includes('x="1.8" y="3" width="16.4" height="14" rx="3"'))
+})
 test('mount requires only slots; unload removes own style; no client-plugin runtime imports', () => {
   let disposed
   let style
   let registered
   sandbox.document = { createElement: () => ({ dataset: {}, remove() { this.removed = true } }), head: { appendChild(node) { style = node } } }
   apply({ effect(callback) { disposed = callback() }, slots: { inject(name, callback) { assert.equal(name, 'conversation.composer.dock'); callback() }, register(config) { registered = config } } })
-  assert.equal(registered.order, 100)
+  assert.equal(registered.order, -10) // before the session stats (order 0): billing is leftmost
   assert.equal(registered.id, 'tali-billing-status')
   assert.ok(style.textContent.includes('padding: 1px 8px'))
   assert.ok(!/\border\s*:\s*1\s*[;}]/.test(style.textContent))
@@ -76,17 +127,19 @@ test('mount requires only slots; unload removes own style; no client-plugin runt
 })
 
 test('quota and credits are not plan claims or money', () => {
-  const data = { ...plan(), latest: { ...plan().latest, kind: 'quota', credits: { hasCredits: true, unlimited: false, balance: '2.5' }, windows: [{ label: 'Primary', usedPercent: 20, windowMinutes: 300 }] } }
+  const data = { ...plan(), latest: { ...plan().latest, provider: 'openai-codex', kind: 'quota', credits: { hasCredits: true, unlimited: false, balance: '2.5' }, windows: [{ label: 'primary', usedPercent: 20 }] } }
   assert.ok(parseSnapshot(data, 'fixture-session'))
-  assert.equal(compactLabel(data, at), 'Primary 20%')
-  assert.equal(compactLabel({ ...data, latest: { ...data.latest, windows: [] } }, at), 'Quota')
+  const view = billingView(data, at)
+  same(view.quota.windows, [{ label: undefined, usedPercent: 20 }])
+  same(view.money, [])
+  assert.equal(view.summary, '20% used')
   assert.equal(parseSnapshot({ ...data, latest: { ...data.latest, credits: { hasCredits: 'yes', unlimited: false } } }, 'fixture-session'), null)
 })
 test('recovered money remains and incomplete requests are explicit', () => {
-  const data = { ...base(), recovered: true, now: new Date(at).toISOString(), totals: [{ kind: 'reported', currency: 'USD', amount: '2.5' }], counts: { ...base().counts, requests: 1, incomplete: 1 } }
+  const data = { ...base(), recovered: true, now: new Date(at).toISOString(), totals: [usd('2.5')], counts: { ...base().counts, requests: 1, incomplete: 1 } }
   assert.ok(parseSnapshot(data, 'fixture-session'))
-  assert.equal(compactLabel(data, at), '$2.50 reported · 1 incomplete')
-  assert.equal(compactLabel({ ...plan(), latest: { ...plan().latest, kind: 'rejected' } }, at), 'Rejected')
+  assert.equal(compactLabel(data, at), 'Reported $2.5 · 1 request incomplete')
+  same(billingView({ ...plan(), latest: { ...plan().latest, kind: 'rejected' } }, at).notes.map(n => n.key), ['rejected'])
 })
 
 test('actual host ledger snapshots accept OpenRouter scope and separate currency buckets', async t => {
@@ -107,9 +160,8 @@ test('actual host ledger snapshots accept OpenRouter scope and separate currency
   const snapshot = await ledger.snapshot('fixture-session')
   assert.ok(parseSnapshot(snapshot, 'fixture-session'))
   assert.equal(snapshot.totals.find(t => t.kind === 'reported').scope, 'openrouter-account')
-  assert.equal(compactLabel(snapshot, at), '$0.004 reported · Est. EUR 2.00')
-  assert.equal(formatMoney('0.00000001', 'EUR'), '<EUR 0.0001')
-  assert.equal(formatMoney('999999999999999999999.99999', 'JPY'), 'JPY 1000000000000000000000.00')
+  same(billingView(snapshot, at).money, ['<$.01', '~€2'])
+  assert.equal(compactLabel(snapshot, at), 'Reported $0.004 · Estimated €2')
   const quota = { ...request, requestId: 'request-quota', provider: 'openai-codex' }
   await ledger.record({ ...quota, phase: 'evidence', evidence: { kind: 'openai-codex', outcome: 'quota-observed', windows: [{ label: 'Primary', usedPercent: 20, windowMinutes: 0 }], credits: { hasCredits: true, unlimited: false, balance: '2.5' } } })
   assert.ok(parseSnapshot(await ledger.snapshot('fixture-session'), 'fixture-session'))

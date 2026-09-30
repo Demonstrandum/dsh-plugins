@@ -16,11 +16,27 @@ An **opt-in, out-of-tree** billing observer, request ledger, and compact compose
 
 Only scoped inference requests are observed. No quota/credit snapshot is shared across sessions or persisted. The most recently started request invalidates the previous claim, including a new request on the same provider. Staleness is based on server time. A claim describes that observed response, not whether future requests will use the same billing route.
 
-The OAuth shield matches the picker glyph, but is local SVG code, not a runtime import from the picker plugin. API/cost and quota states remain distinct. Clicking opens short labelled rows; no UI help paragraphs.
+### Compact display
+
+| State | Pill |
+|---|---|
+| Provider-reported cost | API glyph + `$1.24` (no qualifier: reported is the default meaning) |
+| Configured token-price estimate | API glyph + `~$2.52` |
+| Cost unknown or not observable | API glyph + `$ ---`; the reason (for example `2 unpriced requests`) is in the tooltip and card |
+| Subscription windows | shield + `5h` ring `7d` ring (ContextMeter ring geometry); the percentages are in the tooltip and card |
+| Single unnamed quota (Codex `primary` without a duration) | shield + `20%`; windows with durations get `5h`/`7d` rings |
+| Extra usage | shield + orange `Extra`, never a percentage |
+| Stale quota | the previous window labels struck through, rings dimmed, orange info icon |
+| Gaps (unpriced beside a known cost, pending, incomplete) | trailing orange info icon; hover lists them |
+| Storage failure, rejected request, access failure | trailing red warning icon; hover lists them |
+
+Amounts are compact display rounding over the host's exact decimals: at most two decimals below 10, one from 10 up, trailing zeros dropped, leading zero omitted after a symbol (`$0`, `$.04`, `$1.24`, `$52.4`, `$1024.1`); a positive amount that rounds to zero reads `<$.01`. `$` means USD: OpenRouter's `usage.cost` carries no currency field and OpenRouter documents USD as its billing currency; configured rate cards name their ISO currency. `EUR`/`GBP` use their symbols, other currencies a code prefix; buckets are never converted or summed across currencies. Money is session history and does not go stale; only quota readings age (default five minutes, server clock).
+
+Clicking opens a card in ContextMeter's panel skin: headline figure, exact per-kind amounts with scope, quota windows with bars and reset times, notes, and request count/model/route/observed time. The OAuth shield and API glyph match the model picker's `RouteIcon` exactly, as local SVG code rather than a runtime import from the picker plugin. No UI help paragraphs.
 
 ### Placement
 
-The plugin uses `conversation.composer.dock`, order 100 within that slot. It currently appears **before** the context meter: the slot itself precedes the built-in meter. Flex `order: 1` successfully moves it visually after the meter, but keyboard focus still reaches billing first. The isolated fixture proved that mismatch, so the accessible natural-order fallback is used. No DOM reparenting, positive tabindex, hashed host selector or fork patch. A generic trailing slot would enable the originally preferred placement.
+The plugin registers in `conversation.composer.dock` at order -10, before the session stats (order 0), so billing is **leftmost** in the status area and the context meter stays rightmost, away from billing. Natural DOM order, so visual and keyboard order agree. The earlier CSS `order: 1` experiment (visual order after the meter, keyboard order before it) was rejected for that mismatch.
 
 ## Dependencies and coexistence
 

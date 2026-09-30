@@ -1,10 +1,10 @@
-import { useEffect, useId, useRef, useState, type RefObject } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import type { Context } from '@deepseek-ai/cordis'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { useAnchoredPosition, useDismissOnOutsidePointer } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconInfoOutline14, IconWarningOutline16, Tooltip, useAnchoredPosition, useDismissOnOutsidePointer } from '@deepseek-ai/dsh-client-ui-primitives'
 import styles from './client.css'
 
 export interface BillingSnapshot {
@@ -48,23 +48,45 @@ export function parseSnapshot(value: unknown, sessionId: string): BillingSnapsho
   return value as unknown as BillingSnapshot
 }
 
-/** Display rounding only; the host remains the sole accounting authority. */
-export function dollars(amount: string): string {
-  if (!decimal(amount)) return 'Unknown'
+const SYMBOLS: Record<string, string> = { USD: '$', EUR: '€', GBP: '£' }
+const prefixOf = (currency: string) => SYMBOLS[currency] ?? `${currency} `
+
+/** Round a decimal string half-up to `places` digits, as an integer scaled by 10^places. */
+function scaled(amount: string, places: number): bigint {
   const [whole, fraction = ''] = amount.split('.')
-  let scaled = BigInt(whole!) * 10000n + BigInt((fraction + '0000').slice(0, 4))
-  if (Number(fraction[4] ?? '0') >= 5) scaled += 1n
-  if (scaled === 0n && /[1-9]/.test(amount)) return '<$0.0001'
-  const digits = (scaled % 10000n).toString().padStart(4, '0').replace(/0+$/, '').padEnd(2, '0')
-  return `$${(scaled / 10000n).toString()}.${digits}`
+  let value = BigInt(whole!) * 10n ** BigInt(places) + BigInt((fraction + '0'.repeat(places)).slice(0, places) || '0')
+  if ((fraction[places] ?? '0') >= '5') value += 1n
+  return value
 }
 
-/** Currency buckets stay separate; no conversion or floating-point arithmetic. */
-export function formatMoney(amount: string, currency: string): string {
-  if (!/^[A-Z]{3}$/.test(currency)) return 'Unknown'
-  const reading = dollars(amount)
-  return currency === 'USD' ? reading : reading.replace('$', `${currency} `)
+/**
+ * Compact display amount: at most two decimals below 10, one decimal from 10 up,
+ * trailing zeros dropped and the leading zero omitted after a currency symbol
+ * ($0, $.04, $1.24, $52.4, $1024.1). A positive amount never displays as zero.
+ * Display rounding only; the host remains the sole accounting authority.
+ */
+export function formatAmount(amount: string, currency: string): string {
+  if (!decimal(amount) || !/^[A-Z]{3}$/.test(currency)) return '---'
+  const prefix = prefixOf(currency)
+  const symbol = currency in SYMBOLS
+  let places = 2
+  let value = scaled(amount, 2)
+  if (value >= 1000n) { places = 1; value = scaled(amount, 1) }
+  if (value === 0n) return /[1-9]/.test(amount) ? `<${prefix}${symbol ? '' : '0'}.01` : `${prefix}0`
+  const unit = 10n ** BigInt(places)
+  const whole = value / unit
+  const fraction = (value % unit).toString().padStart(places, '0').replace(/0+$/, '')
+  return `${prefix}${whole === 0n && symbol ? '' : whole.toString()}${fraction ? `.${fraction}` : ''}`
 }
+
+/** Full-precision amount for the details card; currency buckets stay separate, no conversion. */
+export function exactAmount(amount: string, currency: string): string {
+  if (!decimal(amount) || !/^[A-Z]{3}$/.test(currency)) return '---'
+  const [whole, fraction = ''] = amount.split('.')
+  const trimmed = fraction.replace(/0+$/, '')
+  return `${prefixOf(currency)}${BigInt(whole!).toString()}${trimmed ? `.${trimmed}` : ''}`
+}
+
 export function isStale(snapshot: BillingSnapshot, now: number): boolean {
   const latest = snapshot.latest
   if (!latest) return false
@@ -72,33 +94,93 @@ export function isStale(snapshot: BillingSnapshot, now: number): boolean {
   return latest.stale === true || now - at >= (snapshot.staleAfterMs ?? 300000) || at > now + 60000
 }
 const percent = (n: number) => `${Math.round(n * 10) / 10}%`
-const shortTime = (at: string | number) => new Date(at).toLocaleString()
-const evidenceLabel = { plan: 'Plan claim', extra: 'Extra usage', unknown: 'Unknown', unobserved: 'Unobserved', rejected: 'Rejected', quota: 'Quota observed' } as const
+const shortTime = (at: string | number) => new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 function orderedTotals(snapshot: BillingSnapshot) {
   return [...snapshot.totals].sort((a, b) => a.kind !== b.kind ? (a.kind === 'reported' ? -1 : 1) : `${a.currency}/${a.scope ?? ''}`.localeCompare(`${b.currency}/${b.scope ?? ''}`))
 }
-export function compactLabel(snapshot: BillingSnapshot, now: number): string {
-  const parts = orderedTotals(snapshot).map(t => `${t.kind === 'estimated' ? 'Est. ' : ''}${formatMoney(t.amount, t.currency)}${t.kind === 'reported' ? ' reported' : ''}`)
-  if (snapshot.latest) {
-    const latest = snapshot.latest
-    if (isStale(snapshot, now)) parts.push('Stale')
-    else if (latest.kind === 'plan' || latest.kind === 'quota') parts.push(latest.windows.length ? latest.windows.map(w => `${w.label} ${percent(w.usedPercent)}`).join(' · ') : latest.kind === 'plan' ? 'Plan claim' : 'Quota')
-    else if (latest.kind === 'extra') parts.push('Extra usage')
-    else if (latest.kind === 'rejected') parts.push('Rejected')
-    else if (parts.length === 0) parts.push(`Billing ${latest.kind}`)
+
+/** Window duration label from the provider label or its duration (300 min → 5h, 10080 min → 7d). */
+export function windowLabel(window: { label: string; windowMinutes?: number }): string | undefined {
+  if (/^\d+[mhdw]$/i.test(window.label)) return window.label.toLowerCase()
+  const minutes = window.windowMinutes
+  if (!minutes) return undefined
+  if (minutes % 1440 === 0) return `${minutes / 1440}d`
+  if (minutes % 60 === 0) return `${minutes / 60}h`
+  return `${minutes}m`
+}
+
+export interface BillingNote { key: string; level: 'info' | 'danger'; text: string }
+export interface BillingView {
+  /** Compact money pieces; estimates carry a `~` prefix. */
+  money: string[]
+  /** No known amount: the money group reads `$ ---`. */
+  unknownMoney: boolean
+  quota?: { stale: boolean; extra: boolean; unknown: boolean; windows: { label?: string; usedPercent: number }[] }
+  notes: BillingNote[]
+  /** Full accessible description of everything the compact pill abbreviates. */
+  summary: string
+}
+
+const SUBSCRIPTION_PROVIDER = /-oauth$|^openai-codex$/
+
+/** Derive the compact pill and its descriptions from one validated snapshot. */
+export function billingView(snapshot: BillingSnapshot | undefined, now: number, failed = false): BillingView {
+  if (!snapshot) {
+    const notes: BillingNote[] = failed ? [{ key: 'unavailable', level: 'danger', text: 'Billing unavailable' }] : []
+    return { money: [], unknownMoney: true, notes, summary: failed ? 'Billing unavailable' : 'No billing observed yet' }
   }
-  if (snapshot.counts.unpriced > 0) parts.push(`${snapshot.counts.unpriced} unpriced`)
-  if (snapshot.counts.pending > 0) parts.push(`${snapshot.counts.pending} pending`)
-  if ((snapshot.counts.incomplete ?? 0) > 0) parts.push(`${snapshot.counts.incomplete} incomplete`)
-  if (parts.length === 0) parts.push('Billing unobserved')
-  if (snapshot.persistence === 'error') parts.push('Partial · Not saved')
-  return parts.join(' · ')
+  const totals = orderedTotals(snapshot)
+  const money = totals.map(t => `${t.kind === 'estimated' ? '~' : ''}${formatAmount(t.amount, t.currency)}`)
+  const latest = snapshot.latest
+  const stale = isStale(snapshot, now)
+  const notes: BillingNote[] = []
+  let quota: BillingView['quota']
+  if (latest && (latest.kind === 'plan' || latest.kind === 'quota' || latest.kind === 'extra')) {
+    quota = { stale, extra: latest.kind === 'extra', unknown: false, windows: latest.kind === 'extra' ? [] : latest.windows.map(w => ({ label: windowLabel(w), usedPercent: w.usedPercent })) }
+  } else if (latest && SUBSCRIPTION_PROVIDER.test(latest.provider) && totals.length === 0) {
+    quota = { stale, extra: false, unknown: true, windows: [] }
+  }
+  const unknownMoney = totals.length === 0 && (!quota || snapshot.counts.unpriced > 0)
+  if (snapshot.counts.unpriced > 0) notes.push({ key: 'unpriced', level: 'info', text: plural(snapshot.counts.unpriced, 'unpriced request') })
+  if (snapshot.counts.pending > 0) notes.push({ key: 'pending', level: 'info', text: `${plural(snapshot.counts.pending, 'request')} pending` })
+  if ((snapshot.counts.incomplete ?? 0) > 0) notes.push({ key: 'incomplete', level: 'info', text: `${plural(snapshot.counts.incomplete!, 'request')} incomplete` })
+  if (quota && stale && !quota.unknown) notes.push({ key: 'stale', level: 'info', text: `Quota reading from ${shortTime(latest!.at)} is stale` })
+  if (latest?.kind === 'rejected') notes.push({ key: 'rejected', level: 'danger', text: 'Last request rejected' })
+  if (snapshot.persistence === 'error') notes.push({ key: 'persistence', level: 'danger', text: 'Not saved; totals may be partial' })
+  const parts = totals.map(t => `${t.kind === 'estimated' ? 'Estimated' : 'Reported'} ${exactAmount(t.amount, t.currency)}`)
+  if (unknownMoney) parts.push('Cost unknown')
+  if (quota?.extra) parts.push('Extra usage')
+  else if (quota?.unknown) parts.push('Subscription usage unknown')
+  else if (quota) parts.push(...quota.windows.map(w => `${w.label ? `${w.label} ` : ''}${percent(w.usedPercent)} used`))
+  parts.push(...notes.map(n => n.text))
+  return { money, unknownMoney, quota, notes, summary: parts.join(' · ') }
+}
+
+/** Full accessible description of the compact pill. */
+export function compactLabel(snapshot: BillingSnapshot, now: number): string {
+  return billingView(snapshot, now).summary
 }
 
 /** Exact glyph from ui-model-selection/ModelSelect.tsx RouteIcon(oauth). */
 export function OAuthShield() {
   return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 1.8 17 4.4v4.7c0 4.2-2.7 7.3-7 9.1-4.3-1.8-7-4.9-7-9.1V4.4l7-2.6Z" fill="none" stroke="currentColor" strokeWidth="1.55" /><circle cx="10" cy="7.2" r="2" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="M6.8 13.5c.5-2.1 1.6-3.2 3.2-3.2s2.8 1.1 3.2 3.2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+}
+
+/** Exact glyph from ui-model-selection/ModelSelect.tsx RouteIcon(api): token-priced billing. */
+export function ApiIcon() {
+  return <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="1.8" y="3" width="16.4" height="14" rx="3" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="m7 7-3 3 3 3m6-6 3 3-3 3m-2.2-7.2-1.6 8.4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+}
+
+/** ContextMeter ring geometry: 14px viewBox, r 5.5, 2px stroke. */
+const RADIUS = 5.5
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS
+export function UsageRing({ usedPercent }: { usedPercent: number }) {
+  return <svg className="tali-billing-ring" viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">
+    <circle className="tali-billing-ring-track" cx="7" cy="7" r={RADIUS} />
+    <circle className="tali-billing-ring-fill" cx="7" cy="7" r={RADIUS} strokeDasharray={`${CIRCUMFERENCE * usedPercent / 100} ${CIRCUMFERENCE}`} transform="rotate(-90 7 7)" />
+  </svg>
 }
 
 function useVisible(ref: RefObject<HTMLSpanElement>) {
@@ -188,33 +270,69 @@ export function BillingStatus({ sessionId, running = false }: { sessionId: strin
     document.addEventListener('keydown', onKey, true)
     return () => document.removeEventListener('keydown', onKey, true)
   }, [open, placed])
-  const label = snapshot ? compactLabel(snapshot, now) : state.failed ? 'Billing unavailable' : 'Billing unobserved'
+  const view = billingView(snapshot, now, state.failed)
   const latest = snapshot?.latest
-  const shield = latest && (latest.kind === 'plan' || latest.kind === 'quota' || latest.kind === 'extra' || latest.provider.endsWith('-oauth'))
-  const row = (label: string, value: string | number) => <div className="tali-billing-row" key={label}><dt>{label}</dt><dd>{value}</dd></div>
+  const iconNotes = view.unknownMoney && !view.quota ? view.notes.filter(n => n.key !== 'unpriced') : view.notes
+  const danger = iconNotes.some(n => n.level === 'danger')
+  const showMoney = view.money.length > 0 || view.unknownMoney
+  const quota = view.quota
+  const labelled = quota ? quota.windows.every(w => w.label) : false
+  const totals = snapshot ? orderedTotals(snapshot) : []
+  const headline = view.money.length ? view.money.join(' · ') : view.unknownMoney || !quota ? '$ ---' : quota.extra ? 'Extra' : quota.windows.length ? quota.windows.map(w => `${w.label ? `${w.label} ` : ''}${percent(w.usedPercent)}`).join(' · ') : '---'
+  const row = (key: string, label: ReactNode, value: ReactNode, className?: string) => <div className={`tali-billing-row${className ? ` ${className}` : ''}`} key={key}><dt>{label}</dt><dd>{value}</dd></div>
+  const scopeLabel = (scope?: string) => scope === 'openrouter-account' ? 'OpenRouter' : scope === 'provider-account' ? 'Provider' : scope === 'model-tokens' ? 'Token prices' : undefined
   return <span className="tali-billing-root" ref={rootRef}>
-    <button type="button" className="tali-billing-pill" ref={triggerRef} aria-label={`Billing: ${label}`} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => setOpen(!open)}>
-      {shield && <OAuthShield />}<span className="tali-billing-label">{label}</span>
-    </button>
+    <Tooltip label={view.summary} side="top" delayMs={200} disabled={open}>
+      <button type="button" className="tali-billing-pill" ref={triggerRef} aria-label={`Billing: ${view.summary}`} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => setOpen(!open)}>
+        {showMoney && <span className="tali-billing-group" data-billing-group="money">
+          {snapshot && <ApiIcon />}
+          {view.money.length
+            ? <span className="tali-billing-amount">{view.money.map((text, i) => <span key={i}>{i > 0 && <span className="tali-billing-sep" aria-hidden="true">·</span>}{text}</span>)}</span>
+            : <span className="tali-billing-amount tali-billing-unknown">$ ---</span>}
+        </span>}
+        {quota && <span className={`tali-billing-group${quota.stale ? ' tali-billing-stale' : ''}`} data-billing-group="quota">
+          <OAuthShield />
+          {quota.extra ? <span className="tali-billing-extra">Extra</span>
+            : quota.unknown || quota.windows.length === 0 ? <span className="tali-billing-unknown">---</span>
+            : labelled ? quota.windows.map((w, i) => <span key={i} className="tali-billing-window"><span className="tali-billing-window-label">{w.label}</span><UsageRing usedPercent={w.usedPercent} /></span>)
+            : <span className="tali-billing-window-label">{quota.windows.map(w => percent(w.usedPercent)).join(' · ')}</span>}
+        </span>}
+        {iconNotes.length > 0 && <Tooltip label={iconNotes.map(n => n.text).join('\n')} side="top">
+          <span className={`tali-billing-note ${danger ? 'tali-billing-danger' : 'tali-billing-info'}`} data-billing-note={danger ? 'danger' : 'info'}>
+            {danger ? <IconWarningOutline16 size={14} /> : <IconInfoOutline14 size={14} />}
+          </span>
+        </Tooltip>}
+      </button>
+    </Tooltip>
     {open && visible && createPortal(<div className="tali-billing-panel" role="dialog" aria-label="Billing details" id={panelId} ref={panelRef} tabIndex={-1} style={position ?? { visibility: 'hidden', left: 0, top: 0 }}>
-      <div className="tali-billing-heading">Billing</div>
+      <div className="tali-billing-header">
+        <span className="tali-billing-headline">Billing</span>
+        <span className="tali-billing-figures">{headline}</span>
+      </div>
       <dl className="tali-billing-rows">
-        {row('Scope', 'This session')}
-        {!snapshot && row('Status', state.failed ? 'Unavailable' : 'Unobserved')}
-        {snapshot && <>
-          {snapshot.totals.length === 0 && row('Cost', 'Unknown')}
-          {orderedTotals(snapshot).map((t, i) => <div className="tali-billing-row" key={`total-${i}`}><dt>{t.kind === 'reported' ? 'Reported' : 'Estimated'}{t.scope ? ` · ${t.scope === 'model-tokens' ? 'Model tokens' : t.scope === 'openrouter-account' ? 'OpenRouter account' : 'Provider account'}` : ''}</dt><dd>{formatMoney(t.amount, t.currency)}</dd></div>)}
-          {row('Requests', snapshot.counts.requests)}{row('Unpriced', snapshot.counts.unpriced)}{row('Pending', snapshot.counts.pending)}{row('Incomplete', snapshot.counts.incomplete ?? 0)}{row('Subscription', snapshot.counts.subscription)}
-          {snapshot.coverageSince !== undefined && row('Coverage start', shortTime(snapshot.coverageSince))}
-          {row('Persistence', snapshot.persistence === 'ok' ? 'Saved' : 'Error')}
-          {snapshot.recovered && row('History', 'Recovered')}
-        </>}
+        {totals.map((t, i) => row(`total-${i}`, <span className="tali-billing-dt-icon"><ApiIcon />{t.kind === 'estimated' ? 'Estimated' : 'Reported'}{scopeLabel(t.scope) && <span className="tali-billing-muted">{scopeLabel(t.scope)}</span>}</span>, `${t.kind === 'estimated' ? '~' : ''}${exactAmount(t.amount, t.currency)}`))}
+        {snapshot && totals.length === 0 && view.unknownMoney && row('cost', <span className="tali-billing-dt-icon"><ApiIcon />Cost</span>, 'Unknown')}
+        {!snapshot && row('status', 'Status', state.failed ? 'Unavailable' : 'Not observed')}
       </dl>
-      {latest && snapshot && <><div className="tali-billing-heading tali-billing-section">Last request</div><dl className="tali-billing-rows">
-        {row('Provider', latest.provider)}{row('Model', latest.model)}{row('Evidence', evidenceLabel[latest.kind])}{row('Freshness', isStale(snapshot, now) ? 'Stale' : 'Fresh')}{row('Observed', shortTime(latest.at))}
-        {latest.windows.map((w, i) => <div className="tali-billing-row" key={`window-${i}`}><dt>{w.label}{w.windowMinutes !== undefined ? ` · ${w.windowMinutes} min` : ''}</dt><dd>{percent(w.usedPercent)}{w.resetAt !== undefined && <span className="tali-billing-reset">Reset {shortTime(w.resetAt)}</span>}</dd></div>)}
-        {latest.credits && row('Credits', latest.credits.unlimited ? 'Unlimited' : latest.credits.balance !== undefined ? latest.credits.balance : latest.credits.hasCredits ? 'Available' : 'None')}
-      </dl></>}
+      {quota && latest && <div className={`tali-billing-section${quota.stale ? ' tali-billing-stale' : ''}`}>
+        {quota.extra && row('extra', <span className="tali-billing-dt-icon"><OAuthShield />Subscription</span>, <span className="tali-billing-extra">Extra usage</span>)}
+        {quota.unknown && row('sub', <span className="tali-billing-dt-icon"><OAuthShield />Subscription</span>, 'Unknown')}
+        {!quota.extra && latest.windows.map((w, i) => <div className="tali-billing-window-row" key={`w-${i}`}>
+          <div className="tali-billing-row"><dt><span className="tali-billing-dt-icon"><OAuthShield />{windowLabel(w) ? `${windowLabel(w)} window` : 'Quota'}</span></dt><dd><span className="tali-billing-window-value">{percent(w.usedPercent)}</span>{w.resetAt !== undefined && <span className="tali-billing-muted"> · resets {shortTime(w.resetAt)}</span>}</dd></div>
+          <div className="tali-billing-bar"><div className="tali-billing-bar-fill" style={{ width: `${Math.max(0, Math.min(100, w.usedPercent))}%` }} /></div>
+        </div>)}
+        {latest.credits && row('credits', 'Credits', latest.credits.unlimited ? 'Unlimited' : latest.credits.balance !== undefined ? latest.credits.balance : latest.credits.hasCredits ? 'Available' : 'None')}
+      </div>}
+      {view.notes.length > 0 && <div className="tali-billing-section tali-billing-notes">
+        {view.notes.map(n => <div key={n.key} className={`tali-billing-note-row ${n.level === 'danger' ? 'tali-billing-danger' : 'tali-billing-info'}`}>{n.level === 'danger' ? <IconWarningOutline16 size={14} /> : <IconInfoOutline14 size={14} />}<span>{n.text}</span></div>)}
+      </div>}
+      {snapshot && <dl className="tali-billing-rows tali-billing-section tali-billing-footer">
+        {row('requests', 'Requests', snapshot.counts.requests)}
+        {latest && row('model', 'Model', latest.model)}
+        {latest && row('route', 'Route', latest.provider)}
+        {latest && row('observed', 'Observed', shortTime(latest.at))}
+        {snapshot.recovered && row('history', 'History', 'Restored')}
+      </dl>}
     </div>, document.body)}
   </span>
 }
@@ -235,5 +353,5 @@ export function apply(ctx: Context) {
     document.head.appendChild(style)
     return () => style.remove()
   })
-  ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({ name: 'conversation.composer.dock', id: 'tali-billing-status', order: 100 }, BillingDock))
+  ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({ name: 'conversation.composer.dock', id: 'tali-billing-status', order: -10 }, BillingDock))
 }
