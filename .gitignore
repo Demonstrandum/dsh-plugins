@@ -3,3 +3,6 @@ lib/
 *.tsbuildinfo
 .DS_Store
 cordis.dev.local.yml
+
+# Machine-private deployment notes and inventories; never commit.
+/private/
