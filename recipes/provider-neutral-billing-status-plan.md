@@ -1,6 +1,6 @@
 # Provider-neutral billing status — research and proposed plan
 
-**Status: proposal, not implemented or installed.** Research completed 2026-09-30 against the current checkout, installed pi-ai 0.87.1, public provider documentation, and Tau source. No inference test, live configuration change, or UI deployment was performed. Provider contracts and tariffs must be rechecked at implementation time.
+**Status: original research / broader roadmap.** A first isolated implementation now exists; see the [implementation recipe](billing-status-plugin.md) and [plugin README](../plugins/billing-status/README.md) for tested coverage and remaining rollout gates. Nothing is installed live. This original research was completed 2026-09-30 against the checkout, pi-ai 0.87.1, public provider documentation, and Tau source; the research itself made no inference calls or deployment changes. Provider contracts and tariffs require continuing verification.
 
 ## Decision summary
 

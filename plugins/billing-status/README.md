@@ -1,0 +1,118 @@
+# Billing status
+
+An **opt-in, out-of-tree** billing observer, request ledger, and compact composer footer. No OAuth command, audit plugin, prompt-excision plugin, or model-picker runtime dependency. No prompt changes, authentication changes, provider polling, generation lookup calls, or forced transport changes.
+
+**Status:** first implementation; offline adapter/transport and isolated UI verification. Not installed into a live profile. This is not an invoice or a provider-neutral subscription guarantee.
+
+## What it shows
+
+| Source | Implemented evidence | Money |
+|---|---|---|
+| Anthropic OAuth, native HTTP | Accepted subscription-window claim; utilization/reset headers; explicit extra usage; rejected/unknown/unobserved | No conversion of subscription tokens into dollars |
+| OpenRouter, native HTTP SSE/JSON | Provider `usage.cost` and generation identity | Reported OpenRouter-account charge, not upstream BYOK charges |
+| OpenAI Codex OAuth, HTTP | Primary/secondary windows and credit facts where returned | No dollar conversion; quota observation is **not** an Anthropic-style plan claim |
+| API-key routes with an explicit rate card | Normalized token usage | Versioned **model-token estimate**; tools, media and contract discounts aren't priced |
+| Unsupported/custom transports, including Codex WebSocket | Explicit unobserved evidence | Unknown, never an invented zero |
+
+Only scoped inference requests are observed. No quota/credit snapshot is shared across sessions or persisted. The most recently started request invalidates the previous claim, including a new request on the same provider. Staleness is based on server time. A claim describes that observed response, not whether future requests will use the same billing route.
+
+The OAuth shield matches the picker glyph, but is local SVG code, not a runtime import from the picker plugin. API/cost and quota states remain distinct. Clicking opens short labelled rows; no UI help paragraphs.
+
+### Placement
+
+The plugin uses `conversation.composer.dock`, order 100 within that slot. It currently appears **before** the context meter: the slot itself precedes the built-in meter. Flex `order: 1` successfully moves it visually after the meter, but keyboard focus still reaches billing first. The isolated fixture proved that mismatch, so the accessible natural-order fallback is used. No DOM reparenting, positive tabindex, hashed host selector or fork patch. A generic trailing slot would enable the originally preferred placement.
+
+## Dependencies and coexistence
+
+Host: normal DSH `llm` service. `connection` and `commands` are optional subcontexts. Browser: `slots` plus the normal platform React modules. No other `tali-*` plugin must be enabled. There is no dependency on the `/oauth` command's existence: OAuth transport and credential refresh remain owned by the provider adapter.
+
+The new collector uses one reference-counted passive fetch broker for its own instances. The existing Anthropic audit still has its original wrapper. Both load/unload orders are tested: wrappers compose and become inert on teardown without clobbering another owner's fetch. **They do not yet share one extracted library.** The existing audit's enforcement settings and defaults are untouched; billing never loads or enables that plugin.
+
+## Durable accounting
+
+- Unique call/attempt identities; native matching HTTP retries are separate attempts. Failed attempts without provider usage remain unpriced.
+- Cumulative samples replace previous samples. A receipt replaces a local estimate for the same request; matching provider response IDs prevent receipt duplication within a session.
+- Amounts and rates use decimal strings and BigInt arithmetic. Rounding occurs only in the display. Reasoning tokens are already included in output; cache categories require explicit rate-card semantics.
+- Auxiliary LLM calls are included when they carry `sessionId`; unattributed calls are not assigned to an arbitrary active chat. Descendants use their own session IDs.
+- A plugin-owned append-only ledger is independent of DSH history. Rewind/compaction isn't a refund. Copies/forks don't re-incur inherited costs. There is no historic-session backfill; the UI shows the first observed request time.
+- Rate-card versions and monetary results survive reload without repricing history. Quota windows and credit balances do not. In-flight records recovered from an old process are marked incomplete, not indefinitely pending.
+- The ledger stores allowlisted metadata/usage/costs only, never prompts, completions, raw headers, credentials or account quota snapshots. A file is mode 0600 and its new directory mode 0700.
+- A writer lock rejects concurrent writers; existing history is replayed read-only when a lock remains, with an explicit unhealthy-storage state. Corruption, torn final lines, excessive replay size (64 MiB), queue overflow or disk failure makes storage unhealthy and stops further appends rather than silently claiming complete durable totals. Collecting billing must never fail inference.
+
+Files default to `$DSH_HOME/billing-status/ledger.jsonl` and `writer.lock`. This is separate from the session event log: the current session append API cannot mark an external event ignorable. Do not manually inject required billing events into DSH history.
+
+## Read authorization
+
+`GET /api/billing-status/snapshot?sessionId=...` is registered through DSH's authenticated Fetch API. It is document-relative in the client and uses `Cache-Control: no-store`. No HTTP ingestion or account-list endpoint exists.
+
+For a normal single-user DSH composition, the existing DSH browser authentication is the boundary. If the optional `sessionOwners` attribution service exists, the endpoint **fails closed** unless a trusted host service named `billingAccess` supplies:
+
+```ts
+canRead(request: Request, sessionId: string): boolean | Promise<boolean>
+```
+
+Only literal `true` authorizes access. This must verify a real authenticated principal against ownership; raw client headers and a guessed session ID aren't proof. Attribution alone is not authorization. No verified adapter for the current remote ownership service is shipped yet, so those compositions display `Billing unavailable` rather than expose financial data. This is a rollout prerequisite, not a request to disable ownership checks.
+
+Trusted host plugins can consume `ctx.billingStatus.snapshot(sessionId)` or publish allowlisted observations through `ctx.billingStatus.observe(observation)`. There is no browser path to that ingestion method. The optional `/billing` command operates on the calling agent's own session.
+
+## Configuration
+
+All fields are optional. With no rate cards, supported native receipts and quota observations still work, while API-key requests remain unpriced. No stale catalog price or catalog zero is silently assumed correct.
+
+```yaml
+config:
+  staleAfterMs: 300000
+  # directory: /absolute/path/in/an/isolated/home/billing-status
+  rateCards: []
+```
+
+A rate card is explicit, immutable for an already-started request, and matches an exact provider/model. This **synthetic example is not a real model's price**:
+
+```yaml
+rateCards:
+  - provider: openai
+    model: fixture-model
+    currency: USD
+    version: fixture-v1
+    source: https://example.com/prices
+    inputMode: exclusive
+    inputPerMillion: '2'
+    outputPerMillion: '8'
+    cacheReadPerMillion: '0.2'
+    cacheWritePerMillion: '3'
+    maxInputTokens: 128000
+```
+
+`exclusive` means `inputTokens` excludes cache reads/writes, as required by DSH's normalized `TokenUsage` contract. `inclusive` is rejected: normalizing provider-total input is the adapter's job; subtracting cache here would double-subtract it. Missing cache rates with nonzero cache use make the request unpriced. OAuth routes cannot be assigned API rate cards. Context limits avoid applying a short-context price beyond its known range. Sources must be public HTTPS URLs without embedded credentials or query strings. Token prices do not include hosted-tool calls, multimodal fees or negotiated/provider-account charges.
+
+## Build and tests — no live activation
+
+From this directory:
+
+```sh
+pnpm install --ignore-scripts
+pnpm typecheck
+pnpm build
+pnpm test
+```
+
+Real DSH/pi-ai tests, **all provider network replaced with fixtures**, from the checkout root:
+
+```sh
+node --import tsx/esm --test ../plugins/billing-status/tests/collector-integration.mjs ../plugins/billing-status/tests/integration.mjs
+```
+
+The browser fixture and its exact launch command are in [tests/fixture-server.mjs](tests/fixture-server.mjs). It serves mock data and a shell-shaped dock, not another production DSH. No provider credentials are needed. Run only while doing isolated verification, then stop it.
+
+A bundle patch is supplied for a later explicitly approved install. The package has deliberately **not** been added to automatic installation lists or live/dev overlays.
+
+## Limitations and next steps
+
+1. Verified multi-user ownership authorization adapter before shared/remote rollout.
+2. Optional shared-library migration with the legacy audit, preserving explicit enforcement settings.
+3. Codex WebSocket telemetry through a supported hook; never force SSE to obtain billing data.
+4. OpenRouter generation-lookup reconciliation and more complete BYOK reporting; no extra network calls in this version.
+5. Maintained rate-card acquisition, actual served-model/service-tier pricing, multimodal and hosted-tool fees. Current estimates price the explicitly configured requested model's normalized tokens only.
+6. Ledger compaction/retention and recovery tooling before long-lived high-volume deployments. After a crash, inspect `writer.lock` and confirm no writer exists before removing a stale lock; preserve the ledger. Never delete a lock held by a live instance.
+
+Implementation/verification story: [billing-status recipe](../../recipes/billing-status-plugin.md). Original design: [provider-neutral plan](../../recipes/provider-neutral-billing-status-plan.md).

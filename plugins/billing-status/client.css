@@ -1,0 +1,64 @@
+/* No flex-order override: the existing outlet precedes ContextMeter in DOM.
+   order:1 moves pixels but reverses keyboard/reading order; fixture tests this. */
+.tali-billing-root {
+  display: inline-flex;
+  min-width: 0;
+  max-width: min(360px, 100%);
+  flex-shrink: 1;
+  box-sizing: border-box;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(20px + var(--dsh-content-font-delta-secondary, 0px));
+}
+.tali-billing-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 1px 8px;
+  border: none;
+  border-radius: 24px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary, #737780);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  line-height: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tali-billing-pill svg { width: 14px; height: 14px; flex: none; }
+.tali-billing-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tali-billing-pill:hover, .tali-billing-pill[aria-expanded='true'] {
+  background: var(--dsw-alias-interactive-bg-hover, #8882);
+  color: var(--dsw-alias-label-secondary, #555b64);
+}
+.tali-billing-pill:focus-visible, .tali-billing-panel:focus-visible { outline: 2px solid var(--dsw-alias-label-tertiary, #737780); outline-offset: 2px; }
+.tali-billing-panel {
+  position: fixed;
+  z-index: 1100;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: min(300px, calc(100vw - 24px));
+  max-width: min(440px, calc(100vw - 24px));
+  max-height: min(600px, calc(100dvh - 24px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--dsw-specific-menu, white);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  box-shadow: var(--dsw-elevation-prominent, 0 4px 24px #0003);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary, #555b64);
+}
+.tali-billing-heading { color: var(--dsw-alias-label-primary, #24262b); font-weight: 500; margin-bottom: 10px; }
+.tali-billing-section { margin-top: 14px; padding-top: 12px; border-top: .5px solid var(--dsw-alias-border-l2, #8884); }
+.tali-billing-rows { display: grid; gap: 6px; margin: 0; }
+.tali-billing-row { display: grid; grid-template-columns: minmax(76px, auto) minmax(0, 1fr); gap: 16px; }
+.tali-billing-row dt, .tali-billing-row dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.tali-billing-row dt { color: var(--dsw-alias-label-tertiary, #737780); }
+.tali-billing-row dd { text-align: right; font-variant-numeric: tabular-nums; }
+.tali-billing-reset { display: block; color: var(--dsw-alias-label-tertiary, #737780); }
+@media (max-width: 640px) { .tali-billing-root { max-width: 160px; } }
