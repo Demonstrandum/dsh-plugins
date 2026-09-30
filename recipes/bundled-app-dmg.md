@@ -436,6 +436,25 @@ the guest 6 GB (`DSH_VM_MEM`); the image needs ~28 GB free.
 - Volume name `DSH <version>` so a mounted image is never confused with the
   installed app.
 
+### Rebase onto main, 2026-09-29 (evening)
+
+- Main's live set gained `backup-restore`; it goes into `plugins.txt` like
+  every plugin `install-plugins.sh` installs. Its `pnpm-workspace.yaml` was
+  pnpm 12's generated stub (`esbuild: set this to true or false`), so a
+  fresh install of the plugin failed with `ERR_PNPM_IGNORED_BUILDS` — fixed
+  to `esbuild: true` like the others.
+- **The bundle must be built from the harness commit main pins**, not from
+  whatever the live checkout is on. `import-sessions` on main imports
+  `storeSessionLogs` from `dsh-session-log-export`, which exists at main's
+  pin (`fc92737`) and not 21 commits earlier (`5029131`, where the live
+  checkout sat); the staged plugin then fails to import at boot. Rebuilding
+  the live checkout would hot-swap the running server, so the build uses a
+  **worktree** of the submodule at the pinned commit (`git -C
+  deepseek-harness worktree add .worktrees/harness-<sha> <sha>`, `pnpm
+  install --frozen-lockfile && pnpm build` there, then `stage-dsh.mjs
+  --checkout <worktree>`). `release.mjs` should refuse a checkout whose
+  HEAD differs from the repo's submodule pin — added as a check.
+
 ## Known gaps / next
 
 - Still open from the milestone-2 design: port-conflict handling when 3090

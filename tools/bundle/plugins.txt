@@ -25,3 +25,4 @@ chat-title
 import-sessions
 app-lifeline
 app-setup
+backup-restore
