@@ -331,6 +331,8 @@ can reproduce or maintain it:
 
 ### Recipe index
 
+- [provider-neutral-billing-status-plan.md](recipes/provider-neutral-billing-status-plan.md) — research-only proposal for a provider-neutral dock billing plugin: Tau cost versus quota UI, OpenRouter reported charges, API-key estimates, OAuth window/credit evidence, out-of-tree placement, durable accounting, ownership, and no-fork integration gaps; not implemented or deployed.
+
 - [oauth-flow-names-and-routes.md](recipes/oauth-flow-names-and-routes.md) — short `/oauth` flow names versus isolated `-oauth` provider routes for every supported catalog flow, the command-oauth rename, prerequisite questions and device codes, credential isolation, offline verification, and explicit rollout.
 
 - [provider-scoped-prompt-excision.md](recipes/provider-scoped-prompt-excision.md) — standalone literal whole-paragraph removal from selected providers' initial system prompts, the opt-in Anthropic OAuth mapping, pre-admission logging fidelity, interpolation and verbatim-persona limits, and offline replay/pi-ai wire verification.
