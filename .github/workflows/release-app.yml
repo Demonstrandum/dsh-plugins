@@ -41,7 +41,7 @@ jobs:
   release:
     # On push: only when the head commit says so. Manual runs always proceed.
     if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release:')
-    runs-on: macos-15
+    runs-on: macos-26   # arm64; the wrapper uses macOS 26 APIs (NSGlassEffectView) that the 15 SDK lacks
     timeout-minutes: 90
     permissions:
       contents: write   # gh release create
