@@ -171,7 +171,16 @@ function allowBuilds() {
   return map
 }
 
+/** pnpm 12+: the only major that applies overrides to peerDependencies, which the tarball pinning relies on. */
+async function assertPnpm() {
+  const { stdout } = await execFileAsync('pnpm', ['--version'], { env: PNPM_ENV })
+  const major = Number(stdout.trim().split('.')[0])
+  if (!(major >= 12)) throw new Error(`stage-dsh needs pnpm >= 12 (overrides must reach peerDependencies); found ${stdout.trim()}`)
+  log(`pnpm ${stdout.trim()}`)
+}
+
 async function main() {
+  await assertPnpm()
   mkdirSync(OUT, { recursive: true })
   let records
   const recordsFile = join(OUT, 'tarballs.json')
@@ -209,6 +218,15 @@ async function main() {
     log(`packed plugin ${info.name}@${info.version}`)
   }
 
+  // Plugin dependencies with install scripts the bundle needs to run:
+  // @vscode/ripgrep downloads the rg binary (fs-tools' `search`).
+  // A tarball-resolved package is keyed `name@file:tarballs/x.tgz` in pnpm's
+  // build check, so every allowed first-party name gets that form as well.
+  const builds = { ...allowBuilds(), '@vscode/ripgrep': true }
+  for (const [name, allowed] of Object.entries(builds)) {
+    if (allowed && byName.has(name)) builds[`${name}@file:tarballs/${byName.get(name).file}`] = true
+  }
+
   const fork = readJson(join(CHECKOUT, 'package.json'))
   writeFileSync(join(OUT, 'package.json'), JSON.stringify({
     name: 'dsh-app-runtime',
@@ -219,19 +237,15 @@ async function main() {
     dshBundle: { fork: fork.version, plugins },
   }, null, 2) + '\n')
 
-  // Plugin dependencies with install scripts the bundle needs to run:
-  // @vscode/ripgrep downloads the rg binary (fs-tools' `search`).
-  // A tarball-resolved package is keyed `name@file:tarballs/x.tgz` in pnpm's
-  // build check, so every allowed first-party name gets that form as well.
-  const builds = { ...allowBuilds(), '@vscode/ripgrep': true }
-  for (const [name, allowed] of Object.entries(builds)) {
-    if (allowed && byName.has(name)) builds[`${name}@file:tarballs/${byName.get(name).file}`] = true
-  }
   // pnpm 12 reads overrides from pnpm-workspace.yaml ONLY; a `pnpm.overrides`
   // block in package.json is ignored with a warning — and then every
   // first-party `^0.1.6-alpha.2` spec silently resolves to UPSTREAM's npm
   // release instead of the fork's tarball (measured: 125 tarball resolutions,
-  // the rest from registry.npmjs.org). verifyFirstParty() guards against it.
+  // the rest from registry.npmjs.org). pnpm 11 reads this file too but does
+  // NOT apply overrides to peerDependencies (measured 2026-09-30: 87
+  // first-party names installed a second time from the registry via peers —
+  // two copies of every service, the Symbol.for trap of the promotion recipe).
+  // Hence the version gate in main() and verifyFirstParty() as the backstop.
   const yaml = [
     `nodeLinker: ${NODE_LINKER}`,
     'overrides:',

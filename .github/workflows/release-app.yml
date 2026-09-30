@@ -85,6 +85,16 @@ jobs:
           pnpm exec tsdown --env.DSH_BUILD_FACE host
           pnpm build
 
+      # The stage tool needs pnpm >= 12: only 12 applies overrides to
+      # peerDependencies, which is how every first-party name is pinned to the
+      # fork's tarball (pnpm 11 installed 87 of them a second time from npm).
+      # The harness above wanted its own 11.7; switch now, for this repo's tools.
+      - name: pnpm 12 for the bundle tools
+        run: |
+          corepack enable
+          corepack prepare pnpm@12.4.2 --activate
+          pnpm --version
+
       - name: Release notes
         id: notes
         shell: bash

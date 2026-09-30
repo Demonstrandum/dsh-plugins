@@ -484,6 +484,15 @@ build; then `release.mjs --repo $GITHUB_REPOSITORY`, which enforces the
 pin. `permissions: contents: write` is all `gh release create` needs; the
 release's DMG + `.sha256` are what installed apps update from.
 
+**pnpm 12 is required for the stage** and the workflow switches to it
+(corepack) after building the harness with its own 11.7: pnpm 11 reads the
+`pnpm-workspace.yaml` overrides but does not apply them to
+`peerDependencies`, so the first CI run installed 87 first-party packages a
+*second* time from npm through peer edges — two copies of every service,
+the `Symbol.for` failure mode of `promotion-loop-and-duplicate-dsh-tools.md`
+at package scale. `verifyFirstParty()` caught it; `stage-dsh.mjs` now also
+refuses to run under pnpm < 12.
+
 Testing it needs the file on the repo's **default branch** (GitHub only
 registers `workflow_dispatch` there) — on the fork the default was
 temporarily switched to the PR branch for the trial run, then back.
