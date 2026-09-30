@@ -12,7 +12,7 @@ The inspected local Rho checkout has three separate pieces:
 
 Rho's investigation notes record historical accepted/rejected requests and header observations, with same-day classifier changes and utilization confounding. They do not reconcile invoices or account ledgers. OAuth acceptance, HTTP 200, CLI-like request formatting, plan-window limiter claims, and confirmed seat billing are different facts. Subscription extra usage and platform API billing are also different funding paths.
 
-The inspected DSH fork's `anthropic-oauth` route is implemented in the in-tree `llm-pi-ai` and authorization plugins, not one of the public out-of-tree plugins. Existing uncommitted OAuth implementation changes are left untouched. The route's pi-ai 0.87.1 dependency already implements:
+The inspected DSH fork's `anthropic-oauth` route is implemented in the in-tree `llm-pi-ai` and authorization plugins, not one of the public out-of-tree plugins. The audit implementation originally left existing OAuth edits untouched; the subsequent [OAuth naming change](oauth-flow-names-and-routes.md) generalizes isolated routes and renames the command package without changing this audit's selected provider id. The route's pi-ai 0.87.1 dependency already implements:
 
 1. OAuth login/refresh and Bearer access tokens, separately from the API-key provider route.
 2. The first system block `You are Claude Code, Anthropic's official CLI for Claude.`
