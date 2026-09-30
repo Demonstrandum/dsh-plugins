@@ -8,7 +8,7 @@ const url = id => `/api/billing-status/snapshot?sessionId=${id}`
 const owner = name => `${name}@example.com`
 function setup(options = {}) {
   return createSessionReadAccess({ lookupOwner: id => id === 'session-one' ? owner('alice') : owner('bob'),
-    selfLogin: () => 'alice@example.com', requestRejection: req => req.headers.cookie === 'authenticated' ? undefined : 401, ...options })
+    selfLogin: () => 'operator@example.com', requestRejection: req => req.headers.cookie === 'authenticated' ? undefined : 401, ...options })
 }
 const request = (id, headers = {}) => new Request(`http://localhost${url(id)}`, { headers })
 test('proxy grants bind verified login, exact request and explicit owner, then expire/consume', async () => {
@@ -71,6 +71,25 @@ test('invalid legacy or changed bindings never authorize an outstanding request'
   binding = 'bob@example.com'
   assert.equal(await access.canRead(request('session-one', grant), 'session-one'), false)
   access.dispose()
+})
+test('the node operator reads every session; others still need a binding; unknown self identity grants nothing', async () => {
+  const unbound = () => undefined
+  const read = async (access, who, id = 'session-unbound') => access.canRead(request(id, access.proxyHeaders({ method: 'GET', url: url(id) }, { kind: 'user', login: who })), id)
+  const access = setup({ lookupOwner: unbound })
+  assert.equal(await read(access, 'Operator@Example.com'), true)
+  assert.equal(await read(access, 'alice@example.com'), false)
+  access.dispose()
+  for (const selfLogin of [() => undefined, () => '', () => 'LOCAL', () => { throw new Error('no route') }]) {
+    const tagged = setup({ lookupOwner: unbound, selfLogin })
+    assert.equal(await read(tagged, 'operator@example.com'), false)
+    tagged.dispose()
+  }
+  // The operator rule still requires a valid, unexpired, exact-path grant.
+  const strict = setup({ lookupOwner: unbound })
+  const grant = strict.proxyHeaders({ method: 'GET', url: url('session-one') }, { kind: 'user', login: 'operator@example.com' })
+  assert.equal(await strict.canRead(request('session-two', grant), 'session-two'), false)
+  assert.equal(await strict.canRead(request('session-one', { [READ_GRANT_HEADER]: 'x'.repeat(43) }), 'session-one'), false)
+  strict.dispose()
 })
 function send(port, path, headers = {}) {
   return new Promise((resolve, reject) => {

@@ -69,7 +69,12 @@ export function createSessionReadAccess({ lookupOwner, selfLogin, requestRejecti
       grants.delete(token) // successful and failed reads both consume the grant
       const route = target(request.method, request.url)
       if (!grant || !route || grant.expires <= now() || route.sessionId !== sessionId || route.path !== grant.path) return false
-      // Only an explicit operator-provided session -> login binding is authoritative.
+      // This node's own Tailscale identity is the machine operator, who can already read the
+      // DSH home on disk; it may read every session. Unknown/tagged self identity grants nothing.
+      let operator
+      try { operator = login(selfLogin()) } catch { operator = undefined }
+      if (operator !== undefined && grant.login === operator) return true
+      // Anyone else needs an explicit operator-provided session -> login binding.
       // Legacy attribution records, including first-driving-method labels, are NOT accepted.
       return login(lookupOwner(sessionId)) === grant.login
     },

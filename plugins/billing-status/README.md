@@ -34,6 +34,8 @@ Amounts are compact display rounding over the host's exact decimals: at most two
 
 Clicking opens a card in ContextMeter's panel skin: headline figure, exact per-kind amounts with scope, quota windows with bars and reset times, notes, and request count/model/route/observed time. The OAuth shield and API glyph match the model picker's `RouteIcon` exactly, as local SVG code rather than a runtime import from the picker plugin. No UI help paragraphs.
 
+With `dsh-tailscale-remote` loaded, the snapshot route is authorized per request: the machine's own Tailscale login and authenticated direct loopback callers (the same operator) read every session; other tailnet users need explicit `billingSessionOwners` bindings (see that plugin's README).
+
 ### Placement
 
 The plugin registers in `conversation.composer.dock` at order -10, before the session stats (order 0), so billing is **leftmost** in the status area and the context meter stays rightmost, away from billing. Natural DOM order, so visual and keyboard order agree. The earlier CSS `order: 1` experiment (visual order after the meter, keyboard order before it) was rejected for that mismatch.

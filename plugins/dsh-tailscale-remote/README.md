@@ -593,14 +593,14 @@ System-level story, facts and troubleshooting: `recipes/tailscale-remote-plugin.
 
 Optional integration with [billing-status](../billing-status/README.md); neither plugin requires the other to be enabled. This adapter is source-tested, not automatically installed or activated. It authenticates the requester but does **not** infer financial ownership from the Server pane's historical attribution labels.
 
-An operator must explicitly bind each authorized session to a login in this plugin's configuration. Merge the field into the full existing row config; DSH patch config values replace rather than deep-merge. Example placeholders only:
+This node's own Tailscale identity (the login `tailscale status` reports for the machine, i.e. its operator, who can already read the DSH home on disk) may read billing for **every** session. A tagged node has no such identity and gets no operator rule. Every other login needs an explicit binding of each authorized session in this plugin's configuration. Merge the field into the full existing row config; DSH patch config values replace rather than deep-merge. Example placeholders only:
 
 ```yaml
 billingSessionOwners:
   session-example: user@example.com
 ```
 
-Default `{}` denies all sessions. No wildcard, role expansion, actor fallback, first-view claim or automatic migration from `sessionOwners` exists. A binding is an explicit permission decision, not evidence of who paid. Review account/session association before adding it; remove it to revoke permission. Config remount disposes all outstanding grants. Do not edit a live profile without explicit approval.
+Default `{}` denies all sessions to everyone except the node operator. No wildcard, role expansion, actor fallback, first-view claim or automatic migration from `sessionOwners` exists. A binding is an explicit permission decision, not evidence of who paid. Review account/session association before adding it; remove it to revoke permission. Config remount disposes all outstanding grants. Do not edit a live profile without explicit approval.
 
 The admitting proxy mints a one-use 256-bit capability for the exact billing GET/session path, after identity admission. It strips client-supplied capability headers, retains grants for at most 15 seconds and bounds storage to 4096 entries. The Fetch handler consumes the capability before comparing the verified login to the explicit binding. Token/QR-cookie admission alone has no identified person and is denied. An authenticated, non-forwarded, direct loopback request uses the node's known self login; unknown/tagged-node self identity is denied. Forged ownership labels or malformed session request bodies cannot change this policy.
 
