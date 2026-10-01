@@ -51,7 +51,10 @@ export function snapshotHandler(ctx, ledger) {
 export function apply(ctx, input) {
   const config = resolveConfig(input)
   // List prices come from DSH's model catalog (`pricing` on resolved model info); absent on older DSH.
-  const ledger = new BillingLedger({ ...config, pricing: async (provider, model) => (await ctx.llm.resolveModelInfo(provider, model)).pricing })
+  // Subscription usage comes from `ctx.llm.subscriptionUsage` (custom fork); absent on older DSH.
+  const ledger = new BillingLedger({ ...config,
+    pricing: async (provider, model) => (await ctx.llm.resolveModelInfo(provider, model)).pricing,
+    usage: typeof ctx.llm?.subscriptionUsage === 'function' ? provider => ctx.llm.subscriptionUsage(provider) : undefined })
   ctx.effect(() => () => ledger.close(), 'billing-status: durable ledger')
   ctx.provide('billingStatus', {
     // Trusted in-process extension point; there is deliberately no HTTP ingestion endpoint.

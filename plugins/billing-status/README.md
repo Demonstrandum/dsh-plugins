@@ -14,7 +14,9 @@ An **opt-in, out-of-tree** billing observer, request ledger, and compact compose
 | API-key routes whose model DSH's catalog prices | Normalized token usage × `ctx.llm.resolveModelInfo(provider, model).pricing` | Versioned **model-token estimate** (`~$`); tools, media and contract discounts aren't priced |
 | Unsupported/custom transports, including Codex WebSocket | Explicit unobserved evidence | Unknown, never an invented zero |
 
-Only scoped inference requests are observed. No quota/credit snapshot is shared across sessions or persisted. The most recently started request invalidates the previous claim, including a new request on the same provider. Staleness is based on server time. A claim describes that observed response, not whether future requests will use the same billing route.
+Only scoped inference requests are observed passively. Subscription readings (5h/7d windows) are account-wide, so the latest accepted reading is remembered per session **and** per subscription route, and written to `quota.json` (0600, newest 512 sessions) beside the ledger. After a restart the previous reading comes back marked stale rather than disappearing; a session on a subscription route with no reading at all shows the shield with `—`, never the API glyph. A late response from a superseded request updates neither. Staleness is based on server time (default five minutes).
+
+When the **displayed** session needs a reading (none, or only a stale one), the host asks DSH once for the account's current usage through `ctx.llm.subscriptionUsage(route)` (custom fork; implemented for `anthropic-oauth` via Anthropic's usage endpoint). That happens at most once per account per process; a failure retries after five minutes or the endpoint's `retry-after`. After that, every model response's own headers keep the reading current, so there is no polling. Credentials never pass through this plugin: the model adapter makes the call with its own refreshed token. Credit facts (Codex) stay in memory only.
 
 ### Compact display
 
@@ -54,7 +56,7 @@ Billing and the audit's explicit `mode: observe` use one reference-counted, vers
 - Auxiliary LLM calls are included when they carry `sessionId`; unattributed calls are not assigned to an arbitrary active chat. Descendants use their own session IDs.
 - A plugin-owned append-only ledger is independent of DSH history. Rewind/compaction isn't a refund. Copies/forks don't re-incur inherited costs. There is no historic-session backfill; the UI shows the first observed request time.
 - Rate-card versions and monetary results survive reload without repricing history. Quota windows and credit balances do not. In-flight records recovered from an old process are marked incomplete, not indefinitely pending.
-- The ledger stores allowlisted metadata/usage/costs only, never prompts, completions, raw headers, credentials or account quota snapshots. A file is mode 0600 and its new directory mode 0700.
+- The ledger stores allowlisted metadata/usage/costs only, never prompts, completions, raw headers or credentials; `quota.json` holds only window percentages, reset times, route and model. A file is mode 0600 and its new directory mode 0700.
 - A writer lock rejects concurrent writers; existing history is replayed read-only when a lock remains, with an explicit unhealthy-storage state. Corruption, torn final lines, excessive replay size (64 MiB), queue overflow or disk failure makes storage unhealthy and stops further appends rather than silently claiming complete durable totals. Collecting billing must never fail inference.
 
 Files default to `$DSH_HOME/billing-status/ledger.jsonl` and `writer.lock`. This is separate from the session event log: the current session append API cannot mark an external event ignorable. Do not manually inject required billing events into DSH history.

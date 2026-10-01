@@ -60,6 +60,61 @@ test('catalog prices estimate new usage and, at read time, usage recorded before
   await ledger.snapshot('session-one')
   assert.ok(!lookups.some(key => key.startsWith('anthropic-oauth/')))
 })
+test('subscription readings survive restart (stale), are shared per account, and usage is fetched once when needed', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'billing-quota-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  let clock = '2026-01-01T00:00:00.000Z'
+  const now = () => clock
+  const oauthBase = { ...base, provider: 'anthropic-oauth', model: 'claude-opus-5-5' }
+  const first = new BillingLedger({ directory, rateCards: [], now })
+  await first.record({ ...oauthBase, phase: 'start' })
+  await first.record({ ...oauthBase, phase: 'evidence', evidence: { kind: 'anthropic-oauth', outcome: 'plan-evidence', windows: [{ label: '5h', usedPercent: 3 }, { label: '7d', usedPercent: 1 }] } })
+  await first.record({ ...oauthBase, phase: 'finish' })
+  assert.equal((await first.snapshot('session-one')).counts.unpriced, 0, 'subscription requests are not unpriced')
+  await first.close()
+
+  clock = '2026-01-01T01:00:00.000Z'
+  const calls = []
+  let answer = { windows: [{ label: '5h', usedPercent: 40 }, { label: '7d', usedPercent: 12 }], observedAt: '2026-01-01T01:00:00.000Z' }
+  const second = new BillingLedger({ directory, rateCards: [], now, usage: async route => { calls.push(route); return answer } })
+  await second.ready
+  t.after(() => second.close())
+  // Restored but stale: shown, and one background usage read is requested.
+  let latest = (await second.snapshot('session-one')).latest
+  assert.equal(latest.kind, 'plan')
+  assert.equal(latest.stale, true)
+  assert.deepEqual(latest.windows.map(w => w.usedPercent), [3, 1])
+  await new Promise(resolve => setTimeout(resolve, 10))
+  latest = (await second.snapshot('session-one')).latest
+  assert.deepEqual([latest.stale, latest.windows.map(w => w.usedPercent)], [false, [40, 12]])
+  // Another session on the same account shares the account reading without a second fetch.
+  await second.record({ ...oauthBase, sessionId: 'session-two', requestId: 'r2', phase: 'start' })
+  assert.deepEqual((await second.snapshot('session-two')).latest.windows.map(w => w.usedPercent), [40, 12])
+  clock = '2026-01-01T02:00:00.000Z'
+  await second.snapshot('session-two')
+  await new Promise(resolve => setTimeout(resolve, 10))
+  assert.deepEqual(calls, ['anthropic-oauth'], 'at most once per account per process')
+  const saved = JSON.parse(await readFile(join(directory, 'quota.json'), 'utf8'))
+  assert.equal(saved.accounts['anthropic-oauth'].source, 'usage-endpoint')
+  assert.equal((await stat(join(directory, 'quota.json'))).mode & 0o777, 0o600)
+})
+test('usage failures retry after backoff; a route with no reading shows the subscription marker', async t => {
+  let calls = 0
+  const { ledger } = await fixture(t, { rateCards: [], usageRetryMs: 0, usage: async () => { calls++; throw new Error('subscription usage rate limited') } })
+  const oauthBase = { ...base, provider: 'anthropic-oauth', model: 'm' }
+  await ledger.record({ ...oauthBase, phase: 'usage', usage: { inputTokens: 1, outputTokens: 1 } })
+  await ledger.record({ ...oauthBase, phase: 'finish' })
+  const latest = (await ledger.snapshot('session-one')).latest
+  assert.deepEqual([latest.provider, latest.kind], ['anthropic-oauth', 'unobserved'])
+  await new Promise(resolve => setTimeout(resolve, 10))
+  await ledger.snapshot('session-one')
+  await new Promise(resolve => setTimeout(resolve, 10))
+  assert.equal(calls, 2)
+  // API-key sessions never ask for subscription usage.
+  await ledger.record({ ...base, sessionId: 'api', provider: 'anthropic', phase: 'start' })
+  await ledger.snapshot('api')
+  assert.equal(calls, 2)
+})
 test('in-flight requests are pending not unpriced; failures before any usage are not billed', async t => {
   const { ledger } = await fixture(t, { rateCards: [] })
   await ledger.record({ ...base, phase: 'start' })
@@ -115,13 +170,15 @@ test('OAuth evidence is not dollars; quota is transient and stale is explicit', 
   assert.equal(data.includes('never-persist-this'), false)
   assert.equal((await stat(join(directory, 'ledger.jsonl'))).mode & 0o777, 0o600)
 })
-test('a new request invalidates an old positive claim, including same-provider account changes', async t => {
-  const { ledger } = await fixture(t)
+test('a late response from a superseded request never replaces the shown reading', async t => {
+  const { ledger } = await fixture(t, { now: () => '2026-01-01T00:00:03.000Z' })
   const request = { ...base, provider: 'anthropic-oauth' }
-  await ledger.record({ ...request, phase: 'evidence', evidence: { outcome: 'plan-evidence' } })
+  await ledger.record({ ...request, phase: 'evidence', evidence: { outcome: 'plan-evidence', windows: [{ label: '5h', usedPercent: 10 }] } })
   await ledger.record({ ...request, requestId: 'new-account-request', at: '2026-01-01T00:00:01Z', phase: 'start' })
-  await ledger.record({ ...request, at: '2026-01-01T00:00:02Z', phase: 'evidence', evidence: { outcome: 'plan-evidence' } })
-  assert.equal((await ledger.snapshot('session-one')).latest.kind, 'unobserved')
+  await ledger.record({ ...request, at: '2026-01-01T00:00:02Z', phase: 'evidence', evidence: { outcome: 'plan-evidence', windows: [{ label: '5h', usedPercent: 99 }] } })
+  const latest = (await ledger.snapshot('session-one')).latest
+  // While the new request is in flight, the last accepted account reading stays on screen.
+  assert.deepEqual([latest.kind, latest.requestId, latest.windows.map(w => w.usedPercent)], ['plan', 'new-account-request', [10]])
 })
 test('a completed request without usage stays unpriced, never becomes a free request', async t => {
   const { ledger } = await fixture(t)
@@ -132,7 +189,7 @@ test('a completed request without usage stays unpriced, never becomes a free req
   assert.equal(snapshot.counts.failed, 0)
   assert.deepEqual(snapshot.totals, [])
 })
-test('reload preserves costs but not quota; history/forks do not inherit costs', async t => {
+test('reload preserves costs; API sessions get no quota reading; history/forks do not inherit costs', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'billing-reload-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const ledger = new BillingLedger({ directory, rateCards: [card] })

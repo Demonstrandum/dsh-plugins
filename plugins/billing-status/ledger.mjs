@@ -1,5 +1,5 @@
 import { constants } from 'node:fs'
-import { mkdir, open, unlink } from 'node:fs/promises'
+import { mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { units, decimal, priceUsage, validateRateCards, catalogCard } from './money.mjs'
@@ -54,7 +54,7 @@ function cleanRow(row) {
 
 /** Append-only request states, separate from DSH history: rewind is not a refund. */
 export class BillingLedger {
-  constructor({ directory, rateCards = [], staleAfterMs = 300_000, now = () => new Date().toISOString(), pricing }) {
+  constructor({ directory, rateCards = [], staleAfterMs = 300_000, now = () => new Date().toISOString(), pricing, usage, usageRetryMs = 300_000 }) {
     this.directory = directory
     this.cards = validateRateCards(rateCards)
     // DSH's resolved-model list prices (`ctx.llm.resolveModelInfo().pricing`), looked up per route/model.
@@ -63,7 +63,15 @@ export class BillingLedger {
     this.staleAfterMs = staleAfterMs
     this.now = now
     this.rows = new Map()
-    this.latest = new Map() // Quota snapshots are deliberately never persisted.
+    // Latest subscription reading per session and per account (route). Persisted to quota.json so a
+    // restart shows the previous reading (stale) instead of nothing; quota is account-wide.
+    this.latest = new Map()
+    this.accounts = new Map()
+    // `ctx.llm.subscriptionUsage(route)`: asked at most once per account per process when a displayed
+    // session has no fresh reading; afterwards each response's headers keep the reading current.
+    this.usage = usage
+    this.usageRetryMs = usageRetryMs
+    this.usageAttempts = new Map()
     this.startOrders = new Map()
     this.sequence = 0
     this.recovered = new Set()
@@ -113,6 +121,64 @@ export class BillingLedger {
       // Preserve the valid prefix, but never append to a damaged log or claim complete totals.
       this.persistence = 'error'
     } finally { lines.close() }
+    await this.loadQuota()
+  }
+  /** Restore remembered readings; a corrupt or missing file just means none. */
+  async loadQuota() {
+    let data
+    try { data = JSON.parse(await readFile(join(this.directory, 'quota.json'), 'utf8')) } catch { return }
+    if (data?.version !== 1) return
+    const entry = value => {
+      const provider = identifier(value?.provider), model = identifier(value?.model), at = timestamp(value?.at)
+      if (!provider || !model || !at || !oauth(provider) || !['plan', 'quota', 'extra'].includes(value.kind)) return undefined
+      return { order: 0, provider, model, at, startedAt: at, kind: value.kind, windows: windowsOf(value.windows),
+        ...(value.source === 'usage-endpoint' ? { source: 'usage-endpoint' } : {}) }
+    }
+    for (const [sessionId, value] of Object.entries(data.sessions ?? {})) {
+      const restored = identifier(sessionId) && entry(value)
+      if (restored && !this.latest.has(sessionId)) this.latest.set(sessionId, restored)
+    }
+    for (const value of Object.values(data.accounts ?? {})) {
+      const restored = entry(value)
+      if (restored && !this.accounts.has(restored.provider)) this.accounts.set(restored.provider, restored)
+    }
+  }
+  /** Atomic rewrite of the remembered readings (writer only), bounded to the 512 newest sessions. */
+  async saveQuota() {
+    if (!this.lock) return
+    const keep = value => ({ provider: value.provider, model: value.model, at: value.at, kind: value.kind, windows: value.windows,
+      ...(value.source ? { source: value.source } : {}) })
+    const sessions = [...this.latest].filter(([, v]) => ['plan', 'quota', 'extra'].includes(v.kind) && oauth(v.provider))
+      .sort((a, b) => Date.parse(b[1].at) - Date.parse(a[1].at)).slice(0, 512)
+    const body = JSON.stringify({ version: 1, sessions: Object.fromEntries(sessions.map(([id, v]) => [id, keep(v)])),
+      accounts: Object.fromEntries([...this.accounts].map(([route, v]) => [route, keep(v)])) })
+    const path = join(this.directory, 'quota.json'), temp = `${path}.${process.pid}.tmp`
+    try { await writeFile(temp, body, { mode: 0o600 }); await rename(temp, path) } catch { /* memory still serves this process */ }
+  }
+  /** Remember an account reading if it is newer than the one held. */
+  rememberAccount(entry) {
+    if (!oauth(entry.provider) || !['plan', 'quota', 'extra'].includes(entry.kind)) return false
+    const held = this.accounts.get(entry.provider)
+    if (held && Date.parse(held.at) > Date.parse(entry.at)) return false
+    this.accounts.set(entry.provider, { ...entry, order: 0 })
+    return true
+  }
+  /** One background usage read per account per process; failures retry after usageRetryMs. */
+  requestUsage(route, model) {
+    if (!this.usage || this.closed) return
+    const attempt = this.usageAttempts.get(route)
+    if (attempt && (attempt.state !== 'failed' || Date.now() < attempt.retryAt)) return
+    this.usageAttempts.set(route, { state: 'pending' })
+    Promise.resolve().then(() => this.usage(route)).then(async result => {
+      if (!result || !Array.isArray(result.windows) || result.windows.length === 0) { this.usageAttempts.set(route, { state: 'done' }); return }
+      const at = timestamp(result.observedAt) ?? this.now()
+      const entry = { order: 0, provider: route, model: identifier(model) ?? 'account', at, startedAt: at, kind: 'plan', windows: windowsOf(result.windows), source: 'usage-endpoint' }
+      this.usageAttempts.set(route, { state: 'done' })
+      if (this.rememberAccount(entry)) await this.saveQuota()
+    }).catch(error => {
+      const seconds = /retry after (\d+)s/.exec(String(error?.message))?.[1]
+      this.usageAttempts.set(route, { state: 'failed', retryAt: Date.now() + Math.max(this.usageRetryMs, Number(seconds ?? 0) * 1000) })
+    })
   }
   /** Configured card first, then DSH's catalog list prices; cached for ten minutes per route/model. */
   async cardFor(provider, model, configured) {
@@ -160,13 +226,17 @@ export class BillingLedger {
         }
         if (identifier(evidence.responseId)) row.responseId = evidence.responseId
         const latest = this.latest.get(row.sessionId)
+        const reading = { order, requestId: row.requestId, provider: row.provider, model: row.model, at: row.at, startedAt: row.startedAt,
+          kind: row.outcome, windows: windowsOf(evidence.windows),
+          ...(evidence.kind === 'openai-codex' && typeof evidence.credits?.hasCredits === 'boolean' && typeof evidence.credits?.unlimited === 'boolean'
+            ? { credits: { hasCredits: evidence.credits.hasCredits, unlimited: evidence.credits.unlimited,
+              ...(units(evidence.credits.balance) !== undefined ? { balance: evidence.credits.balance } : {}) } } : {}) }
         // The newest started request wins, not a late response from an older concurrent call.
+        // A late response from a superseded request updates neither the session nor its account.
         if (!latest || order >= latest.order) {
-          this.latest.set(row.sessionId, { order, requestId: row.requestId, provider: row.provider, model: row.model, at: row.at, startedAt: row.startedAt,
-            kind: row.outcome, windows: windowsOf(evidence.windows),
-            ...(evidence.kind === 'openai-codex' && typeof evidence.credits?.hasCredits === 'boolean' && typeof evidence.credits?.unlimited === 'boolean'
-              ? { credits: { hasCredits: evidence.credits.hasCredits, unlimited: evidence.credits.unlimited,
-                ...(units(evidence.credits.balance) !== undefined ? { balance: evidence.credits.balance } : {}) } } : {}) })
+          this.latest.set(row.sessionId, reading)
+          this.rememberAccount(reading)
+          if (['plan', 'quota', 'extra'].includes(reading.kind)) await this.saveQuota()
         }
       }
       if (observation.phase === 'start') {
@@ -193,6 +263,27 @@ export class BillingLedger {
     }).catch(() => { this.persistence = 'error' }).finally(() => { this.queueDepth-- })
     return this.tail
   }
+  /**
+   * The reading to show for a session: its own, or its subscription account's when newer (quota is
+   * account-wide), or a bare route marker so the pill shows the right kind of glyph. Asks DSH for
+   * the account's usage once when nothing fresh is known.
+   */
+  subscriptionReading(sessionId, stored, now) {
+    let latest = this.latest.get(sessionId)
+    const last = stored[stored.length - 1]
+    const route = latest?.provider ?? last?.provider
+    if (!route || !oauth(route)) return latest
+    const account = this.accounts.get(route)
+    const known = ['plan', 'quota', 'extra']
+    if (account && (!latest || !known.includes(latest.kind) || Date.parse(account.at) > Date.parse(latest.at))) {
+      const { requestId: _request, ...shared } = account
+      latest = { ...shared, order: latest?.order ?? 0, ...(latest?.requestId ? { requestId: latest.requestId } : {}) }
+    }
+    latest ??= { order: 0, provider: route, model: last?.model ?? 'account', at: last?.at ?? now, startedAt: last?.startedAt ?? now, kind: 'unobserved', windows: [] }
+    const fresh = known.includes(latest.kind) && Date.parse(now) - Date.parse(latest.at) <= this.staleAfterMs
+    if (!fresh) this.requestUsage(route, latest.model)
+    return latest
+  }
   async snapshot(sessionId) {
     await this.tail
     const stored = [...this.rows.values()].filter(row => row.sessionId === sessionId)
@@ -215,7 +306,8 @@ export class BillingLedger {
       if (!row.cost) {
         // In flight: counted as pending until its usage arrives. Failed before any usage (e.g. a
         // rejected request): nothing was processed, so it is not an unknown cost.
-        if (row.outcome === 'plan' || !row.finished) continue
+        // Subscription requests are covered by the plan, not unknown spend.
+        if (row.outcome === 'plan' || !row.finished || row.authKind === 'oauth' || oauth(row.provider)) continue
         if (row.incomplete && !row.usage) counts.failed++
         else counts.unpriced++
         continue
@@ -232,8 +324,8 @@ export class BillingLedger {
       if (row.cost.kind === 'estimated' && row.cost.pricingVersion) total.sources.add(row.cost.pricingVersion)
       totals.set(key, total)
     }
-    const latest = this.latest.get(sessionId)
     const now = this.now()
+    const latest = this.subscriptionReading(sessionId, stored, now)
     return { version: 1, sessionId, totals: [...totals.values()].map(({ units: amount, sources, ...rest }) => ({ ...rest, amount: decimal(amount), ...(sources.size === 1 ? { source: [...sources][0] } : {}) })), counts,
       ...(latest ? { latest: { ...latest, stale: Date.parse(now) - Date.parse(latest.at) > this.staleAfterMs || Date.parse(now) < Date.parse(latest.at) } } : {}),
       persistence: this.persistence, staleAfterMs: this.staleAfterMs,
