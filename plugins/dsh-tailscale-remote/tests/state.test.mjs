@@ -62,6 +62,35 @@ describe('tailscale helpers', () => {
   })
 })
 
+describe('Dock app bundle identity', async () => {
+  const { BUNDLE_ID, bundleIdFor, instanceFromBundleId, resolveInstance, bundleIdCollisions } = await import('../dock-app.mjs')
+  it('round-trips instance tags through bundle ids', () => {
+    assert.equal(instanceFromBundleId(bundleIdFor('')), '')
+    assert.equal(instanceFromBundleId(bundleIdFor('personal')), 'personal')
+    assert.equal(instanceFromBundleId('com.apple.Safari.WebApp.x'), undefined)
+    assert.equal(instanceFromBundleId(`${BUNDLE_ID}x`), undefined)
+  })
+  it('keeps the replaced wrapper\'s instance unless one is given', () => {
+    const personal = { kind: 'wrapper', bundleId: bundleIdFor('personal') }
+    assert.equal(resolveInstance(undefined, personal), 'personal')
+    assert.equal(resolveInstance('staging', personal), 'staging')
+    assert.equal(resolveInstance('', personal), '')
+    assert.equal(resolveInstance(undefined, { kind: 'none' }), '')
+    assert.equal(resolveInstance(undefined, { kind: 'safari-webapp', bundleId: 'com.apple.Safari.WebApp.1' }), '')
+  })
+  it('reports other wrappers sharing a bundle id, never the destination itself', () => {
+    const wrappers = [
+      { path: '/A/DSH.app', kind: 'wrapper', bundleId: BUNDLE_ID },
+      { path: '/A/DSH Personal.app', kind: 'wrapper', bundleId: BUNDLE_ID },
+      { path: '/A/DSH Preview.app', kind: 'wrapper', bundleId: bundleIdFor('preview') },
+      { path: '/A/Other.app', kind: 'other', bundleId: BUNDLE_ID },
+    ]
+    assert.deepEqual(bundleIdCollisions(BUNDLE_ID, '/A/DSH.app', wrappers), ['/A/DSH Personal.app'])
+    assert.deepEqual(bundleIdCollisions(bundleIdFor('preview'), '/A/DSH Preview.app', wrappers), [])
+    assert.deepEqual(bundleIdCollisions(bundleIdFor('personal'), '/A/DSH Personal.app', wrappers), [])
+  })
+})
+
 describe('direct-remote Dock app targets', async () => {
   const { parseRemoteTarget, resolveTailnetHost, remoteAppName, remoteInstance, titleCase } = await import('../dock-app.mjs')
   const status = {

@@ -35,6 +35,37 @@ export const BUNDLE_ID = 'io.github.taliesinb.dsh-dock-app'
 export function bundleIdFor(instance = '') {
   return instance === '' ? BUNDLE_ID : `${BUNDLE_ID}.${instance}`
 }
+/** Inverse of {@link bundleIdFor}: the instance tag of a wrapper bundle id, or undefined for a foreign id. */
+export function instanceFromBundleId(bundleId) {
+  if (bundleId === BUNDLE_ID) return ''
+  const prefix = `${BUNDLE_ID}.`
+  return typeof bundleId === 'string' && bundleId.startsWith(prefix) ? bundleId.slice(prefix.length) : undefined
+}
+
+/**
+ * The instance a (re)install uses: the explicit one, else the replaced wrapper's
+ * own (a rebuild from `dsh-dock-app.json` must not collapse `…dsh-dock-app.personal`
+ * onto the base id), else the base instance.
+ * @param {string | undefined} requested - `--instance` / config value; undefined when not given.
+ * @param {{ kind: string, bundleId?: string }} existing - what sits at the destination now.
+ */
+export function resolveInstance(requested, existing) {
+  if (requested !== undefined) return requested
+  return (existing.kind === 'wrapper' ? instanceFromBundleId(existing.bundleId) : undefined) ?? ''
+}
+
+/**
+ * Other wrappers already using `bundleId`. Two wrappers with one id share one
+ * WebKit data store: every running copy opens the same localStorage database,
+ * all but one get "database is locked" on every write, and same-origin
+ * instances (`/dsh/`, `/dsh-personal/`, …) read each other's keys.
+ * @param {string} bundleId
+ * @param {string} dest - the bundle being (re)installed; never a collision with itself.
+ * @param {Array<{ path: string, kind: string, bundleId?: string }>} wrappers
+ */
+export function bundleIdCollisions(bundleId, dest, wrappers) {
+  return wrappers.filter(w => w.kind === 'wrapper' && w.path !== dest && w.bundleId === bundleId).map(w => w.path)
+}
 const EXECUTABLE = 'DSH'
 
 // ---------------------------------------------------------------------------
@@ -255,7 +286,8 @@ export async function assembleBundle(spec) {
   await cp(spec.icns, join(contents, 'Resources', 'AppIcon.icns'))
   await cp(join(HERE, 'desktop-branding.js'), join(contents, 'Resources', 'desktop-branding.js'))
   // glyphColor lets the wrapper colour the page's sidebar whale like its icon (main.swift identityScript).
-  const config = { name: spec.name, url: spec.url, fallbackUrl: spec.fallbackUrl, tokenFile: spec.tokenFile, glyphColor: spec.glyphColor }
+  // instance is informational (the bundle id is the truth); it lets a rebuild from this file pass --instance.
+  const config = { name: spec.name, instance: instanceFromBundleId(bundleId) ?? '', url: spec.url, fallbackUrl: spec.fallbackUrl, tokenFile: spec.tokenFile, glyphColor: spec.glyphColor }
   await writeFile(join(contents, 'Resources', 'dsh-dock-app.json'), `${JSON.stringify(config, null, 2)}\n`)
   await execFileAsync('/usr/bin/codesign', ['--force', '--sign', '-', '--identifier', bundleId, spec.dest])
   return spec.dest
@@ -395,6 +427,8 @@ export async function removeDockTile(bundlePath, log = () => {}, { keepFirst = f
 
 /**
  * Build + assemble + replace + register + pin + launch.
+ * `instance` undefined keeps the replaced wrapper's instance (see {@link resolveInstance}); a bundle id
+ * another wrapper already uses is refused (see {@link bundleIdCollisions}).
  * @param {{ name: string, url: string, fallbackUrl?: string, tokenFile?: string, launch?: boolean, instance?: string,
  *   glyphColor?: string, tileColor?: string, version?: string, log?: (line: string) => void }} spec
  */
@@ -407,11 +441,16 @@ export async function installDockApp(spec) {
   if (existing.kind === 'other') {
     throw new Error(`${dest} exists and is neither a Safari web app nor a DSH Dock app (${existing.bundleId ?? 'unknown bundle'}); remove it or choose another name`)
   }
+  const bundleId = bundleIdFor(resolveInstance(spec.instance, existing))
+  const collisions = bundleIdCollisions(bundleId, dest, await installedWrappers())
+  if (collisions.length > 0) {
+    throw new Error(`bundle id ${bundleId} is already used by ${collisions.join(', ')}; two Dock apps with one id share (and lock) one WebKit store. Reinstall that app with its own --instance first, or pass --instance for this one`)
+  }
   const built = await buildDockApp({ glyphColor: spec.glyphColor, tileColor: spec.tileColor, log })
   await mkdir(applicationsDir(), { recursive: true })
   const staging = join(applicationsDir(), `.${name}.app.staging-${String(process.pid)}`)
   await rm(staging, { recursive: true, force: true })
-  await assembleBundle({ dest: staging, name, url: spec.url, fallbackUrl: spec.fallbackUrl, tokenFile: spec.tokenFile, glyphColor: spec.glyphColor ?? '#000000', executable: built.executable, icns: built.icns, version: spec.version, bundleId: bundleIdFor(spec.instance ?? '') })
+  await assembleBundle({ dest: staging, name, url: spec.url, fallbackUrl: spec.fallbackUrl, tokenFile: spec.tokenFile, glyphColor: spec.glyphColor ?? '#000000', executable: built.executable, icns: built.icns, version: spec.version, bundleId })
   if (existing.kind !== 'none') {
     log(`dock-app: replacing ${existing.kind} at ${dest}${existing.url === undefined ? '' : ` (${existing.url})`}`)
     await quitBundle(dest)
@@ -422,8 +461,15 @@ export async function installDockApp(spec) {
   await execFileAsync(LSREGISTER, ['-f', dest]).catch(() => {})
   const pinned = await ensureDockTile(dest, log)
   if (spec.launch !== false) await execFileAsync('/usr/bin/open', [dest])
-  log(`dock-app: installed ${dest} -> ${spec.url}`)
-  return { path: dest, replaced: existing.kind, pinned }
+  log(`dock-app: installed ${dest} (${bundleId}) -> ${spec.url}`)
+  return { path: dest, bundleId, replaced: existing.kind, pinned }
+}
+
+/** Every wrapper bundle in `~/Applications`. */
+async function installedWrappers() {
+  const dir = applicationsDir()
+  const names = (await readdir(dir).catch(() => [])).filter(name => name.endsWith('.app'))
+  return Promise.all(names.map(name => inspectBundle(join(dir, name))))
 }
 
 /** Remove the wrapper (never a Safari web app or anything else). */

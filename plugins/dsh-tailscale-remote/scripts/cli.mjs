@@ -65,7 +65,9 @@ async function main() {
     return
   }
   const log = line => console.log(line)
-  const instance = typeof flags.instance === 'string' ? flags.instance : ''
+  // relay commands default to the base instance; dock-app:install keeps the replaced app's own when absent.
+  const instanceFlag = typeof flags.instance === 'string' ? flags.instance : undefined
+  const instance = instanceFlag ?? ''
   switch (command) {
     case 'relay:install': {
       const result = await installRelayAgent({
@@ -100,7 +102,7 @@ async function main() {
       const url = await routeUrl(flags)
       const result = await installDockApp({
         name,
-        instance,
+        instance: instanceFlag,
         url,
         fallbackUrl: String(flags.fallback ?? 'http://127.0.0.1:3083/'),
         tokenFile: expandHome(String(flags['token-file'] ?? defaultStateFile())),

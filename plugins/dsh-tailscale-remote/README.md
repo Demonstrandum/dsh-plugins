@@ -547,6 +547,17 @@ window.
 The same actions are buttons in Settings → Tailscale remote → *This Mac*.
 Every script takes `--instance preview` to address the preview pair.
 
+The instance picks the Dock app's bundle id and therefore its WebKit data store.
+Two wrappers with one bundle id share one `localstorage.sqlite3`: each running
+copy's WebKit network process opens it, all but one fail every write with
+`SQLiteStorageArea::setItem failed … database is locked`, and same-origin
+instances (`/dsh/`, `/dsh-preview/`, …) read each other's keys, so composer
+drafts and UI state stop persisting and revert on reload. `dock-app:install`
+therefore keeps the replaced app's own instance when `--instance` is absent,
+refuses a bundle id another wrapper in `~/Applications` already uses, and
+records `instance` in `dsh-dock-app.json` so a rebuild from that file can pass
+it back.
+
 ## Two instances side by side
 
 The live row sits in `~/.dsh/profiles/web/cordis.patch.yml`; the preview
