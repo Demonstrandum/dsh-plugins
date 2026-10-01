@@ -10,7 +10,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 const result = await build({ entryPoints: [new URL('../client.tsx', import.meta.url).pathname], bundle: true, format: 'cjs', platform: 'browser', jsx: 'automatic', write: false, loader: { '.css': 'text' }, external: ['react', 'react/jsx-runtime', 'react-dom', '@deepseek-ai/dsh-client-ui-primitives'] })
 const sandbox = { module: { exports: {} }, require: name => ({ react: React, 'react/jsx-runtime': jsx, 'react-dom': {}, '@deepseek-ai/dsh-client-ui-primitives': {} })[name] }
 vm.runInNewContext(result.outputFiles[0].text, sandbox)
-const { parseSnapshot, formatAmount, exactAmount, compactLabel, billingView, pillNotes, windowLabel, isStale, OAuthShield, ApiIcon, OpenRouterIcon, apply } = sandbox.module.exports
+const { parseSnapshot, formatAmount, exactAmount, sumAmounts, costTotal, sourceName, compactLabel, billingView, pillNotes, windowLabel, isStale, OAuthShield, ApiIcon, OpenRouterIcon, apply } = sandbox.module.exports
 const at = Date.parse('2026-01-01T12:00:00Z')
 const base = () => ({ version: 1, sessionId: 'fixture-session', totals: [], counts: { requests: 0, unpriced: 0, pending: 0, subscription: 0 }, persistence: 'ok' })
 const plan = () => ({ ...base(), latest: { provider: 'anthropic-oauth', model: 'fixture-model', at, kind: 'plan', windows: [{ label: '5h', usedPercent: 3 }, { label: '7d', usedPercent: 1 }] } })
@@ -38,6 +38,13 @@ test('exact money keeps full precision and the currency', () => {
   assert.equal(exactAmount('0.042310', 'USD'), '$0.04231')
   assert.equal(exactAmount('2', 'CHF'), 'CHF 2')
 })
+test('card total: exact per-currency sum, ~ when any part is estimated; sources named by account', () => {
+  assert.equal(sumAmounts(['0.733181', '0.0440322', '2']), '2.7772132')
+  assert.equal(sumAmounts(['1', '2']), '3')
+  assert.equal(costTotal([{ ...usd('2.994085'), scope: 'openrouter-account' }]), '$2.99')
+  assert.equal(costTotal([usd('1.23'), usd('0.04', 'estimated'), { kind: 'estimated', currency: 'EUR', amount: '2' }]), '~$1.27 · ~€2')
+  same([{ scope: 'openrouter-account' }, { scope: 'openrouter-tokens' }, { scope: 'model-tokens' }, {}].map(sourceName), ['OpenRouter', 'OpenRouter', 'API', 'API'])
+})
 test('missing is unknown, not reported zero', () => {
   const empty = billingView(base(), at)
   assert.equal(empty.unknownMoney, true)
@@ -45,14 +52,14 @@ test('missing is unknown, not reported zero', () => {
   const zero = billingView({ ...base(), totals: [usd('0')] }, at)
   same(zero.money, ['$0'])
   assert.equal(zero.unknownMoney, false)
-  assert.equal(compactLabel({ ...base(), totals: [usd('0')] }, at), 'Reported $0')
+  assert.equal(compactLabel({ ...base(), totals: [usd('0')] }, at), 'API $0')
 })
 test('estimates carry ~, reported has no qualifier; gaps become notes', () => {
   const data = { ...base(), totals: [usd('1.23'), usd('0.04', 'estimated')], counts: { requests: 4, unpriced: 1, pending: 1, subscription: 0 } }
   const view = billingView(data, at)
   same(view.money, ['$1.23', '~$.04'])
   same(view.notes.map(n => [n.key, n.level]), [['unpriced', 'info'], ['pending', 'status']])
-  assert.equal(view.summary, 'Reported $1.23 · Estimated $0.04 · 1 unpriced request · 1 request pending')
+  assert.equal(view.summary, 'API $1.23 · API ~$.04 · 1 unpriced request · 1 request pending')
   same(pillNotes(view).map(n => n.key), ['unpriced'])
 })
 test('a request in flight is not a gap: no pill icon', () => {
@@ -173,7 +180,7 @@ test('quota and credits are not plan claims or money', () => {
 test('recovered money remains and incomplete requests are explicit', () => {
   const data = { ...base(), recovered: true, now: new Date(at).toISOString(), totals: [usd('2.5')], counts: { ...base().counts, requests: 1, incomplete: 1 } }
   assert.ok(parseSnapshot(data, 'fixture-session'))
-  assert.equal(compactLabel(data, at), 'Reported $2.5 · 1 request incomplete')
+  assert.equal(compactLabel(data, at), 'API $2.5 · 1 request incomplete')
   same(billingView({ ...plan(), latest: { ...plan().latest, kind: 'rejected' } }, at).notes.map(n => n.key), ['rejected'])
 })
 
@@ -196,7 +203,7 @@ test('actual host ledger snapshots accept OpenRouter scope and separate currency
   assert.ok(parseSnapshot(snapshot, 'fixture-session'))
   assert.equal(snapshot.totals.find(t => t.kind === 'reported').scope, 'openrouter-account')
   same(billingView(snapshot, at).money, ['<$.01', '~€2'])
-  assert.equal(compactLabel(snapshot, at), 'Reported $0.004 · Estimated €2')
+  assert.equal(compactLabel(snapshot, at), 'OpenRouter <$.01 · API ~€2')
   const quota = { ...request, requestId: 'request-quota', provider: 'openai-codex' }
   await ledger.record({ ...quota, phase: 'evidence', evidence: { kind: 'openai-codex', outcome: 'quota-observed', windows: [{ label: 'Primary', usedPercent: 20, windowMinutes: 0 }], credits: { hasCredits: true, unlimited: false, balance: '2.5' } } })
   assert.ok(parseSnapshot(await ledger.snapshot('fixture-session'), 'fixture-session'))

@@ -71,7 +71,7 @@
   color: var(--dsw-alias-label-secondary, #555b64);
   cursor: default;
 }
-.tali-billing-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.tali-billing-header { display: flex; align-items: center; gap: 6px; }
 .tali-billing-headline { color: var(--dsw-alias-label-tertiary, #737780); }
 .tali-billing-figures { margin-left: auto; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-primary, #24262b); }
 .tali-billing-rows { margin: 0; }
@@ -82,8 +82,13 @@
 .tali-billing-muted { color: var(--dsw-alias-label-tertiary, #737780); }
 .tali-billing-dt-icon .tali-billing-muted { margin-left: 2px; }
 .tali-billing-section { margin-top: 8px; padding-top: 8px; border-top: .5px solid var(--dsw-alias-border-l2, #8884); }
-/* ContextMeter bar: 4px hover-tint track, tertiary fill. */
-.tali-billing-bar { height: 4px; margin: 2px 0 6px; border-radius: 999px; background: var(--dsw-alias-interactive-bg-hover); overflow: hidden; }
+/* A card without a cost section (subscription only) opens on its quota section. */
+.tali-billing-panel > .tali-billing-section:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+/* ContextMeter bar: 4px hover-tint track, tertiary fill. Tucked under its row so it reads as
+   that row's gauge, not as a divider between rows. */
+.tali-billing-window-row > .tali-billing-row { padding-bottom: 0; }
+.tali-billing-bar { height: 4px; margin: 0 0 8px; border-radius: 999px; background: var(--dsw-alias-interactive-bg-hover); overflow: hidden; }
+.tali-billing-window-row:last-child > .tali-billing-bar { margin-bottom: 2px; }
 .tali-billing-bar-fill { height: 100%; min-width: 2px; border-radius: 999px; background: var(--dsw-alias-label-tertiary); }
 .tali-billing-note-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
 .tali-billing-note-row span { color: var(--dsw-alias-label-secondary, #555b64); }

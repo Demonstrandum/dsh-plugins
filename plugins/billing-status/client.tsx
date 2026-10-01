@@ -90,6 +90,30 @@ export function exactAmount(amount: string, currency: string): string {
   return `${prefixOf(currency)}${BigInt(whole!).toString()}${trimmed ? `.${trimmed}` : ''}`
 }
 
+/** Exact decimal sum of non-negative decimal strings (no float). */
+export function sumAmounts(amounts: string[]): string {
+  const places = Math.max(0, ...amounts.map(a => (a.split('.')[1] ?? '').length))
+  const total = amounts.reduce((sum, a) => sum + scaled(a, places), 0n)
+  if (places === 0) return total.toString()
+  const unit = 10n ** BigInt(places)
+  const fraction = (total % unit).toString().padStart(places, '0').replace(/0+$/, '')
+  return `${total / unit}${fraction ? `.${fraction}` : ''}`
+}
+
+type Total = BillingSnapshot['totals'][number]
+/** Where a total comes from: the charging account or route. `~` on the amount marks an estimate. */
+export const sourceName = (t: Total) => t.scope === 'openrouter-account' || t.scope === 'openrouter-tokens' ? 'OpenRouter' : t.scope === 'provider-account' ? 'Provider' : 'API'
+const moneyText = (t: Total) => `${t.kind === 'estimated' ? '~' : ''}${formatAmount(t.amount, t.currency)}`
+
+/** One figure per currency (no FX): reported and estimated amounts summed, `~` if any part is estimated. */
+export function costTotal(totals: Total[]): string {
+  const currencies = [...new Set(totals.map(t => t.currency))]
+  return currencies.map(currency => {
+    const parts = totals.filter(t => t.currency === currency)
+    return `${parts.some(t => t.kind === 'estimated') ? '~' : ''}${formatAmount(sumAmounts(parts.map(t => t.amount)), currency)}`
+  }).join(' · ')
+}
+
 export function isStale(snapshot: BillingSnapshot, now: number): boolean {
   const latest = snapshot.latest
   if (!latest) return false
@@ -116,7 +140,7 @@ export function windowLabel(window: { label: string; windowMinutes?: number }): 
 
 export type MoneyIcon = 'openrouter' | 'api'
 // OpenRouter receipts and catalog estimates of OpenRouter requests both carry the OpenRouter glyph.
-const iconOfTotal = (t: BillingSnapshot['totals'][number]): MoneyIcon => t.scope === 'openrouter-account' || t.scope === 'openrouter-tokens' ? 'openrouter' : 'api'
+const iconOfTotal = (t: Total): MoneyIcon => t.scope === 'openrouter-account' || t.scope === 'openrouter-tokens' ? 'openrouter' : 'api'
 /** `status` is neutral progress (a request in flight), never a gap: no pill icon, no note row. */
 export interface BillingNote { key: string; level: 'info' | 'danger' | 'status'; text: string }
 export interface BillingView {
@@ -143,7 +167,7 @@ export function billingView(snapshot: BillingSnapshot | undefined, now: number, 
     return { money: [], moneyIcons: [], unknownMoney: true, unknownIcon: 'api', notes, summary: failed ? 'Billing unavailable' : 'No billing observed yet' }
   }
   const totals = orderedTotals(snapshot)
-  const money = totals.map(t => `${t.kind === 'estimated' ? '~' : ''}${formatAmount(t.amount, t.currency)}`)
+  const money = totals.map(moneyText)
   const latest = snapshot.latest
   const stale = isStale(snapshot, now)
   const notes: BillingNote[] = []
@@ -161,7 +185,7 @@ export function billingView(snapshot: BillingSnapshot | undefined, now: number, 
   if (quota && stale && !quota.unknown) notes.push({ key: 'stale', level: 'info', text: `Quota reading from ${shortTime(latest!.at)} is stale` })
   if (latest?.kind === 'rejected') notes.push({ key: 'rejected', level: 'danger', text: 'Last request rejected' })
   if (snapshot.persistence === 'error') notes.push({ key: 'persistence', level: 'danger', text: 'Not saved; totals may be partial' })
-  const parts = totals.map(t => `${t.kind === 'estimated' ? 'Estimated' : 'Reported'} ${exactAmount(t.amount, t.currency)}`)
+  const parts = totals.map(t => `${sourceName(t)} ${moneyText(t)}`)
   // Nothing recorded (e.g. every request predates billing): say so rather than imply hidden spend.
   if (unknownMoney) parts.push(snapshot.counts.requests === 0 ? 'No requests recorded yet' : 'Cost unknown')
   if (quota?.extra) parts.push('Extra usage')
@@ -306,7 +330,6 @@ export function BillingStatus({ sessionId, running = false, route }: { sessionId
   const quota = view.quota
   const labelled = quota ? quota.windows.every(w => w.label) : false
   const totals = snapshot ? orderedTotals(snapshot) : []
-  const headline = view.money.length ? view.money.join(' · ') : view.unknownMoney || !quota ? '$ —' : quota.extra ? 'Extra' : quota.windows.length ? quota.windows.map(w => `${w.label ? `${w.label} ` : ''}${percent(w.usedPercent)}`).join(' · ') : '—'
   // Consecutive pieces sharing a glyph form one group: [OpenRouter] $1.24  [API] ~$.04.
   const moneyGroups: { icon: MoneyIcon; texts: string[] }[] = []
   view.money.forEach((text, i) => {
@@ -316,8 +339,8 @@ export function BillingStatus({ sessionId, running = false, route }: { sessionId
   })
   const row = (key: string, label: ReactNode, value: ReactNode, className?: string) => <div className={`tali-billing-row${className ? ` ${className}` : ''}`} key={key}><dt>{label}</dt><dd>{value}</dd></div>
   // Catalog versions arrive as `pi-ai-catalog-2026-09-22`; show `pi-ai prices`.
-  const sourceLabel = (t: BillingSnapshot['totals'][number]) => t.kind === 'estimated' && t.source?.startsWith('pi-ai') ? 'pi-ai prices' : undefined
-  const scopeLabel = (scope?: string) => scope === 'openrouter-account' ? 'OpenRouter' : scope === 'provider-account' ? 'Provider' : scope === 'model-tokens' || scope === 'openrouter-tokens' ? 'Token prices' : undefined
+  const priceSource = (t: Total) => t.kind === 'estimated' && t.source?.startsWith('pi-ai') ? 'pi-ai prices' : undefined
+  const showCost = !snapshot || totals.length > 0 || view.unknownMoney
   return <span className="tali-billing-root" ref={rootRef}>
     <Tooltip label={view.summary} side="top" delayMs={200} disabled={open}>
       <button type="button" className="tali-billing-pill" ref={triggerRef} aria-label={`Billing: ${view.summary}`} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => setOpen(!open)}>
@@ -345,15 +368,13 @@ export function BillingStatus({ sessionId, running = false, route }: { sessionId
       </button>
     </Tooltip>
     {open && visible && createPortal(<div className="tali-billing-panel" role="dialog" aria-label="Billing details" id={panelId} ref={panelRef} tabIndex={-1} style={position ?? { visibility: 'hidden', left: 0, top: 0 }}>
-      <div className="tali-billing-header">
-        <span className="tali-billing-headline">Billing</span>
-        <span className="tali-billing-figures">{headline}</span>
-      </div>
-      <dl className="tali-billing-rows">
-        {totals.map((t, i) => row(`total-${i}`, <span className="tali-billing-dt-icon"><MoneyGlyph icon={iconOfTotal(t)} />{t.kind === 'estimated' ? 'Estimated' : 'Reported'}{(sourceLabel(t) ?? scopeLabel(t.scope)) && <span className="tali-billing-muted">{sourceLabel(t) ?? scopeLabel(t.scope)}</span>}</span>, `${t.kind === 'estimated' ? '~' : ''}${exactAmount(t.amount, t.currency)}`))}
-        {snapshot && totals.length === 0 && view.unknownMoney && row('cost', <span className="tali-billing-dt-icon"><MoneyGlyph icon={view.unknownIcon} />Cost</span>, 'Unknown')}
-        {!snapshot && row('status', 'Status', state.failed ? 'Unavailable' : 'Not observed')}
-      </dl>
+      {showCost && <div className="tali-billing-header">
+        <span className="tali-billing-headline">Total cost</span>
+        <span className="tali-billing-figures">{snapshot ? totals.length ? costTotal(totals) : '$ —' : state.failed ? 'Unavailable' : 'Not observed'}</span>
+      </div>}
+      {totals.length > 0 && <dl className="tali-billing-rows tali-billing-section" data-billing-section="sources">
+        {totals.map((t, i) => row(`total-${i}`, <span className="tali-billing-dt-icon"><MoneyGlyph icon={iconOfTotal(t)} />{sourceName(t)}{priceSource(t) && <span className="tali-billing-muted">{priceSource(t)}</span>}</span>, <span title={`${t.kind === 'estimated' ? '~' : ''}${exactAmount(t.amount, t.currency)}`}>{moneyText(t)}</span>))}
+      </dl>}
       {quota && latest && <div className={`tali-billing-section${quota.stale ? ' tali-billing-stale' : ''}`}>
         {quota.extra && row('extra', <span className="tali-billing-dt-icon"><OAuthShield />Subscription</span>, <span className="tali-billing-extra">Extra usage</span>)}
         {quota.unknown && row('sub', <span className="tali-billing-dt-icon"><OAuthShield />Subscription</span>, 'Unknown')}

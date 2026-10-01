@@ -15,7 +15,7 @@ body{margin:24px;font-family:system-ui;background:#f7f8fa;color:#232632}*{box-si
 `
 document.head.appendChild(style)
 
-type Scenario = 'plan' | 'quota' | 'rejected' | 'recovered' | 'reported' | 'mixed' | 'zero' | 'unknown' | 'stale' | 'extra' | 'error' | 'forbidden' | 'delayed' | 'wrong-session'
+type Scenario = 'plan' | 'quota' | 'rejected' | 'recovered' | 'reported' | 'mixed' | 'zero' | 'unknown' | 'stale' | 'extra' | 'error' | 'forbidden' | 'delayed' | 'wrong-session' | 'switched'
 const requests: { sessionId: string; url: string; aborted: boolean; scenario: Scenario }[] = []
 let scenario: Scenario = 'plan'
 let update: ((next: Scenario, id?: string) => void) | undefined
@@ -25,6 +25,8 @@ let order: ((value: boolean) => void) | undefined
 
 function makeSnapshot(sessionId: string): BillingSnapshot {
   const base: BillingSnapshot = { version: 1, sessionId, totals: [], counts: { requests: 2, unpriced: 0, pending: 0, subscription: 2 }, persistence: 'ok', coverageSince: new Date().toISOString() }
+  // Started on OpenRouter, failed there, continued on the subscription (a real mixed session).
+  if (scenario === 'switched') return { ...base, recovered: true, totals: [{ kind: 'reported', currency: 'USD', amount: '2.994085', scope: 'openrouter-account' }], counts: { requests: 32, unpriced: 0, pending: 0, subscription: 5, incomplete: 1, failed: 1 }, latest: { provider: 'anthropic-oauth', model: 'claude-opus-5-5', at: new Date().toISOString(), kind: 'plan', windows: [{ label: '5h', usedPercent: 8, resetAt: new Date(Date.now() + 7200000).toISOString() }, { label: '7d', usedPercent: 2, resetAt: new Date(Date.now() + 6 * 86400000).toISOString() }] } }
   if (scenario === 'recovered') return { ...base, recovered: true, totals: [{ kind: 'reported', currency: 'USD', amount: '2.5' }], counts: { ...base.counts, incomplete: 1 } }
   if (scenario === 'quota') return { ...base, latest: { provider: 'openai-codex-oauth', model: 'fixture-codex', at: new Date().toISOString(), kind: 'quota', windows: [{ label: 'Primary', usedPercent: 20, windowMinutes: 300 }], credits: { hasCredits: true, unlimited: false, balance: '2.50' } } }
   if (scenario === 'unknown' || scenario === 'wrong-session') return { ...base, sessionId: scenario === 'wrong-session' ? 'somebody-else' : sessionId, counts: { requests: 2, unpriced: 2, pending: 0, subscription: 0 } }
@@ -57,7 +59,7 @@ function Fixture() {
   hide = setHidden
   order = setOrdered
   return <><h1 className="fixture-title">Billing status fixture</h1><div className="fixture-controls">
-    {(['plan', 'quota', 'rejected', 'recovered', 'reported', 'mixed', 'zero', 'unknown', 'stale', 'extra', 'error', 'forbidden', 'delayed', 'wrong-session'] as Scenario[]).map(name => <button key={name} onClick={() => update?.(name)}>{name}</button>)}
+    {(['plan', 'quota', 'rejected', 'recovered', 'reported', 'mixed', 'zero', 'unknown', 'stale', 'extra', 'error', 'forbidden', 'delayed', 'wrong-session', 'switched'] as Scenario[]).map(name => <button key={name} onClick={() => update?.(name)}>{name}</button>)}
     <button onClick={() => order?.(!ordered)}>Order {ordered ? '1' : '0'}</button><button onClick={() => hide?.(!hidden)}>Hide dock</button><button onClick={() => mount?.(!mounted)}>Unmount</button>
   </div><div className={`fixture-dock ${ordered ? 'fixture-order' : ''}`} style={{ display: hidden ? 'none' : undefined }}>
     <span data-slot="conversation.composer.dock"><button className="fixture-stat" id="stats">2 turns</button><button className="fixture-stat" id="tokens">96% cache</button>
