@@ -26,6 +26,12 @@ test('proxy grants bind verified login, exact request and explicit owner, then e
   assert.equal(await access.canRead(request('session-one', expired), 'session-one'), false)
   assert.deepEqual(access.proxyHeaders({ method: 'GET', url: url('session-one') }, { kind: 'cookie' }), {})
   assert.deepEqual(access.proxyHeaders({ method: 'GET', url: url('session-one') + '&sessionId=session-two' }, { kind: 'user', login: 'alice@example.com' }), {})
+  // One route hint is allowed and bound into the grant; extra or malformed parameters are not.
+  const hinted = access.proxyHeaders({ method: 'GET', url: url('session-one') + '&route=anthropic-oauth' }, { kind: 'user', login: 'alice@example.com' })
+  assert.equal(await access.canRead(new Request(`http://localhost${url('session-one')}&route=anthropic-oauth`, { headers: hinted }), 'session-one'), true)
+  const swapped = access.proxyHeaders({ method: 'GET', url: url('session-one') + '&route=anthropic-oauth' }, { kind: 'user', login: 'alice@example.com' })
+  assert.equal(await access.canRead(new Request(`http://localhost${url('session-one')}&route=openai-codex`, { headers: swapped }), 'session-one'), false)
+  for (const extra of ['&route=a&route=b', '&route=Bad!', '&other=1']) assert.deepEqual(access.proxyHeaders({ method: 'GET', url: url('session-one') + extra }, { kind: 'user', login: 'alice@example.com' }), {})
   const viewed = setup({ lookupOwner: () => ({ owner: 'alice@example.com', first: { method: 'session/prompt' } }) })
   assert.equal(await viewed.canRead(request('session-one', viewed.proxyHeaders({ method: 'GET', url: url('session-one') }, { kind: 'user', login: 'alice@example.com' })), 'session-one'), false)
   access.dispose(); viewed.dispose()

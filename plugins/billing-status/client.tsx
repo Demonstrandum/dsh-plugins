@@ -213,7 +213,7 @@ function useVisible(ref: RefObject<HTMLSpanElement>) {
 }
 
 type SnapshotState = { sessionId: string; snapshot?: BillingSnapshot; failed?: boolean; clockOffset?: number }
-function useSnapshot(sessionId: string, visible: boolean, running: boolean) {
+function useSnapshot(sessionId: string, visible: boolean, running: boolean, route?: string) {
   const [state, setState] = useState<SnapshotState>({ sessionId })
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
@@ -226,7 +226,8 @@ function useSnapshot(sessionId: string, visible: boolean, running: boolean) {
       active = new AbortController()
       const timeout = setTimeout(() => active?.abort(), 15000)
       try {
-        const response = await fetch(`api/billing-status/snapshot?sessionId=${encodeURIComponent(sessionId)}`, { signal: active.signal, credentials: 'same-origin', cache: 'no-store' })
+        const query = `sessionId=${encodeURIComponent(sessionId)}${route ? `&route=${encodeURIComponent(route)}` : ''}`
+        const response = await fetch(`api/billing-status/snapshot?${query}`, { signal: active.signal, credentials: 'same-origin', cache: 'no-store' })
         if (!response.ok) throw new Error('Snapshot unavailable')
         const snapshot = parseSnapshot(await response.json(), sessionId)
         if (!snapshot) throw new Error('Invalid snapshot')
@@ -246,7 +247,7 @@ function useSnapshot(sessionId: string, visible: boolean, running: boolean) {
     }
     void poll()
     return () => { stopped = true; clearTimeout(timer); active?.abort() }
-  }, [sessionId, visible, running])
+  }, [sessionId, visible, running, route])
   // Age evidence even if the endpoint hangs; money never expires with quota TTL.
   useEffect(() => {
     if (!visible) return
@@ -257,12 +258,12 @@ function useSnapshot(sessionId: string, visible: boolean, running: boolean) {
   return { state: state.sessionId === sessionId ? state : { sessionId }, now: now + (state.clockOffset ?? 0) }
 }
 
-export function BillingStatus({ sessionId, running = false }: { sessionId: string; running?: boolean }) {
+export function BillingStatus({ sessionId, running = false, route }: { sessionId: string; running?: boolean; route?: string }) {
   const rootRef = useRef<HTMLSpanElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const visible = useVisible(rootRef)
-  const { state, now } = useSnapshot(sessionId, visible, running)
+  const { state, now } = useSnapshot(sessionId, visible, running, route)
   const snapshot = state.snapshot
   const [open, setOpen] = useState(false)
   const panelId = useId()
@@ -365,8 +366,15 @@ export function BillingStatus({ sessionId, running = false }: { sessionId: strin
 
 function BillingDock(props: PropsRuntime<'conversation.composer.dock'>) {
   const running = props.useSession(s => s.running)
+  // The session's selected route (`modelSelection` projection, session-controller): tells the host which
+  // subscription account to show for a session whose requests predate the ledger.
+  const useProjection = props.useProjection as unknown as (key: string, select: (value: unknown) => string | undefined) => string | undefined
+  const route = useProjection('modelSelection', value => {
+    const selection = value as { next?: { provider?: string } | null; lastUsed?: { provider?: string } | null } | undefined
+    return selection?.next?.provider ?? selection?.lastUsed?.provider
+  })
   // Key reset closes the panel and removes old snapshot state synchronously.
-  return <BillingStatus key={props.sessionId} sessionId={props.sessionId} running={running} />
+  return <BillingStatus key={props.sessionId} sessionId={props.sessionId} running={running} route={route} />
 }
 
 export const name = 'billing-status'

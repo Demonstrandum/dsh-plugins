@@ -98,6 +98,18 @@ test('subscription readings survive restart (stale), are shared per account, and
   assert.equal(saved.accounts['anthropic-oauth'].source, 'usage-endpoint')
   assert.equal((await stat(join(directory, 'quota.json'))).mode & 0o777, 0o600)
 })
+test('a session with nothing recorded uses its selected route; observed traffic wins over the hint', async t => {
+  const calls = []
+  const { ledger } = await fixture(t, { rateCards: [], now: () => '2026-01-01T00:00:00.000Z', usage: async route => { calls.push(route) } })
+  const quiet = (await ledger.snapshot('session-quiet', 'anthropic-oauth')).latest
+  assert.deepEqual([quiet.provider, quiet.kind], ['anthropic-oauth', 'unobserved'])
+  assert.equal((await ledger.snapshot('session-api', 'anthropic')).latest, undefined)
+  assert.equal((await ledger.snapshot('session-bad', 'Not A Route!')).latest, undefined)
+  await ledger.record({ ...base, sessionId: 'session-used', provider: 'anthropic', phase: 'start' })
+  assert.equal((await ledger.snapshot('session-used', 'anthropic-oauth')).latest.provider, 'anthropic')
+  await new Promise(resolve => setTimeout(resolve, 10))
+  assert.deepEqual(calls, ['anthropic-oauth'])
+})
 test('usage failures retry after backoff; a route with no reading shows the subscription marker', async t => {
   let calls = 0
   const { ledger } = await fixture(t, { rateCards: [], usageRetryMs: 0, usage: async () => { calls++; throw new Error('subscription usage rate limited') } })

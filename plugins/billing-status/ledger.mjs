@@ -268,10 +268,11 @@ export class BillingLedger {
    * account-wide), or a bare route marker so the pill shows the right kind of glyph. Asks DSH for
    * the account's usage once when nothing fresh is known.
    */
-  subscriptionReading(sessionId, stored, now) {
+  subscriptionReading(sessionId, stored, now, routeHint) {
     let latest = this.latest.get(sessionId)
     const last = stored[stored.length - 1]
-    const route = latest?.provider ?? last?.provider
+    // Observed traffic wins; the selected route only covers sessions with nothing recorded yet.
+    const route = latest?.provider ?? last?.provider ?? identifier(routeHint)
     if (!route || !oauth(route)) return latest
     const account = this.accounts.get(route)
     const known = ['plan', 'quota', 'extra']
@@ -284,7 +285,7 @@ export class BillingLedger {
     if (!fresh) this.requestUsage(route, latest.model)
     return latest
   }
-  async snapshot(sessionId) {
+  async snapshot(sessionId, routeHint) {
     await this.tail
     const stored = [...this.rows.values()].filter(row => row.sessionId === sessionId)
     // Usage recorded before prices were known (or before this feature) is priced at read time from the
@@ -325,7 +326,7 @@ export class BillingLedger {
       totals.set(key, total)
     }
     const now = this.now()
-    const latest = this.subscriptionReading(sessionId, stored, now)
+    const latest = this.subscriptionReading(sessionId, stored, now, routeHint)
     return { version: 1, sessionId, totals: [...totals.values()].map(({ units: amount, sources, ...rest }) => ({ ...rest, amount: decimal(amount), ...(sources.size === 1 ? { source: [...sources][0] } : {}) })), counts,
       ...(latest ? { latest: { ...latest, stale: Date.parse(now) - Date.parse(latest.at) > this.staleAfterMs || Date.parse(now) < Date.parse(latest.at) } } : {}),
       persistence: this.persistence, staleAfterMs: this.staleAfterMs,

@@ -33,8 +33,12 @@ export function snapshotHandler(ctx, ledger) {
   if (ownershipServices.some(name => ctx.get(name) !== undefined)) mode.ownershipRequired = true
   for (const name of ownershipServices) ctx.inject?.([name], () => { mode.ownershipRequired = true })
   return async request => {
-    const sessionId = new URL(request.url).searchParams.get('sessionId') ?? ''
+    const params = new URL(request.url).searchParams
+    const sessionId = params.get('sessionId') ?? ''
     if (!/^session-[a-zA-Z0-9_-]{1,140}$/.test(sessionId)) return json({ error: 'Invalid session' }, 400)
+    // Optional selected route: only chooses which subscription account reading a ledger-less session shows.
+    const route = params.get('route') ?? undefined
+    if (route !== undefined && !/^[a-z0-9][a-z0-9-]{0,63}$/.test(route)) return json({ error: 'Invalid route' }, 400)
     try {
       const access = ctx.get('billingAccess') ?? ctx.get('sessionRequestAccess')
       if (access !== undefined || ctx.get('sessionOwners') !== undefined) mode.ownershipRequired = true
@@ -44,7 +48,7 @@ export function snapshotHandler(ctx, ledger) {
         // Attribution is not authorization. Multi-user compositions need a verified principal seam.
         return json({ error: 'Billing unavailable' }, 403)
       }
-      return json(await ledger.snapshot(sessionId))
+      return json(await ledger.snapshot(sessionId, route))
     } catch { return json({ error: 'Billing unavailable' }, 503) }
   }
 }

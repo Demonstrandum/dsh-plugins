@@ -15,8 +15,11 @@ function target(method, url) {
   try {
     const parsed = new URL(url, 'http://dsh.invalid')
     if (parsed.pathname !== TARGET) return undefined
-    const ids = parsed.searchParams.getAll('sessionId')
-    if ([...parsed.searchParams.keys()].length !== 1 || ids.length !== 1 || !/^session-[a-zA-Z0-9_-]{1,140}$/.test(ids[0])) return undefined
+    const ids = parsed.searchParams.getAll('sessionId'), routes = parsed.searchParams.getAll('route')
+    const keys = [...parsed.searchParams.keys()]
+    // Exactly one sessionId, at most one route hint, nothing else; the grant binds the full query.
+    if (keys.some(key => key !== 'sessionId' && key !== 'route') || ids.length !== 1 || routes.length > 1
+      || !/^session-[a-zA-Z0-9_-]{1,140}$/.test(ids[0]) || (routes.length === 1 && !/^[a-z0-9][a-z0-9-]{0,63}$/.test(routes[0]))) return undefined
     return { sessionId: ids[0], path: parsed.pathname + parsed.search }
   } catch { return undefined }
 }
