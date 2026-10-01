@@ -10,7 +10,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 const result = await build({ entryPoints: [new URL('../client.tsx', import.meta.url).pathname], bundle: true, format: 'cjs', platform: 'browser', jsx: 'automatic', write: false, loader: { '.css': 'text' }, external: ['react', 'react/jsx-runtime', 'react-dom', '@deepseek-ai/dsh-client-ui-primitives'] })
 const sandbox = { module: { exports: {} }, require: name => ({ react: React, 'react/jsx-runtime': jsx, 'react-dom': {}, '@deepseek-ai/dsh-client-ui-primitives': {} })[name] }
 vm.runInNewContext(result.outputFiles[0].text, sandbox)
-const { parseSnapshot, formatAmount, exactAmount, compactLabel, billingView, windowLabel, isStale, OAuthShield, ApiIcon, OpenRouterIcon, apply } = sandbox.module.exports
+const { parseSnapshot, formatAmount, exactAmount, compactLabel, billingView, pillNotes, windowLabel, isStale, OAuthShield, ApiIcon, OpenRouterIcon, apply } = sandbox.module.exports
 const at = Date.parse('2026-01-01T12:00:00Z')
 const base = () => ({ version: 1, sessionId: 'fixture-session', totals: [], counts: { requests: 0, unpriced: 0, pending: 0, subscription: 0 }, persistence: 'ok' })
 const plan = () => ({ ...base(), latest: { provider: 'anthropic-oauth', model: 'fixture-model', at, kind: 'plan', windows: [{ label: '5h', usedPercent: 3 }, { label: '7d', usedPercent: 1 }] } })
@@ -51,8 +51,14 @@ test('estimates carry ~, reported has no qualifier; gaps become notes', () => {
   const data = { ...base(), totals: [usd('1.23'), usd('0.04', 'estimated')], counts: { requests: 4, unpriced: 1, pending: 1, subscription: 0 } }
   const view = billingView(data, at)
   same(view.money, ['$1.23', '~$.04'])
-  same(view.notes.map(n => [n.key, n.level]), [['unpriced', 'info'], ['pending', 'info']])
+  same(view.notes.map(n => [n.key, n.level]), [['unpriced', 'info'], ['pending', 'status']])
   assert.equal(view.summary, 'Reported $1.23 · Estimated $0.04 · 1 unpriced request · 1 request pending')
+  same(pillNotes(view).map(n => n.key), ['unpriced'])
+})
+test('a request in flight is not a gap: no pill icon', () => {
+  const view = billingView({ ...plan(), counts: { requests: 53, unpriced: 0, pending: 1, subscription: 52 } }, at)
+  same(pillNotes(view), [])
+  assert.match(view.summary, /1 request pending$/)
 })
 test('money glyphs: OpenRouter for its reported charges, API for estimates and unknown API cost', () => {
   const data = { ...base(), totals: [{ ...usd('1.24'), scope: 'openrouter-account' }, { ...usd('0.04', 'estimated'), scope: 'model-tokens' }] }

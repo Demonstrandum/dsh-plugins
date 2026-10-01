@@ -117,7 +117,8 @@ export function windowLabel(window: { label: string; windowMinutes?: number }): 
 export type MoneyIcon = 'openrouter' | 'api'
 // OpenRouter receipts and catalog estimates of OpenRouter requests both carry the OpenRouter glyph.
 const iconOfTotal = (t: BillingSnapshot['totals'][number]): MoneyIcon => t.scope === 'openrouter-account' || t.scope === 'openrouter-tokens' ? 'openrouter' : 'api'
-export interface BillingNote { key: string; level: 'info' | 'danger'; text: string }
+/** `status` is neutral progress (a request in flight), never a gap: no pill icon, no note row. */
+export interface BillingNote { key: string; level: 'info' | 'danger' | 'status'; text: string }
 export interface BillingView {
   /** Compact money pieces; estimates carry a `~` prefix. */
   money: string[]
@@ -154,7 +155,7 @@ export function billingView(snapshot: BillingSnapshot | undefined, now: number, 
   }
   const unknownMoney = totals.length === 0 && (!quota || snapshot.counts.unpriced > 0)
   if (snapshot.counts.unpriced > 0) notes.push({ key: 'unpriced', level: 'info', text: plural(snapshot.counts.unpriced, 'unpriced request') })
-  if (snapshot.counts.pending > 0) notes.push({ key: 'pending', level: 'info', text: `${plural(snapshot.counts.pending, 'request')} pending` })
+  if (snapshot.counts.pending > 0) notes.push({ key: 'pending', level: 'status', text: `${plural(snapshot.counts.pending, 'request')} pending` })
   if ((snapshot.counts.incomplete ?? 0) > 0) notes.push({ key: 'incomplete', level: 'info', text: `${plural(snapshot.counts.incomplete!, 'request')} incomplete` })
   if ((snapshot.counts.failed ?? 0) > 0) notes.push({ key: 'failed', level: 'info', text: `${plural(snapshot.counts.failed!, 'failed request')} (not billed)` })
   if (quota && stale && !quota.unknown) notes.push({ key: 'stale', level: 'info', text: `Quota reading from ${shortTime(latest!.at)} is stale` })
@@ -168,6 +169,11 @@ export function billingView(snapshot: BillingSnapshot | undefined, now: number, 
   else if (quota) parts.push(...quota.windows.map(w => `${w.label ? `${w.label} ` : ''}${percent(w.usedPercent)} used`))
   parts.push(...notes.map(n => n.text))
   return { money, moneyIcons: totals.map(iconOfTotal), unknownMoney, unknownIcon: (latest?.provider ?? route) === 'openrouter' ? 'openrouter' : 'api', quota, notes, summary: parts.join(' · ') }
+}
+
+/** Notes behind the pill's trailing icon. Unpriced is already said by `$ —`; status notes are not gaps. */
+export function pillNotes(view: BillingView): BillingNote[] {
+  return view.notes.filter(n => n.level !== 'status' && !(n.key === 'unpriced' && view.unknownMoney && !view.quota))
 }
 
 /** Full accessible description of the compact pill. */
@@ -293,7 +299,8 @@ export function BillingStatus({ sessionId, running = false, route }: { sessionId
   }, [open, placed])
   const view = billingView(snapshot, now, state.failed, route)
   const latest = snapshot?.latest
-  const iconNotes = view.unknownMoney && !view.quota ? view.notes.filter(n => n.key !== 'unpriced') : view.notes
+  const iconNotes = pillNotes(view)
+  const panelNotes = view.notes.filter(n => n.level !== 'status')
   const danger = iconNotes.some(n => n.level === 'danger')
   const showMoney = view.money.length > 0 || view.unknownMoney
   const quota = view.quota
@@ -356,11 +363,11 @@ export function BillingStatus({ sessionId, running = false, route }: { sessionId
         </div>)}
         {latest.credits && row('credits', 'Credits', latest.credits.unlimited ? 'Unlimited' : latest.credits.balance !== undefined ? latest.credits.balance : latest.credits.hasCredits ? 'Available' : 'None')}
       </div>}
-      {view.notes.length > 0 && <div className="tali-billing-section tali-billing-notes">
-        {view.notes.map(n => <div key={n.key} className={`tali-billing-note-row ${n.level === 'danger' ? 'tali-billing-danger' : 'tali-billing-info'}`}>{n.level === 'danger' ? <IconWarningOutline16 size={14} /> : <IconInfoOutline14 size={14} />}<span>{n.text}</span></div>)}
+      {panelNotes.length > 0 && <div className="tali-billing-section tali-billing-notes">
+        {panelNotes.map(n => <div key={n.key} className={`tali-billing-note-row ${n.level === 'danger' ? 'tali-billing-danger' : 'tali-billing-info'}`}>{n.level === 'danger' ? <IconWarningOutline16 size={14} /> : <IconInfoOutline14 size={14} />}<span>{n.text}</span></div>)}
       </div>}
       {snapshot && <dl className="tali-billing-rows tali-billing-section tali-billing-footer">
-        {row('requests', 'Requests', snapshot.counts.requests)}
+        {row('requests', 'Requests', snapshot.counts.pending > 0 ? <>{snapshot.counts.requests}<span className="tali-billing-muted"> · {snapshot.counts.pending} in flight</span></> : snapshot.counts.requests)}
         {latest && row('model', 'Model', latest.model)}
         {latest && row('route', 'Route', latest.provider)}
         {latest && row('observed', 'Observed', shortTime(latest.at))}

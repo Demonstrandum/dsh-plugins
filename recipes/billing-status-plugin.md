@@ -31,6 +31,7 @@ No package was added to installation lists or overlays. No live profiles, creden
 | Parser and UI disagreed on OpenRouter charge scope | Use the actual `openrouter-account` scope end to end; different currencies stay distinct and are never converted. |
 | A crash may leave a writer lock or a partial line | Do not steal the lock or append after damage. Replay valid history read-only and show partial/unhealthy state; manual recovery requires confirming no active writer. |
 | Reconciliation can correct a previous receipt amount | Last-observation order chooses the newest receipt, not the first occurrence of its generation ID. |
+| "1 request pending" lit the orange (i) during every running turn (2026-10-01) | `counts.pending` is the request being streamed right now (ledger row `finished: false` until the stream ends), so it was on almost the whole turn. Pending is now a `status` note: kept in the summary/tooltip, never on the pill icon or the card's notes; the card's Requests row reads `53 · 1 in flight`. A request that never finishes still surfaces as `incomplete` after a restart. |
 
 ## Verification
 
