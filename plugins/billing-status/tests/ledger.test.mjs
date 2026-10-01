@@ -75,15 +75,18 @@ test('subscription readings survive restart (stale), are shared per account, and
 
   clock = '2026-01-01T01:00:00.000Z'
   const calls = []
-  let answer = { windows: [{ label: '5h', usedPercent: 40 }, { label: '7d', usedPercent: 12 }], observedAt: '2026-01-01T01:00:00.000Z' }
-  const second = new BillingLedger({ directory, rateCards: [], now, usage: async route => { calls.push(route); return answer } })
+  const answer = { windows: [{ label: '5h', usedPercent: 40 }, { label: '7d', usedPercent: 12 }], observedAt: '2026-01-01T01:00:00.000Z' }
+  let release
+  const gate = new Promise(resolve => { release = resolve })
+  const second = new BillingLedger({ directory, rateCards: [], now, firstLoadWaitMs: 10, usage: async route => { calls.push(route); await gate; return answer } })
   await second.ready
   t.after(() => second.close())
-  // Restored but stale: shown, and one background usage read is requested.
-  let latest = (await second.snapshot('session-one')).latest
-  assert.equal(latest.kind, 'plan')
-  assert.equal(latest.stale, true)
+  // Restored but stale while the usage read is slow: shown, and the client is told to re-poll.
+  const restored = await second.snapshot('session-one')
+  let latest = restored.latest
+  assert.deepEqual([latest.kind, latest.stale, restored.refreshing], ['plan', true, true])
   assert.deepEqual(latest.windows.map(w => w.usedPercent), [3, 1])
+  release()
   await new Promise(resolve => setTimeout(resolve, 10))
   latest = (await second.snapshot('session-one')).latest
   assert.deepEqual([latest.stale, latest.windows.map(w => w.usedPercent)], [false, [40, 12]])
@@ -166,6 +169,20 @@ test('history backfill: OpenRouter receipts, catalog fallback, once per session,
   await again.snapshot('session-one'); await settle()
   assert.equal((await again.snapshot('session-one')).counts.requests, 4)
   assert.equal(lookups.length, 2)
+})
+test('the first snapshot waits briefly for its backfill; slow work reports refreshing', async t => {
+  const usage = { inputTokens: 1000, outputTokens: 0 }
+  const events = [message(3, Date.parse('2025-12-31T00:00:00Z'), 'anthropic', 'claude-opus-5-5', usage)]
+  const { ledger } = await fixture(t, { rateCards: [], pricing: async () => catalogPricing, history: async () => ({ events }) })
+  assert.equal((await ledger.snapshot('session-one')).totals[0].amount, '0.004', 'priced on the very first snapshot')
+  let release
+  const gate = new Promise(resolve => { release = resolve })
+  const slow = await fixture(t, { rateCards: [], firstLoadWaitMs: 10, pricing: async () => catalogPricing, history: async () => { await gate; return { events } } })
+  const first = await slow.ledger.snapshot('session-one')
+  assert.deepEqual([first.totals, first.refreshing], [[], true])
+  release(); await settle()
+  const later = await slow.ledger.snapshot('session-one')
+  assert.deepEqual([later.totals[0].amount, later.refreshing], ['0.004', undefined])
 })
 test('in-flight requests are pending not unpriced; failures before any usage are not billed', async t => {
   const { ledger } = await fixture(t, { rateCards: [] })

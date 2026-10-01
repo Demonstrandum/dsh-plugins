@@ -54,12 +54,16 @@ function cleanRow(row) {
 
 /** Append-only request states, separate from DSH history: rewind is not a refund. */
 export class BillingLedger {
-  constructor({ directory, rateCards = [], staleAfterMs = 300_000, now = () => new Date().toISOString(), pricing, usage, usageRetryMs = 300_000, history, responseCost }) {
+  constructor({ directory, rateCards = [], staleAfterMs = 300_000, now = () => new Date().toISOString(), pricing, usage, usageRetryMs = 300_000, history, responseCost, firstLoadWaitMs = 5_000 }) {
     // Session-log reader (`sessionQuery.readSession`) and provider receipt lookup (`ctx.llm.responseCost`)
     // for requests that predate the ledger; each session is backfilled at most once per process.
     this.history = history
     this.responseCost = responseCost
     this.backfilled = new Set()
+    this.backfillWork = new Map()
+    // A snapshot that just started a backfill or usage read waits this long for it, so the first
+    // display already shows the result; beyond that it reports `refreshing` and the client re-polls soon.
+    this.firstLoadWaitMs = firstLoadWaitMs
     this.directory = directory
     this.cards = validateRateCards(rateCards)
     // DSH's resolved-model list prices (`ctx.llm.resolveModelInfo().pricing`), looked up per route/model.
@@ -173,8 +177,7 @@ export class BillingLedger {
     if (!this.usage || this.closed) return
     const attempt = this.usageAttempts.get(route)
     if (attempt && (attempt.state !== 'failed' || Date.now() < attempt.retryAt)) return
-    this.usageAttempts.set(route, { state: 'pending' })
-    Promise.resolve().then(() => this.usage(route)).then(async result => {
+    const promise = Promise.resolve().then(() => this.usage(route)).then(async result => {
       if (!result || !Array.isArray(result.windows) || result.windows.length === 0) { this.usageAttempts.set(route, { state: 'done' }); return }
       const at = timestamp(result.observedAt) ?? this.now()
       const entry = { order: 0, provider: route, model: identifier(model) ?? 'account', at, startedAt: at, kind: 'plan', windows: windowsOf(result.windows), source: 'usage-endpoint' }
@@ -184,6 +187,7 @@ export class BillingLedger {
       const seconds = /retry after (\d+)s/.exec(String(error?.message))?.[1]
       this.usageAttempts.set(route, { state: 'failed', retryAt: Date.now() + Math.max(this.usageRetryMs, Number(seconds ?? 0) * 1000) })
     })
+    this.usageAttempts.set(route, { state: 'pending', promise })
   }
   /** Catalog estimate for one usage; OpenRouter estimates keep their route so the pill shows its glyph. */
   async estimate(provider, models, usage, configured) {
@@ -203,7 +207,7 @@ export class BillingLedger {
   requestBackfill(sessionId) {
     if (!this.history || this.closed || this.backfilled.has(sessionId)) return
     this.backfilled.add(sessionId)
-    void (async () => {
+    const work = (async () => {
       const log = await this.history(sessionId)
       const events = Array.isArray(log?.events) ? log.events.slice(Number.isSafeInteger(log.inheritedEventCount) ? log.inheritedEventCount : 0) : []
       const rows = [...this.rows.values()].filter(row => row.sessionId === sessionId)
@@ -249,7 +253,8 @@ export class BillingLedger {
           if (this.persistence === 'ok' && this.file) await this.file.sync()
         }).catch(() => { this.persistence = 'error' }))
       }
-    })().catch(() => { /* history unavailable: nothing to backfill */ })
+    })().catch(() => { /* history unavailable: nothing to backfill */ }).finally(() => { this.backfillWork.delete(sessionId) })
+    this.backfillWork.set(sessionId, work)
   }
   /** Configured card first, then DSH's catalog list prices; cached for ten minutes per route/model. */
   async cardFor(provider, model, configured) {
@@ -339,7 +344,7 @@ export class BillingLedger {
    * account-wide), or a bare route marker so the pill shows the right kind of glyph. Asks DSH for
    * the account's usage once when nothing fresh is known.
    */
-  subscriptionReading(sessionId, stored, now, routeHint) {
+  subscriptionReading(sessionId, stored, now, routeHint, request = true) {
     let latest = this.latest.get(sessionId)
     const last = stored[stored.length - 1]
     // Observed traffic wins; the selected route only covers sessions with nothing recorded yet.
@@ -353,12 +358,21 @@ export class BillingLedger {
     }
     latest ??= { order: 0, provider: route, model: last?.model ?? 'account', at: last?.at ?? now, startedAt: last?.startedAt ?? now, kind: 'unobserved', windows: [] }
     const fresh = known.includes(latest.kind) && Date.parse(now) - Date.parse(latest.at) <= this.staleAfterMs
-    if (!fresh) this.requestUsage(route, latest.model)
+    if (!fresh && request) this.requestUsage(route, latest.model)
     return latest
   }
   async snapshot(sessionId, routeHint) {
     await this.tail
     this.requestBackfill(sessionId)
+    const wait = promise => promise ? Promise.race([promise, new Promise(resolve => setTimeout(resolve, this.firstLoadWaitMs).unref?.())]) : undefined
+    await wait(this.backfillWork.get(sessionId))
+    {
+      // Start (or join) a usage read for this session's subscription account before reading.
+      const peek = this.subscriptionReading(sessionId, [...this.rows.values()].filter(row => row.sessionId === sessionId), this.now(), routeHint)
+      const attempt = peek && this.usageAttempts.get(peek.provider)
+      if (attempt?.state === 'pending') await wait(attempt.promise)
+    }
+    await this.tail
     const stored = [...this.rows.values()].filter(row => row.sessionId === sessionId)
     // Usage recorded before prices were known (or before this feature) is priced at read time from the
     // same catalog; nothing is written back, so a later receipt or restart never double-counts it.
@@ -398,12 +412,13 @@ export class BillingLedger {
       totals.set(key, total)
     }
     const now = this.now()
-    const latest = this.subscriptionReading(sessionId, stored, now, routeHint)
+    const latest = this.subscriptionReading(sessionId, stored, now, routeHint, false)
     return { version: 1, sessionId, totals: [...totals.values()].map(({ units: amount, sources, ...rest }) => ({ ...rest, amount: decimal(amount), ...(sources.size === 1 ? { source: [...sources][0] } : {}) })), counts,
       ...(latest ? { latest: { ...latest, stale: Date.parse(now) - Date.parse(latest.at) > this.staleAfterMs || Date.parse(now) < Date.parse(latest.at) } } : {}),
       persistence: this.persistence, staleAfterMs: this.staleAfterMs,
       ...(records.length ? { coverageSince: records.reduce((a, row) => a < row.startedAt ? a : row.startedAt, records[0].startedAt) } : {}),
-      recovered: this.recovered.has(sessionId), now }
+      recovered: this.recovered.has(sessionId), now,
+      ...(this.backfillWork.has(sessionId) || (latest && this.usageAttempts.get(latest.provider)?.state === 'pending') ? { refreshing: true } : {}) }
   }
   close() {
     if (this.closePromise) return this.closePromise

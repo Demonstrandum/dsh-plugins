@@ -18,6 +18,8 @@ export interface BillingSnapshot {
   staleAfterMs?: number
   recovered?: boolean
   now?: string
+  /** The host is still backfilling history or reading subscription usage; poll again soon. */
+  refreshing?: boolean
 }
 
 const record = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x)
@@ -227,6 +229,7 @@ function useSnapshot(sessionId: string, visible: boolean, running: boolean, rout
     const poll = async () => {
       active = new AbortController()
       const timeout = setTimeout(() => active?.abort(), 15000)
+      let refreshing = false
       try {
         const query = `sessionId=${encodeURIComponent(sessionId)}${route ? `&route=${encodeURIComponent(route)}` : ''}`
         const response = await fetch(`api/billing-status/snapshot?${query}`, { signal: active.signal, credentials: 'same-origin', cache: 'no-store' })
@@ -234,6 +237,7 @@ function useSnapshot(sessionId: string, visible: boolean, running: boolean, rout
         const snapshot = parseSnapshot(await response.json(), sessionId)
         if (!snapshot) throw new Error('Invalid snapshot')
         failures = 0
+        refreshing = snapshot.refreshing === true
         if (!stopped) setState({ sessionId, snapshot, clockOffset: snapshot.now ? new Date(snapshot.now).getTime() - Date.now() : 0 })
       } catch {
         // Never retain account evidence after an authorization/network failure.
@@ -243,7 +247,7 @@ function useSnapshot(sessionId: string, visible: boolean, running: boolean, rout
         clearTimeout(timeout)
         if (!stopped) {
           setNow(Date.now())
-          timer = setTimeout(() => { void poll() }, failures ? Math.min(60000, 15000 * 2 ** Math.min(failures - 1, 3)) : running ? 5000 : 30000)
+          timer = setTimeout(() => { void poll() }, failures ? Math.min(60000, 15000 * 2 ** Math.min(failures - 1, 3)) : refreshing ? 2000 : running ? 5000 : 30000)
         }
       }
     }
