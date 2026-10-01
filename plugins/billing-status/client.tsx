@@ -133,7 +133,7 @@ export interface BillingView {
 const SUBSCRIPTION_PROVIDER = /-oauth$|^openai-codex$/
 
 /** Derive the compact pill and its descriptions from one validated snapshot. */
-export function billingView(snapshot: BillingSnapshot | undefined, now: number, failed = false): BillingView {
+export function billingView(snapshot: BillingSnapshot | undefined, now: number, failed = false, route?: string): BillingView {
   if (!snapshot) {
     const notes: BillingNote[] = failed ? [{ key: 'unavailable', level: 'danger', text: 'Billing unavailable' }] : []
     return { money: [], moneyIcons: [], unknownMoney: true, unknownIcon: 'api', notes, summary: failed ? 'Billing unavailable' : 'No billing observed yet' }
@@ -158,12 +158,13 @@ export function billingView(snapshot: BillingSnapshot | undefined, now: number, 
   if (latest?.kind === 'rejected') notes.push({ key: 'rejected', level: 'danger', text: 'Last request rejected' })
   if (snapshot.persistence === 'error') notes.push({ key: 'persistence', level: 'danger', text: 'Not saved; totals may be partial' })
   const parts = totals.map(t => `${t.kind === 'estimated' ? 'Estimated' : 'Reported'} ${exactAmount(t.amount, t.currency)}`)
-  if (unknownMoney) parts.push('Cost unknown')
+  // Nothing recorded (e.g. every request predates billing): say so rather than imply hidden spend.
+  if (unknownMoney) parts.push(snapshot.counts.requests === 0 ? 'No requests recorded yet' : 'Cost unknown')
   if (quota?.extra) parts.push('Extra usage')
   else if (quota?.unknown) parts.push('Subscription usage unknown')
   else if (quota) parts.push(...quota.windows.map(w => `${w.label ? `${w.label} ` : ''}${percent(w.usedPercent)} used`))
   parts.push(...notes.map(n => n.text))
-  return { money, moneyIcons: totals.map(iconOfTotal), unknownMoney, unknownIcon: latest?.provider === 'openrouter' ? 'openrouter' : 'api', quota, notes, summary: parts.join(' · ') }
+  return { money, moneyIcons: totals.map(iconOfTotal), unknownMoney, unknownIcon: (latest?.provider ?? route) === 'openrouter' ? 'openrouter' : 'api', quota, notes, summary: parts.join(' · ') }
 }
 
 /** Full accessible description of the compact pill. */
@@ -285,7 +286,7 @@ export function BillingStatus({ sessionId, running = false, route }: { sessionId
     document.addEventListener('keydown', onKey, true)
     return () => document.removeEventListener('keydown', onKey, true)
   }, [open, placed])
-  const view = billingView(snapshot, now, state.failed)
+  const view = billingView(snapshot, now, state.failed, route)
   const latest = snapshot?.latest
   const iconNotes = view.unknownMoney && !view.quota ? view.notes.filter(n => n.key !== 'unpriced') : view.notes
   const danger = iconNotes.some(n => n.level === 'danger')

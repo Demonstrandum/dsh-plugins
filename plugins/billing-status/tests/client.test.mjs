@@ -61,6 +61,12 @@ test('money glyphs: OpenRouter for its reported charges, API for estimates and u
   assert.equal(billingView(routed, at).unknownIcon, 'openrouter')
   assert.equal(billingView({ ...routed, latest: { ...routed.latest, provider: 'anthropic' } }, at).unknownIcon, 'api')
 })
+test('a session with nothing recorded says so and uses its selected route glyph', () => {
+  const view = billingView(base(), at, false, 'openrouter')
+  assert.equal(view.unknownIcon, 'openrouter')
+  assert.equal(view.summary, 'No requests recorded yet')
+  assert.equal(billingView(base(), at, false, 'anthropic').unknownIcon, 'api')
+})
 test('failed requests are a separate, not-billed note', () => {
   const view = billingView({ ...base(), totals: [usd('1.2')], counts: { requests: 3, unpriced: 0, pending: 0, subscription: 0, incomplete: 2, failed: 2 } }, at)
   same(view.notes.map(n => n.text), ['2 requests incomplete', '2 failed requests (not billed)'])
