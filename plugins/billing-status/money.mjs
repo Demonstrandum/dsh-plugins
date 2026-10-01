@@ -50,7 +50,7 @@ export function validateRateCards(cards = []) {
     const allowed = ['provider','model','currency','version','source','inputMode','inputPerMillion','outputPerMillion','cacheReadPerMillion','cacheWritePerMillion','maxInputTokens']
     if (!card || typeof card !== 'object' || Object.keys(card).some(key => !allowed.includes(key))) throw new TypeError('Invalid rate card fields')
     for (const key of ['provider','model','version']) {
-      if (typeof card[key] !== 'string' || !/^[a-zA-Z0-9_.:/-]{1,160}$/.test(card[key])) throw new TypeError(`Invalid rate card ${key}`)
+      if (typeof card[key] !== 'string' || !/^[a-zA-Z0-9_.:/~-]{1,160}$/.test(card[key])) throw new TypeError(`Invalid rate card ${key}`)
     }
     if (card.provider.endsWith('-oauth') || card.provider === 'openai-codex') throw new TypeError('OAuth subscriptions cannot use API token rate cards')
     if (!/^[A-Z]{3}$/.test(card.currency ?? '')) throw new TypeError('Rate card needs an ISO currency')

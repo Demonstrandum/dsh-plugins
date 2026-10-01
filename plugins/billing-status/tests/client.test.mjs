@@ -57,6 +57,7 @@ test('estimates carry ~, reported has no qualifier; gaps become notes', () => {
 test('money glyphs: OpenRouter for its reported charges, API for estimates and unknown API cost', () => {
   const data = { ...base(), totals: [{ ...usd('1.24'), scope: 'openrouter-account' }, { ...usd('0.04', 'estimated'), scope: 'model-tokens' }] }
   same(billingView(data, at).moneyIcons, ['openrouter', 'api'])
+  same(billingView({ ...base(), totals: [{ ...usd('15', 'estimated'), scope: 'openrouter-tokens' }] }, at).moneyIcons, ['openrouter'])
   const routed = { ...base(), latest: { provider: 'openrouter', model: 'm', at, kind: 'unknown', windows: [] }, counts: { requests: 1, unpriced: 1, pending: 0, subscription: 0 } }
   assert.equal(billingView(routed, at).unknownIcon, 'openrouter')
   assert.equal(billingView({ ...routed, latest: { ...routed.latest, provider: 'anthropic' } }, at).unknownIcon, 'api')

@@ -28,7 +28,7 @@ When the **displayed** session needs a reading (none, or only a stale one), the 
 | Subscription windows | shield + `5h` ring `7d` ring (ContextMeter ring geometry); the percentages are in the tooltip and card |
 | Single unnamed quota (Codex `primary` without a duration) | shield + `20%`; windows with durations get `5h`/`7d` rings |
 | Extra usage | shield + orange `Extra`, never a percentage |
-| Stale quota | the previous window labels struck through, rings dimmed, orange info icon |
+| Stale quota | the previous reading stays; its shield and rings are dimmed, orange info icon |
 | Gaps (unpriced beside a known cost, pending, incomplete, failed) | trailing orange info icon; hover lists them |
 | Storage failure, rejected request, access failure | trailing red warning icon; hover lists them |
 
@@ -84,6 +84,12 @@ Trusted host plugins can consume `ctx.billingStatus.snapshot(sessionId)` or publ
 All fields are optional.
 
 Counting: a request still in flight is only **pending** (its usage has not arrived). A request that ended in an error or cancellation **before any usage** is counted as **failed (not billed)**, not unpriced: nothing was processed (for example Anthropic's "credit balance is too low" rejection). A request that did process tokens and was then cancelled keeps its usage and is priced normally; one that completed without any usage stays **unpriced**.
+
+### Requests before the ledger (history backfill)
+
+The first time a session is displayed in a process, the host reads its session log (optional `sessionQuery` service) and prices every assistant response that predates the session's first ledger row, skipping subscription routes and events inherited from a fork parent. OpenRouter responses are looked up by generation id through `ctx.llm.responseCost` (custom fork; one request each, at most 500 per session, stopped early by a rate limit or auth failure) and recorded as **reported** charges; when a lookup fails, the catalog estimate is used instead (`~$`, still with the OpenRouter glyph: scope `openrouter-tokens`). Other per-token routes get the catalog estimate. Results are appended as `history:<seq>` rows, so a session is backfilled once, not on every restart; a response already recorded live (same generation id, or after the first live row) is never counted twice.
+
+Model ids may contain `~` (OpenRouter's `~vendor/model-latest` aliases); earlier builds rejected them and silently dropped those requests.
 
 ### Estimates from DSH's model catalog
 

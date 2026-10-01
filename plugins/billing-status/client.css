@@ -41,9 +41,9 @@
 .tali-billing-window { display: inline-flex; align-items: center; gap: 4px; }
 .tali-billing-window + .tali-billing-window { margin-left: 4px; }
 .tali-billing-extra { color: var(--dsw-alias-state-warn-primary, #f59e0b); }
-.tali-billing-stale .tali-billing-window-label { text-decoration: line-through; }
-.tali-billing-stale .tali-billing-ring,
-.tali-billing-stale .tali-billing-bar { opacity: .45; }
+/* Stale: the reading stays legible; its glyphs (shield, rings, bars) dim. */
+.tali-billing-stale svg,
+.tali-billing-stale .tali-billing-bar { opacity: .4; }
 .tali-billing-note { display: inline-flex; align-items: center; }
 .tali-billing-info { color: var(--dsw-alias-state-warn-primary, #f59e0b); }
 .tali-billing-danger { color: var(--dsw-alias-state-error-primary, #dc2626); }

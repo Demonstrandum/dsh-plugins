@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { units, decimal, priceUsage, validateRateCards, catalogCard } from './money.mjs'
 
-const identifier = value => typeof value === 'string' && /^[a-zA-Z0-9_.:/-]{1,160}$/.test(value) && !/sk-|bearer|password|secret/i.test(value) ? value : undefined
+const identifier = value => typeof value === 'string' && /^[a-zA-Z0-9_.:/~-]{1,160}$/.test(value) && !/sk-|bearer|password|secret/i.test(value) ? value : undefined
 const timestamp = value => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : undefined
 const oauth = provider => provider?.endsWith('-oauth') || provider === 'openai-codex'
 const USAGE_KEYS = ['inputTokens', 'outputTokens', 'totalTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens']
@@ -21,7 +21,7 @@ function usageOf(value) {
 }
 function costOf(value) {
   if (!value || units(value.amount) === undefined || !/^[A-Z]{3}$/.test(value.currency ?? '')) return undefined
-  if (!['reported','estimated'].includes(value.kind) || !['openrouter-account','model-tokens'].includes(value.scope)) return undefined
+  if (!['reported','estimated'].includes(value.kind) || !['openrouter-account','model-tokens','openrouter-tokens'].includes(value.scope)) return undefined
   return { kind: value.kind, amount: value.amount, currency: value.currency, scope: value.scope,
     ...(identifier(value.pricingVersion) ? { pricingVersion: value.pricingVersion } : {}) }
 }
@@ -54,7 +54,12 @@ function cleanRow(row) {
 
 /** Append-only request states, separate from DSH history: rewind is not a refund. */
 export class BillingLedger {
-  constructor({ directory, rateCards = [], staleAfterMs = 300_000, now = () => new Date().toISOString(), pricing, usage, usageRetryMs = 300_000 }) {
+  constructor({ directory, rateCards = [], staleAfterMs = 300_000, now = () => new Date().toISOString(), pricing, usage, usageRetryMs = 300_000, history, responseCost }) {
+    // Session-log reader (`sessionQuery.readSession`) and provider receipt lookup (`ctx.llm.responseCost`)
+    // for requests that predate the ledger; each session is backfilled at most once per process.
+    this.history = history
+    this.responseCost = responseCost
+    this.backfilled = new Set()
     this.directory = directory
     this.cards = validateRateCards(rateCards)
     // DSH's resolved-model list prices (`ctx.llm.resolveModelInfo().pricing`), looked up per route/model.
@@ -180,6 +185,72 @@ export class BillingLedger {
       this.usageAttempts.set(route, { state: 'failed', retryAt: Date.now() + Math.max(this.usageRetryMs, Number(seconds ?? 0) * 1000) })
     })
   }
+  /** Catalog estimate for one usage; OpenRouter estimates keep their route so the pill shows its glyph. */
+  async estimate(provider, models, usage, configured) {
+    for (const model of models) {
+      if (!model) continue
+      const cost = priceUsage(usage, await this.cardFor(provider, model, configured))
+      if (cost) return provider === 'openrouter' ? { ...cost, scope: 'openrouter-tokens' } : cost
+    }
+    return undefined
+  }
+  /**
+   * Price requests recorded in the session log before this ledger saw the session: OpenRouter
+   * generations by their receipt (one lookup each), falling back to the catalog estimate; other
+   * per-token routes by the catalog. Results are appended as `history:<seq>` rows, so this happens
+   * once per session ever; subscription routes and fork-inherited events are skipped.
+   */
+  requestBackfill(sessionId) {
+    if (!this.history || this.closed || this.backfilled.has(sessionId)) return
+    this.backfilled.add(sessionId)
+    void (async () => {
+      const log = await this.history(sessionId)
+      const events = Array.isArray(log?.events) ? log.events.slice(Number.isSafeInteger(log.inheritedEventCount) ? log.inheritedEventCount : 0) : []
+      const rows = [...this.rows.values()].filter(row => row.sessionId === sessionId)
+      const live = rows.filter(row => !row.requestId.startsWith('history:'))
+      const cutoff = live.length ? Math.min(...live.map(row => Date.parse(row.startedAt))) : Infinity
+      const have = new Set(rows.map(row => row.requestId)), receipts = new Set(rows.map(row => row.responseId).filter(Boolean))
+      const items = []
+      for (const event of events) {
+        if (event?.type !== 'assistant/message' || !(event.time < cutoff)) continue
+        const source = event.data?.message?.source
+        const provider = identifier(source?.provider), model = identifier(source?.model), usage = usageOf(event.data?.usage)
+        if (source?.kind !== 'model' || !provider || !model || !usage || oauth(provider)) continue
+        const requestId = `history:${event.seq}`, responseId = identifier(source.replayState?.response?.responseId)
+        if (have.has(requestId) || (responseId && receipts.has(responseId))) continue
+        items.push({ requestId, provider, model, usage, responseId, responseModel: identifier(source.replayState?.response?.responseModel), at: new Date(event.time).toISOString() })
+      }
+      let lookups = 0, lookupsStopped = false
+      const price = async item => {
+        if (item.provider === 'openrouter' && item.responseId && this.responseCost && !lookupsStopped && lookups < 500) {
+          lookups++
+          try {
+            const receipt = await this.responseCost(item.provider, item.responseId)
+            const cost = receipt && costOf({ kind: 'reported', amount: receipt.amount, currency: receipt.currency, scope: 'openrouter-account' })
+            if (cost) return cost
+          } catch (error) {
+            // Rate limits or auth failures stop further lookups; the rest use the catalog.
+            if (/RATE_LIMIT|AUTH/.test(String(error?.code))) lookupsStopped = true
+          }
+        }
+        return this.estimate(item.provider, [item.model, item.responseModel], item.usage)
+      }
+      for (let index = 0; index < items.length; index += 4) {
+        const batch = items.slice(index, index + 4)
+        const costs = await Promise.all(batch.map(price))
+        await (this.tail = this.tail.then(async () => {
+          for (const [i, item] of batch.entries()) {
+            const row = cleanRow({ sessionId, requestId: item.requestId, provider: item.provider, model: item.model, at: item.at, startedAt: item.at,
+              purpose: 'history', ...(item.responseId ? { responseId: item.responseId } : {}), finished: true, usage: item.usage, cost: costs[i], outcome: 'unknown' })
+            if (!row || this.rows.has(`${sessionId}/${row.requestId}`)) continue
+            this.rows.set(`${sessionId}/${row.requestId}`, row)
+            if (this.persistence === 'ok' && this.file) await this.file.write(`${JSON.stringify({ version: 1, row })}\n`)
+          }
+          if (this.persistence === 'ok' && this.file) await this.file.sync()
+        }).catch(() => { this.persistence = 'error' }))
+      }
+    })().catch(() => { /* history unavailable: nothing to backfill */ })
+  }
   /** Configured card first, then DSH's catalog list prices; cached for ten minutes per route/model. */
   async cardFor(provider, model, configured) {
     if (configured) return configured
@@ -209,7 +280,7 @@ export class BillingLedger {
         const usage = usageOf(observation.usage)
         if (usage) {
           row.usage = usage // cumulative sample replaces; never add successive samples
-          if (row.cost?.kind !== 'reported' && row.authKind !== 'oauth' && !oauth(row.provider)) row.cost = priceUsage(usage, await this.cardFor(row.provider, row.model, row.card))
+          if (row.cost?.kind !== 'reported' && row.authKind !== 'oauth' && !oauth(row.provider)) row.cost = await this.estimate(row.provider, [row.model], usage, row.card)
         }
       }
       if (observation.phase === 'evidence') {
@@ -287,13 +358,14 @@ export class BillingLedger {
   }
   async snapshot(sessionId, routeHint) {
     await this.tail
+    this.requestBackfill(sessionId)
     const stored = [...this.rows.values()].filter(row => row.sessionId === sessionId)
     // Usage recorded before prices were known (or before this feature) is priced at read time from the
     // same catalog; nothing is written back, so a later receipt or restart never double-counts it.
     const records = []
     for (const row of stored) {
       if (row.cost || !row.usage || row.authKind === 'oauth' || oauth(row.provider) || row.outcome === 'plan') { records.push(row); continue }
-      const cost = priceUsage(row.usage, await this.cardFor(row.provider, row.model, row.card))
+      const cost = await this.estimate(row.provider, [row.model], row.usage, row.card)
       records.push(cost && !(row.incomplete && units(cost.amount) === 0n) ? { ...row, cost } : row)
     }
     const totals = new Map(), countedReceipts = new Set()

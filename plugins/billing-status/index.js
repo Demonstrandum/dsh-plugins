@@ -58,7 +58,10 @@ export function apply(ctx, input) {
   // Subscription usage comes from `ctx.llm.subscriptionUsage` (custom fork); absent on older DSH.
   const ledger = new BillingLedger({ ...config,
     pricing: async (provider, model) => (await ctx.llm.resolveModelInfo(provider, model)).pricing,
-    usage: typeof ctx.llm?.subscriptionUsage === 'function' ? provider => ctx.llm.subscriptionUsage(provider) : undefined })
+    usage: typeof ctx.llm?.subscriptionUsage === 'function' ? provider => ctx.llm.subscriptionUsage(provider) : undefined,
+    // Optional: the session log (session-query) and receipt lookups price requests that predate the ledger.
+    history: async sessionId => { const query = ctx.get?.('sessionQuery'); return typeof query?.readSession === 'function' ? query.readSession(sessionId) : undefined },
+    responseCost: typeof ctx.llm?.responseCost === 'function' ? (provider, id) => ctx.llm.responseCost(provider, id) : undefined })
   ctx.effect(() => () => ledger.close(), 'billing-status: durable ledger')
   ctx.provide('billingStatus', {
     // Trusted in-process extension point; there is deliberately no HTTP ingestion endpoint.

@@ -127,6 +127,46 @@ test('usage failures retry after backoff; a route with no reading shows the subs
   await ledger.snapshot('api')
   assert.equal(calls, 2)
 })
+const settle = () => new Promise(resolve => setTimeout(resolve, 20))
+const message = (seq, time, provider, model, usage, responseId) => ({ type: 'assistant/message', seq, time, data: { usage,
+  message: { role: 'assistant', content: [], source: { kind: 'model', provider, model, ...(responseId ? { replayState: { response: { responseId, responseModel: 'anthropic/claude-opus-5.5' } } } : {}) } } } })
+test('history backfill: OpenRouter receipts, catalog fallback, once per session, live rows and inherited events excluded', async t => {
+  const usage = { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 1000000 }
+  const reads = [], lookups = []
+  const events = [
+    message(1, Date.parse('2025-12-31T00:00:00Z'), 'openrouter', '~anthropic/claude-opus-latest', usage, 'gen-inherited'),
+    message(5, Date.parse('2025-12-31T10:00:00Z'), 'openrouter', '~anthropic/claude-opus-latest', usage, 'gen-ok'),
+    message(6, Date.parse('2025-12-31T10:01:00Z'), 'openrouter', '~anthropic/claude-opus-latest', usage, 'gen-missing'),
+    message(7, Date.parse('2025-12-31T10:02:00Z'), 'anthropic-oauth', 'claude-opus-5-5', usage),
+    message(8, Date.parse('2025-12-31T10:03:00Z'), 'anthropic', 'claude-opus-5-5', usage),
+    message(9, Date.parse('2026-01-01T00:00:05Z'), 'openrouter', '~anthropic/claude-opus-latest', usage, 'gen-live'),
+  ]
+  const { ledger, directory } = await fixture(t, { rateCards: [],
+    pricing: async () => catalogPricing,
+    history: async id => { reads.push(id); return { inheritedEventCount: 1, events } },
+    responseCost: async (provider, id) => { lookups.push(id); if (id === 'gen-ok') return { amount: '0.5', currency: 'USD' }; throw Object.assign(new Error('missing'), { code: 'PROVIDER_ERROR' }) } })
+  // A live request recorded by the ledger at 00:00:00 sets the cutoff; later log messages are already covered.
+  await ledger.record({ ...base, provider: 'openrouter', model: '~anthropic/claude-opus-latest', phase: 'evidence', evidence: { kind: 'openrouter', responseId: 'gen-live', reportedCost: { amount: '0.25', currency: 'USD', scope: 'openrouter-account' }, outcome: 'unknown' } })
+  await ledger.snapshot('session-one')
+  await settle()
+  const snapshot = await ledger.snapshot('session-one')
+  assert.deepEqual(reads, ['session-one'], 'the log is read once per process')
+  assert.deepEqual(lookups, ['gen-ok', 'gen-missing'])
+  const byKind = Object.fromEntries(snapshot.totals.map(t => [`${t.kind}/${t.scope}`, t.amount]))
+  assert.equal(byKind['reported/openrouter-account'], '0.75', 'receipt 0.5 + live 0.25')
+  assert.equal(byKind['estimated/openrouter-tokens'], '0.206', 'missing receipt falls back to the catalog')
+  assert.equal(byKind['estimated/model-tokens'], '0.206', 'API-key history priced from the catalog')
+  assert.equal(snapshot.counts.requests, 4, 'live + 3 history rows; subscription and inherited skipped')
+  const persisted = await readFile(join(directory, 'ledger.jsonl'), 'utf8')
+  assert.ok(persisted.includes('history:5') && !persisted.includes('history:1') && !persisted.includes('history:7'))
+  // A new process sees the history rows and adds nothing.
+  await ledger.close()
+  const again = new BillingLedger({ directory, rateCards: [], pricing: async () => catalogPricing, history: async () => ({ inheritedEventCount: 1, events }), responseCost: async id => { lookups.push(id) } })
+  t.after(() => again.close())
+  await again.snapshot('session-one'); await settle()
+  assert.equal((await again.snapshot('session-one')).counts.requests, 4)
+  assert.equal(lookups.length, 2)
+})
 test('in-flight requests are pending not unpriced; failures before any usage are not billed', async t => {
   const { ledger } = await fixture(t, { rateCards: [] })
   await ledger.record({ ...base, phase: 'start' })

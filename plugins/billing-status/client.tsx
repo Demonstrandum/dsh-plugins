@@ -10,7 +10,7 @@ import styles from './client.css'
 export interface BillingSnapshot {
   version: 1
   sessionId: string
-  totals: { kind: 'reported' | 'estimated'; currency: string; amount: string; scope?: 'model-tokens' | 'provider-account' | 'openrouter-account'; source?: string }[]
+  totals: { kind: 'reported' | 'estimated'; currency: string; amount: string; scope?: 'model-tokens' | 'provider-account' | 'openrouter-account' | 'openrouter-tokens'; source?: string }[]
   counts: { requests: number; unpriced: number; pending: number; subscription: number; incomplete?: number; failed?: number }
   latest?: { provider: string; model: string; at: string | number; kind: 'plan' | 'extra' | 'unknown' | 'unobserved' | 'rejected' | 'quota'; stale?: boolean; windows: { label: string; usedPercent: number; resetAt?: string | number; windowMinutes?: number }[]; credits?: { hasCredits: boolean; unlimited: boolean; balance?: string } }
   persistence: 'ok' | 'error'
@@ -29,7 +29,7 @@ const timestamp = (x: unknown): x is string | number => (typeof x === 'string' |
 /** Reject malformed or misaddressed data rather than showing another session's account. */
 export function parseSnapshot(value: unknown, sessionId: string): BillingSnapshot | null {
   if (!record(value) || value.version !== 1 || value.sessionId !== sessionId || !Array.isArray(value.totals) || value.totals.length > 16) return null
-  if (!value.totals.every(x => record(x) && ['reported', 'estimated'].includes(String(x.kind)) && typeof x.currency === 'string' && /^[A-Z]{3}$/.test(x.currency) && decimal(x.amount) && (x.scope === undefined || ['model-tokens', 'provider-account', 'openrouter-account'].includes(String(x.scope))))) return null
+  if (!value.totals.every(x => record(x) && ['reported', 'estimated'].includes(String(x.kind)) && typeof x.currency === 'string' && /^[A-Z]{3}$/.test(x.currency) && decimal(x.amount) && (x.scope === undefined || ['model-tokens', 'provider-account', 'openrouter-account', 'openrouter-tokens'].includes(String(x.scope))))) return null
   const counts = value.counts
   if (!record(counts) || !['requests', 'unpriced', 'pending', 'subscription'].every(k => count(counts[k]))) return null
   if (counts.incomplete !== undefined && !count(counts.incomplete)) return null
@@ -113,7 +113,8 @@ export function windowLabel(window: { label: string; windowMinutes?: number }): 
 }
 
 export type MoneyIcon = 'openrouter' | 'api'
-const iconOfTotal = (t: BillingSnapshot['totals'][number]): MoneyIcon => t.kind === 'reported' && t.scope === 'openrouter-account' ? 'openrouter' : 'api'
+// OpenRouter receipts and catalog estimates of OpenRouter requests both carry the OpenRouter glyph.
+const iconOfTotal = (t: BillingSnapshot['totals'][number]): MoneyIcon => t.scope === 'openrouter-account' || t.scope === 'openrouter-tokens' ? 'openrouter' : 'api'
 export interface BillingNote { key: string; level: 'info' | 'danger'; text: string }
 export interface BillingView {
   /** Compact money pieces; estimates carry a `~` prefix. */
@@ -305,7 +306,7 @@ export function BillingStatus({ sessionId, running = false, route }: { sessionId
   const row = (key: string, label: ReactNode, value: ReactNode, className?: string) => <div className={`tali-billing-row${className ? ` ${className}` : ''}`} key={key}><dt>{label}</dt><dd>{value}</dd></div>
   // Catalog versions arrive as `pi-ai-catalog-2026-09-22`; show `pi-ai prices`.
   const sourceLabel = (t: BillingSnapshot['totals'][number]) => t.kind === 'estimated' && t.source?.startsWith('pi-ai') ? 'pi-ai prices' : undefined
-  const scopeLabel = (scope?: string) => scope === 'openrouter-account' ? 'OpenRouter' : scope === 'provider-account' ? 'Provider' : scope === 'model-tokens' ? 'Token prices' : undefined
+  const scopeLabel = (scope?: string) => scope === 'openrouter-account' ? 'OpenRouter' : scope === 'provider-account' ? 'Provider' : scope === 'model-tokens' || scope === 'openrouter-tokens' ? 'Token prices' : undefined
   return <span className="tali-billing-root" ref={rootRef}>
     <Tooltip label={view.summary} side="top" delayMs={200} disabled={open}>
       <button type="button" className="tali-billing-pill" ref={triggerRef} aria-label={`Billing: ${view.summary}`} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => setOpen(!open)}>
