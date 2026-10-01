@@ -65,6 +65,19 @@ node plugins/billing-status/tests/fixture-server.mjs
 - The full remote suite exposed two pre-existing synthetic identity fixtures whose replacement display phrase was not a valid login (and disagreed with their expected `user@example.com`). They now use consistent example logins; no production identity policy was loosened.
 - Only the new, uninstalled client bundle was built. The mock fixture server is disposable and stopped after verification.
 
+## Codex subscription usage (2026-10-01)
+
+Symptom: an `openai-codex-oauth` session showed the shield with `—`. Its ledger rows were `outcome: unobserved`, because pi-ai's Codex transport defaults to WebSocket (`transport: "auto"`, models `prefer_websockets: true`), which the passive fetch broker never sees; the HTTP `x-codex-*` header parser only covers SSE. `ctx.llm.subscriptionUsage` returned `undefined` for every route but `anthropic-oauth`.
+
+Changes, along the existing seams:
+
+- **Fork** (`packages/llm/llm-pi-ai/src/subscription-usage.ts`): `readSubscriptionUsage` also serves `openai-codex` (native id and `-oauth` route) with one `GET https://chatgpt.com/backend-api/wham/usage`, the endpoint behind the Codex CLI's `/status` (`codex-rs/backend-client`, `PathStyle::ChatGptApi` → `/wham/…`). Headers: the route token plus `chatgpt-account-id` from the token's `https://api.openai.com/auth` claim — the same extraction pi-ai's Codex transport does. `rate_limit.primary_window`/`secondary_window` (`used_percent`, `limit_window_seconds`, `reset_at` epoch seconds) become windows labelled by length (`18000` s → `5h`, `604800` s → `7d`). Credits, `plan_type`, `model_usage` and `chatpass` are not reported. Test: `oauth-routes.spec.ts` "subscription usage".
+- **Plugin** (`ledger.mjs`): Codex usage-endpoint readings are `kind: 'quota'`. A finished subscription request with usage but `outcome: unobserved` records account activity; a display whose account reading is older than that activity re-reads usage, at most once per `usageRefreshMs` (60 s). Without activity nothing is re-read, so there is still no polling of idle accounts. Client unchanged: it already renders `quota` rings for `5h`/`7d` labels.
+
+Measured against a real Plus account (one read, no inference): `200` with `primary_window` 18000 s and `secondary_window` 604800 s, `credits.balance: "0"`. A Free account's token reads the same endpoint; `gpt-5.5` is still refused for it ("does not exist or you do not have access"), while `gpt-5.6-luna`/`-terra` and `gpt-6-luna` answer. Upgrading the ChatGPT plan **invalidates the existing grant** ("Your authentication token has been invalidated"): `/oauth deactivate openai-codex` then `/oauth activate openai-codex`.
+
+Rollout: host-side only (fork source + plugin host module), so it takes effect at the next `dsh web` restart of each instance running the checkout; no client bundle rebuild.
+
 ## Next increment / rollout gate
 
 Before trying this in an ownership-aware instance, review and configure the optional adapter's **explicit session-to-login bindings**; unbound sessions and token-only readers intentionally remain unavailable. Automatic financial-owner discovery/migration is unsupported. Remaining provider work includes supported Codex WebSocket hooks, optional OpenRouter lookup reconciliation, maintained pricing cards and richer service-tier/model/media/tool pricing. Trial the actual package in an isolated DSH preview before seeking explicit live-install approval. Do not treat the mock UI or fake-provider integrations as verification of real account billing or live activation.

@@ -54,7 +54,7 @@ function cleanRow(row) {
 
 /** Append-only request states, separate from DSH history: rewind is not a refund. */
 export class BillingLedger {
-  constructor({ directory, rateCards = [], staleAfterMs = 300_000, now = () => new Date().toISOString(), pricing, usage, usageRetryMs = 300_000, history, responseCost, firstLoadWaitMs = 5_000 }) {
+  constructor({ directory, rateCards = [], staleAfterMs = 300_000, now = () => new Date().toISOString(), pricing, usage, usageRetryMs = 300_000, usageRefreshMs = 60_000, history, responseCost, firstLoadWaitMs = 5_000 }) {
     // Session-log reader (`sessionQuery.readSession`) and provider receipt lookup (`ctx.llm.responseCost`)
     // for requests that predate the ledger; each session is backfilled at most once per process.
     this.history = history
@@ -81,6 +81,11 @@ export class BillingLedger {
     this.usage = usage
     this.usageRetryMs = usageRetryMs
     this.usageAttempts = new Map()
+    // Routes whose responses carry no account reading (Codex over WebSocket): the time their latest
+    // finished request was observed. A reading older than that is re-read, at most once per
+    // usageRefreshMs, the next time a session on the account is displayed.
+    this.usageRefreshMs = usageRefreshMs
+    this.activity = new Map()
     this.startOrders = new Map()
     this.sequence = 0
     this.recovered = new Set()
@@ -172,16 +177,24 @@ export class BillingLedger {
     this.accounts.set(entry.provider, { ...entry, order: 0 })
     return true
   }
-  /** One background usage read per account per process; failures retry after usageRetryMs. */
-  requestUsage(route, model) {
+  /**
+   * One background usage read per account per process; failures retry after usageRetryMs. With
+   * `refresh` (the account was used since its reading and its responses carry none), a completed
+   * read may be repeated once usageRefreshMs has passed.
+   */
+  requestUsage(route, model, refresh = false) {
     if (!this.usage || this.closed) return
     const attempt = this.usageAttempts.get(route)
-    if (attempt && (attempt.state !== 'failed' || Date.now() < attempt.retryAt)) return
+    if (attempt?.state === 'pending') return
+    if (attempt?.state === 'failed' && Date.now() < attempt.retryAt) return
+    if (attempt?.state === 'done' && !(refresh && Date.now() - attempt.doneAt >= this.usageRefreshMs)) return
     const promise = Promise.resolve().then(() => this.usage(route)).then(async result => {
-      if (!result || !Array.isArray(result.windows) || result.windows.length === 0) { this.usageAttempts.set(route, { state: 'done' }); return }
+      if (!result || !Array.isArray(result.windows) || result.windows.length === 0) { this.usageAttempts.set(route, { state: 'done', doneAt: Date.now() }); return }
       const at = timestamp(result.observedAt) ?? this.now()
-      const entry = { order: 0, provider: route, model: identifier(model) ?? 'account', at, startedAt: at, kind: 'plan', windows: windowsOf(result.windows), source: 'usage-endpoint' }
-      this.usageAttempts.set(route, { state: 'done' })
+      // Codex windows are an account quota, not an Anthropic-style claim that a request was billed to a plan.
+      const kind = route.startsWith('openai-codex') ? 'quota' : 'plan'
+      const entry = { order: 0, provider: route, model: identifier(model) ?? 'account', at, startedAt: at, kind, windows: windowsOf(result.windows), source: 'usage-endpoint' }
+      this.usageAttempts.set(route, { state: 'done', doneAt: Date.now() })
       if (this.rememberAccount(entry)) await this.saveQuota()
     }).catch(error => {
       const seconds = /retry after (\d+)s/.exec(String(error?.message))?.[1]
@@ -328,6 +341,8 @@ export class BillingLedger {
           // pi-ai emits a zero usage placeholder even when no provider usage arrived.
           if (row.cost?.kind === 'estimated' && units(row.cost.amount) === 0n) delete row.cost
         }
+        // Used the account without seeing its reading: the remembered reading is now behind.
+        if (oauth(row.provider) && row.outcome === 'unobserved' && row.usage) this.activity.set(row.provider, row.at)
       }
       const clean = cleanRow(row)
       this.rows.delete(key)
@@ -358,7 +373,9 @@ export class BillingLedger {
     }
     latest ??= { order: 0, provider: route, model: last?.model ?? 'account', at: last?.at ?? now, startedAt: last?.startedAt ?? now, kind: 'unobserved', windows: [] }
     const fresh = known.includes(latest.kind) && Date.parse(now) - Date.parse(latest.at) <= this.staleAfterMs
-    if (!fresh && request) this.requestUsage(route, latest.model)
+    const used = this.activity.get(route)
+    const behind = used !== undefined && known.includes(latest.kind) && Date.parse(used) > Date.parse(latest.at)
+    if ((!fresh || behind) && request) this.requestUsage(route, latest.model, behind)
     return latest
   }
   async snapshot(sessionId, routeHint) {

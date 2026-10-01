@@ -130,6 +130,49 @@ test('usage failures retry after backoff; a route with no reading shows the subs
   await ledger.snapshot('api')
   assert.equal(calls, 2)
 })
+test('Codex usage: a quota reading, re-read after the account is used over an unobserved transport', async t => {
+  let clock = '2026-01-01T00:00:00.000Z', used = 10
+  const calls = []
+  const { ledger } = await fixture(t, { rateCards: [], usageRefreshMs: 0, firstLoadWaitMs: 50, now: () => clock,
+    usage: async route => { calls.push(route); used += 5; return { windows: [{ label: '5h', usedPercent: used }, { label: '7d', usedPercent: 1 }], observedAt: clock } } })
+  const codex = { ...base, sessionId: 'session-codex', provider: 'openai-codex-oauth', model: 'gpt-5.6-terra' }
+  let latest = (await ledger.snapshot('session-codex', 'openai-codex-oauth')).latest
+  assert.deepEqual([latest.kind, latest.stale, latest.windows.map(w => w.usedPercent)], ['quota', false, [15, 1]])
+  // Displayed again with no activity: the reading is fresh, nothing is re-read.
+  clock = '2026-01-01T00:01:00.000Z'
+  await ledger.snapshot('session-codex')
+  assert.equal(calls.length, 1)
+  // A WebSocket request (no header evidence) finishes with usage: the next display re-reads.
+  await ledger.record({ ...codex, at: clock, phase: 'start' })
+  await ledger.record({ ...codex, at: clock, phase: 'usage', usage: { inputTokens: 100, outputTokens: 5 } })
+  await ledger.record({ ...codex, at: clock, phase: 'evidence', evidence: { kind: 'unobserved', outcome: 'unobserved' } })
+  await ledger.record({ ...codex, at: clock, phase: 'finish', finishReason: 'stop' })
+  clock = '2026-01-01T00:02:00.000Z'
+  const after = await ledger.snapshot('session-codex')
+  assert.deepEqual([after.latest.kind, after.latest.windows.map(w => w.usedPercent), after.counts.unpriced], ['quota', [20, 1], 0])
+  assert.deepEqual(calls, ['openai-codex-oauth', 'openai-codex-oauth'])
+  await ledger.snapshot('session-codex')
+  assert.equal(calls.length, 2, 'the newer reading is not re-read until the account is used again')
+  // A failed request that processed nothing does not count as use.
+  await ledger.record({ ...codex, requestId: 'failed', at: clock, phase: 'start' })
+  await ledger.record({ ...codex, requestId: 'failed', at: clock, phase: 'finish', finishReason: 'error' })
+  clock = '2026-01-01T00:03:00.000Z'
+  await ledger.snapshot('session-codex')
+  assert.equal(calls.length, 2)
+})
+test('Codex usage re-reads respect the refresh interval', async t => {
+  let clock = '2026-01-01T00:00:00.000Z'
+  const calls = []
+  const { ledger } = await fixture(t, { rateCards: [], usageRefreshMs: 60_000, firstLoadWaitMs: 50, now: () => clock,
+    usage: async route => { calls.push(route); return { windows: [{ label: '5h', usedPercent: 1 }], observedAt: clock } } })
+  const codex = { ...base, sessionId: 'session-codex', provider: 'openai-codex-oauth', model: 'gpt-5.6-terra' }
+  await ledger.snapshot('session-codex', 'openai-codex-oauth')
+  clock = '2026-01-01T00:00:30.000Z'
+  await ledger.record({ ...codex, at: clock, phase: 'usage', usage: { inputTokens: 1, outputTokens: 1 } })
+  await ledger.record({ ...codex, at: clock, phase: 'finish', finishReason: 'stop' })
+  await ledger.snapshot('session-codex')
+  assert.equal(calls.length, 1, 'a read finished moments ago is not repeated')
+})
 const settle = () => new Promise(resolve => setTimeout(resolve, 20))
 const message = (seq, time, provider, model, usage, responseId) => ({ type: 'assistant/message', seq, time, data: { usage,
   message: { role: 'assistant', content: [], source: { kind: 'model', provider, model, ...(responseId ? { replayState: { response: { responseId, responseModel: 'anthropic/claude-opus-5.5' } } } : {}) } } } })
