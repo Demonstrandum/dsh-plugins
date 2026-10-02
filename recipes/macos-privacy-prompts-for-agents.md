@@ -59,8 +59,10 @@ get consent dialogs, and it becomes the name in System Settings. Full Disk Acces
 never prompts for anyone: add the bundle by hand (System Settings ▸ Privacy &
 Security ▸ Full Disk Access ▸ +, ⌘⇧G
 `~/Library/Application Support/dsh-tailscale-remote/DSH <Instance> Server.app`),
-then restart the relay (`launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay.<instance>`)
-so new processes pick it up. Knowledge/Biome, other apps' containers, Mail,
+and switch it on. **No restart is needed**: measured 2026-10-02, the next
+command from an already-running session read `Knowledge/knowledgeC.db`,
+`Biome/streams/restricted` and another app's container (TCC is consulted per
+access, not cached per process tree). Knowledge/Biome (`Biome/streams/restricted/Media.NowPlaying` is a cross-app now-playing log: title, artist, album, source bundle id), other apps' containers, Mail,
 Messages, Safari data all fall under FDA.
 
 ## Design choices
@@ -103,7 +105,7 @@ itself out.
 
 | Symptom | Cause |
 |---|---|
-| Still "Operation not permitted", no dialog | That path is FDA-class (no prompt exists): add the bundle to Full Disk Access, then kickstart the relay |
+| Still "Operation not permitted", no dialog | That path is FDA-class (no prompt exists): add the bundle to Full Disk Access (takes effect immediately) |
 | Grant vanished after an update | Host bundle bytes changed → new cdhash; re-grant |
 | `tccutil reset All <id>` → `-10814` | Launch Services no longer knows the bundle id (bundle deleted or never registered); delete the row in System Settings instead |
 | Automation dialog never appears for `get name` | osascript answers some properties locally; a real event (`count of tracks …`) is needed |
