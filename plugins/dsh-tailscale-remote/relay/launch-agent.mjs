@@ -3,7 +3,13 @@
  * started at login and kept alive, so the port `tailscale serve` targets is
  * always answered even when DSH is not running.
  *
- *   ProgramArguments: <support dir>/dsh-web-relay relay.mjs --listen … --backend … --dsh … --cwd … --start … --log …
+ *   ProgramArguments: [<support dir>/DSH <Instance> Server.app/Contents/MacOS/dsh-server-host]
+ *                     <support dir>/dsh-web-relay relay.mjs --listen … --backend … --dsh … --cwd … --start … --log …
+ *
+ * The leading server host (relay/server-host.mjs) is a background app bundle
+ * that spawns the rest and stays its parent, so macOS privacy prompts and Full
+ * Disk Access name that bundle instead of silently refusing the bare `node`.
+ * It is built when swiftc is available (`serverHost: false` opts out).
  *
  * `dsh-web-relay` is a symlink to the installing Node binary: launchd/System
  * Settings name a background item after its executable, so this reads
@@ -20,7 +26,9 @@ import { homedir, userInfo } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { bundleIdFor, installedWrappers } from '../dock-app.mjs'
 import { isListening } from './relay.mjs'
+import { ensureServerHost, removeServerHost } from './server-host.mjs'
 
 const execFileAsync = promisify(execFile)
 export const LABEL = 'io.github.taliesinb.dsh-web-relay'
@@ -98,14 +106,16 @@ function xml(value) {
 }
 
 /**
- * @param {{ listen: string, backend: string, dsh: string, cwd: string, start: string, logDir: string, instance?: string, dshHome?: string, executable?: string, path?: string }} spec
+ * @param {{ listen: string, backend: string, dsh: string, cwd: string, start: string, logDir: string, instance?: string, dshHome?: string, executable?: string, host?: string, path?: string }} spec
  *   `listen`/`backend`/`dsh` are `host:port`; `start` is the shell command that runs DSH in `cwd`;
  *   `instance` ('' = the main one) keeps a preview relay's label, symlink and logs apart;
- *   `dshHome` is the DSH_HOME the spawned `dsh web` runs against (default: the installer's).
+ *   `dshHome` is the DSH_HOME the spawned `dsh web` runs against (default: the installer's);
+ *   `host` is the server-host executable that launchd runs first (see server-host.mjs).
  * @returns {string[]} ProgramArguments
  */
 export function relayArguments(spec) {
   return [
+    ...(spec.host === undefined ? [] : [spec.host]),
     spec.executable ?? relayExecutable(spec.instance ?? ''),
     RELAY_SCRIPT,
     '--listen', spec.listen,
@@ -199,18 +209,46 @@ export async function hasGuiSession() {
   return (await launchctl(['print', domain()])).code === 0
 }
 
+/** The icon of the Dock app for this instance, if one is installed. */
+async function dockAppIcon(instance) {
+  const wrapper = (await installedWrappers()).find(bundle => bundle.kind === 'wrapper' && bundle.bundleId === bundleIdFor(instance))
+  if (wrapper === undefined) return undefined
+  const icon = join(wrapper.path, 'Contents', 'Resources', 'AppIcon.icns')
+  try {
+    await stat(icon)
+    return icon
+  } catch {
+    return undefined
+  }
+}
+
+/** The server host for this install (undefined: opted out, or no swiftc). */
+async function prepareHost(spec, instance, log) {
+  if (spec.serverHost === false) return undefined
+  try {
+    const host = await ensureServerHost({ supportDir: supportDir(), instance, icon: await dockAppIcon(instance), log })
+    if (host === undefined) log('relay: swiftc not found, running without the server host (privacy prompts will not appear)')
+    return host?.executable
+  } catch (error) {
+    log(`relay: server host build failed, running without it: ${String(error?.message ?? error)}`)
+    return undefined
+  }
+}
+
 /**
  * Write the plist and (re)load the agent; resolves once the port answers (or after 8 s).
  * With `load: false` only the plist (and the named Node symlink) are written: for an
  * account with no GUI session (ssh-only install on a shared machine), where the plist is
  * then converted to a LaunchDaemon by the host's administrator or picked up at first login.
- * @param {Parameters<typeof relayCommand>[0] & { log?: (line: string) => void, load?: boolean }} spec
+ * @param {Parameters<typeof relayCommand>[0] & { log?: (line: string) => void, load?: boolean, serverHost?: boolean }} spec
  */
-export async function installRelayAgent(spec) {
+export async function installRelayAgent(input) {
   if (process.platform !== 'darwin') throw new Error('the relay LaunchAgent is macOS-only')
-  const log = spec.log ?? (() => {})
-  const instance = spec.instance ?? ''
+  const log = input.log ?? (() => {})
+  const instance = input.instance ?? ''
   if (await daemonInstalled(instance)) throw daemonManagedError('reinstalling it')
+  await mkdir(supportDir(), { recursive: true })
+  const spec = { ...input, host: input.host ?? await prepareHost(input, instance, log) }
   if (spec.load === false) {
     const plist = plistPath(instance)
     await mkdir(spec.logDir, { recursive: true })
@@ -258,6 +296,36 @@ export async function installRelayAgent(spec) {
   return { listening: false }
 }
 
+/**
+ * The install spec an existing plist was written from (ProgramArguments after relay.mjs,
+ * DSH_HOME, PATH, the log directory), so `relay:reinstall` can rewrite it unchanged
+ * except for what this version of the installer adds (the server host).
+ */
+export async function specFromPlist(instance = '') {
+  const { stdout } = await execFileAsync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', plistPath(instance)])
+  const plist = JSON.parse(stdout)
+  const args = plist.ProgramArguments ?? []
+  const at = args.findIndex(arg => arg.endsWith('relay.mjs'))
+  if (at === -1) throw new Error(`${plistPath(instance)}: no relay.mjs in ProgramArguments`)
+  const flags = {}
+  for (let i = at + 1; i < args.length - 1; i += 2) flags[args[i].replace(/^--/, '')] = args[i + 1]
+  for (const key of ['listen', 'backend', 'dsh', 'cwd', 'start']) {
+    if (typeof flags[key] !== 'string') throw new Error(`${plistPath(instance)}: --${key} missing`)
+  }
+  const env = plist.EnvironmentVariables ?? {}
+  return {
+    instance,
+    listen: flags.listen,
+    backend: flags.backend,
+    dsh: flags.dsh,
+    cwd: flags.cwd,
+    start: flags.start,
+    logDir: typeof flags.log === 'string' ? dirname(flags.log) : defaultLogDir(),
+    dshHome: env.DSH_HOME,
+    path: env.PATH,
+  }
+}
+
 export async function uninstallRelayAgent({ instance = '', log = () => {} } = {}) {
   if (process.platform !== 'darwin') throw new Error('the relay LaunchAgent is macOS-only')
   const label = labelFor(instance)
@@ -271,6 +339,7 @@ export async function uninstallRelayAgent({ instance = '', log = () => {} } = {}
     removed = false
   }
   await rm(relayExecutable(instance), { force: true })
+  await removeServerHost(supportDir(), instance)
   log(`relay: LaunchAgent ${label} removed`)
   return { removed }
 }

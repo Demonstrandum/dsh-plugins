@@ -11,6 +11,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LABEL, launchAgentPlist, relayArguments, relayCommand, shellQuote } from '../relay/launch-agent.mjs'
+import { USAGE_KEYS, hostBundleIdFor, hostInfoPlist, hostNameFor } from '../relay/server-host.mjs'
 import { createRelay, parseArgs, parseRequestHead, splashHtml } from '../relay/relay.mjs'
 
 /** A stand-in for the spawned `dsh web` process. */
@@ -97,6 +98,31 @@ describe('relay: LaunchAgent plist', () => {
     assert.match(text, /<key>PATH<\/key>\s*<string>\/opt\/homebrew\/bin:\/usr\/bin<\/string>/)
     const dir = await mkdtemp(join(tmpdir(), 'relay-plist-'))
     const file = join(dir, 'agent.plist')
+    await writeFile(file, text)
+    await new Promise((resolve, reject) => execFile('/usr/bin/plutil', ['-lint', file], (error, stdout) => (error ? reject(new Error(String(error.message))) : resolve(stdout))))
+  })
+})
+
+describe('relay: server host', () => {
+  const spec = { listen: '127.0.0.1:3093', backend: '127.0.0.1:3094', dsh: '127.0.0.1:3090', cwd: '/d', start: 'pnpm dsh web', logDir: '/tmp/x/logs', instance: 'personal', executable: '/x/dsh-web-relay-personal', host: '/x/DSH Personal Server.app/Contents/MacOS/dsh-server-host' }
+  it('runs first in ProgramArguments, ahead of the named Node', () => {
+    const args = relayArguments(spec)
+    assert.equal(args[0], spec.host)
+    assert.equal(args[1], spec.executable)
+    assert.match(args[2], /relay\.mjs$/)
+  })
+  it('is named and identified per instance', () => {
+    assert.equal(hostNameFor(''), 'DSH Server')
+    assert.equal(hostNameFor('personal'), 'DSH Personal Server')
+    assert.equal(hostNameFor('my-box'), 'DSH My Box Server')
+    assert.equal(hostBundleIdFor('personal'), 'io.github.taliesinb.dsh-server-host.personal')
+  })
+  it('has a valid Info.plist carrying every usage string', { skip: process.platform !== 'darwin' }, async () => {
+    const text = hostInfoPlist({ instance: 'personal', icon: true })
+    for (const key of USAGE_KEYS) assert.match(text, new RegExp(`<key>${key}</key>`))
+    assert.match(text, /<key>LSBackgroundOnly<\/key><true\/>/)
+    const dir = await mkdtemp(join(tmpdir(), 'host-plist-'))
+    const file = join(dir, 'Info.plist')
     await writeFile(file, text)
     await new Promise((resolve, reject) => execFile('/usr/bin/plutil', ['-lint', file], (error, stdout) => (error ? reject(new Error(String(error.message))) : resolve(stdout))))
   })

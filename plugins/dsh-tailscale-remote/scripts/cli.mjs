@@ -7,6 +7,10 @@
  *                      [--cwd ~/github/deepseek-harness] [--start "pnpm dsh web --no-open"] [--log-dir ~/.dsh/logs]
  *                      [--dsh-home ~/.dsh-preview]   (DSH_HOME the relay starts DSH with; default: the caller's)
  *                      [--no-load]   write the plist only (no GUI session to load it into; see launch-agent.mjs)
+ *                      [--no-server-host]   run Node directly, without the app bundle macOS privacy prompts name
+ *                                           (relay/server-host.mjs)
+ *   pnpm relay:reinstall [--instance personal] [--no-server-host]   rewrite the installed plist with the same
+ *                      ports/start/DSH_HOME/PATH (restarts that relay and its DSH)
  *   pnpm relay:uninstall
  *   pnpm relay:status  [--listen 127.0.0.1:3083]
  *   pnpm dock-app:build  [--glyph-color #000000] [--tile-color #ffffff]
@@ -25,7 +29,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { REMOTE_GLYPH_COLOR, buildDockApp, dockAppStatus, installDockApp, parseRemoteTarget, remoteAppName, remoteInstance, resolveTailnetHost, uninstallDockApp } from '../dock-app.mjs'
-import { defaultLogDir, installRelayAgent, relayStatus, uninstallRelayAgent } from '../relay/launch-agent.mjs'
+import { defaultLogDir, installRelayAgent, relayStatus, specFromPlist, uninstallRelayAgent } from '../relay/launch-agent.mjs'
 import { defaultStateFile } from '../state.mjs'
 import { createTailscaleManager } from '../tailscale.mjs'
 
@@ -79,10 +83,18 @@ async function main() {
         start: String(flags.start ?? 'pnpm dsh web --no-open'),
         logDir: expandHome(String(flags['log-dir'] ?? defaultLogDir())),
         dshHome: typeof flags['dsh-home'] === 'string' ? expandHome(flags['dsh-home']) : undefined,
-        load: flags['no-load'] === true ? false : undefined,
+        load: flags['no-load'] === true || flags.load === false ? false : undefined,
+        serverHost: flags['server-host'] === false ? false : undefined,
         log,
       })
       if (result.loaded === false) return
+      console.log(result.listening ? 'relay: listening' : 'relay: loaded but not listening yet — check relay.log')
+      return
+    }
+    case 'relay:reinstall': {
+      // Same ports, start command, DSH_HOME and PATH as the installed plist; restarts the relay and its DSH.
+      const spec = await specFromPlist(instance)
+      const result = await installRelayAgent({ ...spec, serverHost: flags['server-host'] === false ? false : undefined, log })
       console.log(result.listening ? 'relay: listening' : 'relay: loaded but not listening yet — check relay.log')
       return
     }
@@ -146,7 +158,7 @@ async function main() {
       console.log(JSON.stringify(await dockAppStatus({ name: String(flags.name ?? 'DSH'), url: typeof flags.url === 'string' ? flags.url : '' }), null, 2))
       return
     default:
-      console.error('usage: cli.mjs relay:install|relay:uninstall|relay:status|dock-app:build|dock-app:install|dock-app:remote <host[/path]>|dock-app:uninstall|dock-app:status [flags]')
+      console.error('usage: cli.mjs relay:install|relay:reinstall|relay:uninstall|relay:status|dock-app:build|dock-app:install|dock-app:remote <host[/path]>|dock-app:uninstall|dock-app:status [flags]')
       process.exit(2)
   }
 }

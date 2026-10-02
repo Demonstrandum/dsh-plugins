@@ -519,6 +519,22 @@ asynchronous — the installer waits for the label to vanish and retries
 `bootstrap` (EIO 5 otherwise). Restart everything:
 `launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay`.
 
+**Server host (macOS privacy).** When swiftc is available the job's program is
+not the Node symlink but `DSH[ <Instance>] Server.app/Contents/MacOS/dsh-server-host`
+in the same support directory (`relay/server-host.mjs`,
+`dock-app/ServerHost/main.swift`): a background-only bundle
+(`io.github.taliesinb.dsh-server-host[.<instance>]`, the Dock app's icon, every
+`NS…UsageDescription` key) that spawns the Node symlink and stays its parent,
+forwarding signals. macOS charges privacy requests to a launchd job's own
+executable and every descendant inherits it, so agent commands now get the normal
+consent prompts ("DSH Personal Server would like to…") instead of silent
+refusals charged to Homebrew's `node`, and **Full Disk Access** (which never
+prompts) can be granted by adding that bundle in System Settings ▸ Privacy &
+Security ▸ Full Disk Access. The bundle is ad-hoc signed and rewritten only when
+its bytes change, so reinstalls keep its grants. `--no-server-host` (or
+`serverHost: false`) installs the old form. Story and measurements:
+`recipes/macos-privacy-prompts-for-agents.md`.
+
 ## Scripts (macOS only; no-ops elsewhere)
 
 ```sh

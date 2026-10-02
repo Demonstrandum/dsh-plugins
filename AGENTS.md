@@ -539,6 +539,16 @@ can reproduce or maintain it:
   with the `lsof` uid guard + `PortForward.swift`; the `NWListener` EINVAL
   and multi-file `swiftc` traps; what is still unmeasured).
 - `install-rewind-plugin.md` — session rewind plugin install.
+- `macos-privacy-prompts-for-agents.md` — agent commands getting the normal
+  macOS consent prompts and grantable Full Disk Access: TCC charges a launchd
+  job's whole tree to the job's executable (it was Homebrew's bare `node`,
+  refused by policy with no prompt), so the relay LaunchAgent now starts a
+  background-only `DSH <Instance> Server.app` host that spawns (never execs) the
+  relay; reading responsibility from the TCC log and
+  `responsibility_get_pid_responsible_for_pid`, the measurements (Automation
+  dialog shown for a launchd-started bundle; other apps' containers,
+  Knowledge/Biome are FDA-only, never prompt), change-only ad-hoc re-signing to
+  keep grants, `relay:reinstall` and why it must run outside the instance.
 - `model-titles-not-slugs-on-new-instance.md` — model-generated session
   titles come out as natural phrases instead of `foo-bar-baz` on a freshly
   bootstrapped instance (DSH Remote, 2026-09-22): the slug shape is the fork's

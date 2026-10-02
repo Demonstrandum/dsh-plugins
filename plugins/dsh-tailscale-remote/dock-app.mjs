@@ -466,7 +466,7 @@ export async function installDockApp(spec) {
 }
 
 /** Every wrapper bundle in `~/Applications`. */
-async function installedWrappers() {
+export async function installedWrappers() {
   const dir = applicationsDir()
   const names = (await readdir(dir).catch(() => [])).filter(name => name.endsWith('.app'))
   return Promise.all(names.map(name => inspectBundle(join(dir, name))))
