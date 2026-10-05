@@ -38,6 +38,11 @@ struct UpdateSpec: Decodable {
     /// (a code to enter at github.com/login/device), the resulting user token is
     /// kept in Application Support and used from then on. Public value.
     var clientId: String?
+    /// The GitHub App's client secret, needed for the web-flow code exchange
+    /// (GitHub requires it even with PKCE). Baked at build time; with the
+    /// callback pinned to loopback + PKCE it lets nobody obtain anyone's code.
+    /// Absent → the device flow (code to type) is used instead.
+    var clientSecret: String?
     /// Optional built-in token (a fine-grained PAT scoped to the repo, Contents:
     /// read). Tried after a stored sign-in; a 401/404 falls through.
     var token: String?
@@ -150,7 +155,9 @@ final class Updater: NSObject {
                             throw UpdateError.badFeed("your GitHub sign-in is valid, but the app is not installed on the repository yet — an organisation owner must install it")
                         }
                         if self.spec.clientId != nil {
-                            self.offerSignIn(userInitiated: userInitiated) { ok in if ok { self.check(userInitiated: userInitiated) } }
+                            // After signing in, check as if the user asked: the normal "update available" prompt
+                            // (or "up to date") follows — never a silent install.
+                            self.offerSignIn(userInitiated: userInitiated) { ok in if ok { self.check(userInitiated: true) } }
                             return
                         }
                     }
@@ -237,159 +244,46 @@ final class Updater: NSObject {
         return token.isEmpty ? nil : token
     }
 
-    // MARK: GitHub device flow ("Sign in…")
+    // MARK: "Sign in…" (GitHubSignIn: web flow with a loopback callback, device flow as fallback)
 
     private var oauthBase: String { spec.oauthBase ?? "https://github.com" }
+    private var signIn: GitHubSignIn?
+    private var mainWindow: NSWindow? { NSApp.mainWindow ?? NSApp.windows.first { $0.isVisible && !($0 is NSPanel) } }
 
-    /// Offer the sign-in; `then(true)` once a token is stored. Automatic checks ask at most
+    /// Offer the sign-in as a sheet; `then(true)` once a token is stored. Automatic checks ask at most
     /// once per launch and never again after "Not now"; Check for Updates… always asks.
     private func offerSignIn(userInitiated: Bool, then: @escaping (Bool) -> Void) {
-        guard spec.clientId != nil else { then(false); return }
+        guard let clientId = spec.clientId else { then(false); return }
         if !userInitiated {
             if promptedThisLaunch || UserDefaults.standard.bool(forKey: Updater.declinedKey) { then(false); return }
             promptedThisLaunch = true
         }
         let alert = NSAlert()
-        alert.messageText = "Sign in to GitHub for \(appName) updates"
+        alert.messageText = "Sign in to GitHub for \(appName) updates?"
         alert.informativeText = "Updates for \(appName) are published privately."
         alert.addButton(withTitle: "Sign in…")
         alert.addButton(withTitle: "Not now")
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            if !userInitiated { UserDefaults.standard.set(true, forKey: Updater.declinedKey) }
-            then(false); return
-        }
-        UserDefaults.standard.removeObject(forKey: Updater.declinedKey)
-        deviceFlow(then: then)
-    }
-
-    /// One synchronous POST to the GitHub web origin (form body, JSON answer). Blocking: call off the main thread.
-    private func postSync(_ path: String, _ form: [String: String]) -> (json: [String: Any]?, status: Int) {
-        var request = URLRequest(url: URL(string: oauthBase + path)!)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.setValue("dsh-canary-updater/\(currentBuild)", forHTTPHeaderField: "User-Agent")
-        var cs = CharacterSet.urlQueryAllowed; cs.remove(charactersIn: "&+=")
-        request.httpBody = form.map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: cs) ?? "")" }.joined(separator: "&").data(using: .utf8)
-        request.timeoutInterval = 20
-        var result: (json: [String: Any]?, status: Int) = (nil, 0)
-        let done = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: request) { data, response, _ in
-            result = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any], (response as? HTTPURLResponse)?.statusCode ?? 0)
-            done.signal()
-        }.resume()
-        _ = done.wait(timeout: .now() + 30)
-        return result
-    }
-
-    /// RFC 8628 as GitHub does it: device code → the user enters the code on the web and
-    /// clicks Authorize → poll for the token. The polling runs on a background thread with
-    /// synchronous requests and ends the modal dialog with `NSApp.abortModal()` (its documented
-    /// cross-thread use) — NOT through the main queue or run-loop blocks, which are not reliably
-    /// drained while `NSAlert.runModal()` owns the main thread.
-    private func deviceFlow(then: @escaping (Bool) -> Void) {
-        guard let clientId = spec.clientId else { then(false); return }
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        let proceed: (NSApplication.ModalResponse) -> Void = { [weak self] response in
             guard let self else { return }
-            let start = self.postSync("/login/device/code", ["client_id": clientId, "scope": "repo"])
-            DispatchQueue.main.async { self.deviceFlowDialog(clientId: clientId, start: start, then: then) }
-        }
-    }
-
-    private func deviceFlowDialog(clientId: String, start: (json: [String: Any]?, status: Int), then: @escaping (Bool) -> Void) {
-        guard let json = start.json, let device = json["device_code"] as? String, let userCode = json["user_code"] as? String,
-              let verify = json["verification_uri"] as? String else {
-            let why = start.json?["error_description"] as? String ?? start.json?["error"] as? String ?? "HTTP \(start.status)"
-            log("update: device flow: no device code (\(why))")
-            fail(UpdateError.badFeed("GitHub did not start the sign-in (\(why)); check the app's client id"))
-            then(false); return
-        }
-        let interval = max(json["interval"] as? Double ?? 5, 1)
-        let expires = Date().addingTimeInterval(json["expires_in"] as? Double ?? 900)
-        log("update: device flow started; polling every \(Int(interval)) s")
-        if let url = URL(string: verify) { NSWorkspace.shared.open(url) }
-
-        let alert = NSAlert()
-        alert.messageText = "Enter this code on GitHub, then Authorize"
-        // Code: large, selectable. Link: selectable AND clickable (an attributed .link in a selectable field).
-        let code = NSTextField(labelWithString: userCode)
-        code.isSelectable = true
-        code.font = NSFont.monospacedSystemFont(ofSize: 28, weight: .semibold)
-        code.alignment = .center
-        let link = NSTextField(labelWithString: "")
-        link.isSelectable = true
-        link.allowsEditingTextAttributes = true
-        link.alignment = .center
-        link.attributedStringValue = NSAttributedString(string: verify, attributes: [.link: verify, .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)])
-        let stack = NSStackView(views: [code, link])
-        stack.orientation = .vertical
-        stack.spacing = 8
-        stack.frame = NSRect(x: 0, y: 0, width: 300, height: 64)
-        alert.accessoryView = stack
-        alert.addButton(withTitle: "Copy Code")
-        alert.addButton(withTitle: "Open GitHub")
-        alert.addButton(withTitle: "Cancel")
-        // The first two must not end the modal: give them their own actions.
-        alert.buttons[0].target = self; alert.buttons[0].action = #selector(copyDeviceCode(_:)); alert.buttons[0].keyEquivalent = ""
-        alert.buttons[0].identifier = NSUserInterfaceItemIdentifier(userCode)
-        alert.buttons[1].target = self; alert.buttons[1].action = #selector(openDeviceURL(_:)); alert.buttons[1].keyEquivalent = ""
-        alert.buttons[1].identifier = NSUserInterfaceItemIdentifier(verify)
-        alert.buttons[2].keyEquivalent = "\u{1b}"
-
-        // Poll off the main thread; the dialog is ended from there.
-        final class Outcome { var token: String?; var cancelled = false }
-        let outcome = Outcome()
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            var wait = interval
-            while let self, !outcome.cancelled {
-                Thread.sleep(forTimeInterval: wait)
-                if outcome.cancelled { return }
-                guard Date() < expires else { self.log("update: device flow: code expired"); NSApp.abortModal(); return }
-                let r = self.postSync("/login/oauth/access_token", ["client_id": clientId, "device_code": device,
-                                                                     "grant_type": "urn:ietf:params:oauth:grant-type:device_code"])
-                if let token = r.json?["access_token"] as? String {
-                    self.log("update: device flow: authorized")
-                    outcome.token = token
-                    NSApp.abortModal()
-                    return
-                }
-                let err = r.json?["error"] as? String ?? "HTTP \(r.status), no JSON"
-                self.log("update: device flow: \(err)")
-                switch err {
-                case "authorization_pending": wait = interval
-                case "slow_down": wait = (r.json?["interval"] as? Double ?? interval) + 5
-                default: NSApp.abortModal(); return
-                }
+            guard response == .alertFirstButtonReturn else {
+                if !userInitiated { UserDefaults.standard.set(true, forKey: Updater.declinedKey) }
+                then(false); return
+            }
+            UserDefaults.standard.removeObject(forKey: Updater.declinedKey)
+            let flow = GitHubSignIn(clientId: clientId, clientSecret: self.spec.clientSecret, oauthBase: self.oauthBase,
+                                    appName: self.appName, userAgent: "dsh-canary-updater/\(self.currentBuild)", log: self.log)
+            self.signIn = flow
+            flow.start(on: self.mainWindow) { [weak self] token in
+                guard let self else { return }
+                self.signIn = nil
+                guard let token else { then(false); return }
+                self.storeToken(token)
+                self.rejected.remove(.signIn)
+                self.log("update: signed in to GitHub; token stored at \(self.tokenFile.path)")
+                then(true)
             }
         }
-        let response = alert.runModal()
-        if response != .abort { outcome.cancelled = true }      // Cancel button or Escape
-        guard let token = outcome.token else { then(false); return }
-        storeToken(token)
-        rejected.remove(.signIn)
-        log("update: signed in to GitHub; token stored at \(tokenFile.path)")
-        // The device flow cannot redirect the browser back here; the next best thing is to
-        // come to the front ourselves and say so, then check at once.
-        NSApp.activate(ignoringOtherApps: true)
-        let done = NSAlert()
-        done.messageText = "Signed in to GitHub"
-        done.informativeText = "\(appName) will now check for updates."
-        done.addButton(withTitle: "OK")
-        done.runModal()
-        then(true)
-    }
-
-    /// The Open GitHub button of the device-code dialog: opens the verification page without ending the modal.
-    @objc private func openDeviceURL(_ sender: NSButton) {
-        if let raw = sender.identifier?.rawValue, let url = URL(string: raw) { NSWorkspace.shared.open(url) }
-    }
-
-    /// The Copy Code button of the device-code dialog: copies without ending the modal.
-    @objc private func copyDeviceCode(_ sender: NSButton) {
-        guard let code = sender.identifier?.rawValue else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(code, forType: .string)
-        sender.title = "Copied"
+        if let window = mainWindow { alert.beginSheetModal(for: window, completionHandler: proceed) } else { proceed(alert.runModal()) }
     }
 
     /// `viaAPI`: use each asset's API `url` (works with a token on private repos) instead of `browser_download_url`.

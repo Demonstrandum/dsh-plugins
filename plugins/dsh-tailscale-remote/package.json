@@ -39,7 +39,8 @@
     "dock-app/Sources/Updater.swift",
     "dock-app/Tools/make-dmg-background.swift",
     "dock-app/Tools/make-dmg-icon.swift",
-    "dock-app/Tools/app-icon-png.swift"
+    "dock-app/Tools/app-icon-png.swift",
+    "dock-app/Sources/SignIn.swift"
   ],
   "dsh": {
     "bundle": {

@@ -75,6 +75,21 @@ const UPDATES = !args.includes('--no-update')
  * when the feed is private and nothing else gets in. A public value.
  */
 const UPDATE_CLIENT_ID = opt('--update-client-id') ?? null
+/**
+ * `--update-client-secret-env VAR`: the GitHub App's client secret from $VAR,
+ * baked in so the updater can run the web sign-in (browser → Authorize → straight
+ * back into the app via a loopback callback). GitHub requires the secret for the
+ * code exchange even with PKCE; with the callback pinned to 127.0.0.1 and PKCE on,
+ * the secret alone lets nobody obtain anyone's code. Without it the app falls back
+ * to the device flow (a code to type). The variable name, never the value, is logged.
+ */
+const UPDATE_CLIENT_SECRET = (() => {
+  const v = opt('--update-client-secret-env')
+  if (!v) return null
+  const t = process.env[v]
+  if (!t) throw new Error(`--update-client-secret-env ${v}: that variable is empty`)
+  return t
+})()
 const UPDATE_TOKEN = (() => {
   const v = opt('--update-token-env')
   if (!v) return null
@@ -331,7 +346,7 @@ async function main() {
         name: NAME,
         url: remote,
         glyphColor: GLYPH,
-        ...(UPDATES ? { update: { repo: REPO_SLUG, channel: CHANNEL, intervalHours: 6, feed: opt('--update-feed') ?? null, ...(UPDATE_CLIENT_ID ? { clientId: UPDATE_CLIENT_ID } : {}), ...(UPDATE_TOKEN ? { token: UPDATE_TOKEN } : {}), ...(opt('--update-oauth-base') ? { oauthBase: opt('--update-oauth-base') } : {}) } } : {}),
+        ...(UPDATES ? { update: { repo: REPO_SLUG, channel: CHANNEL, intervalHours: 6, feed: opt('--update-feed') ?? null, ...(UPDATE_CLIENT_ID ? { clientId: UPDATE_CLIENT_ID } : {}), ...(UPDATE_CLIENT_SECRET ? { clientSecret: UPDATE_CLIENT_SECRET } : {}), ...(UPDATE_TOKEN ? { token: UPDATE_TOKEN } : {}), ...(opt('--update-oauth-base') ? { oauthBase: opt('--update-oauth-base') } : {}) } } : {}),
       }
     : {
         name: NAME,
@@ -345,7 +360,7 @@ async function main() {
           profileTemplate: 'profile-template',
           dshHome: DSH_HOME,
         },
-        ...(UPDATES ? { update: { repo: REPO_SLUG, channel: CHANNEL, intervalHours: 6, feed: opt('--update-feed') ?? null, ...(UPDATE_CLIENT_ID ? { clientId: UPDATE_CLIENT_ID } : {}), ...(UPDATE_TOKEN ? { token: UPDATE_TOKEN } : {}), ...(opt('--update-oauth-base') ? { oauthBase: opt('--update-oauth-base') } : {}) } } : {}),
+        ...(UPDATES ? { update: { repo: REPO_SLUG, channel: CHANNEL, intervalHours: 6, feed: opt('--update-feed') ?? null, ...(UPDATE_CLIENT_ID ? { clientId: UPDATE_CLIENT_ID } : {}), ...(UPDATE_CLIENT_SECRET ? { clientSecret: UPDATE_CLIENT_SECRET } : {}), ...(UPDATE_TOKEN ? { token: UPDATE_TOKEN } : {}), ...(opt('--update-oauth-base') ? { oauthBase: opt('--update-oauth-base') } : {}) } } : {}),
       }
   await writeFile(join(resources, 'dsh-dock-app.json'), JSON.stringify(config, null, 2) + '\n')
   await writeFile(join(resources, 'dsh-app-release.json'), JSON.stringify(remote

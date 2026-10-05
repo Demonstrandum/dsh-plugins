@@ -533,75 +533,56 @@ wrapper, and must never "update" itself into the 52 MB server app. So:
   harness is inside), ~1 min.
 
 **Private release feeds — "Sign in…"** (`--update-repo <private org/repo>
---update-client-id <OAuth/GitHub App client id>`). GitHub refuses anonymous
-reads of a private repo's releases, so the app authenticates **as the
-colleague**: when the feed cannot be read it offers *Sign in to GitHub for
-<App> updates* → GitHub's **device flow** (RFC 8628, what `gh auth login`
-does): the app POSTs `/login/device/code`, puts the user code on the
-clipboard, opens `github.com/login/device`, shows the code in a dialog and
-polls `/login/oauth/access_token` until GitHub grants a user token, which is
-stored 0600 under `~/Library/Application Support/<bundle id>/` — **not the
-Keychain**: an ad-hoc app's identity is its cdhash, different after every
-update, so Keychain ACLs would prompt or refuse each time. From then on the
-feed and assets are read with that token (assets through their API `url` +
-`Accept: application/octet-stream`; a private asset's browser URL 404s). An
-automatic check asks at most once per launch and never after *Not now*;
-Check for Updates… always asks. **401 vs 404** on a stored sign-in differ:
-401 = the token is invalid → deleted, sign-in offered again; 404 = GitHub
-hides the repo from a *valid* token — for a GitHub App, "not installed on
-the organisation yet" (measured: a fresh `ghu_` token answered 404 before
-the install) — the token is kept and the app says so. The order of what the updater tries: stored
-sign-in → built-in token (below) → the user's own `gh auth token` (through
-the login shell, so Homebrew's PATH applies) → anonymous → *Sign in…*.
-Verified end to end against a fake GitHub (device code, two
-`authorization_pending` polls, grant, gated feed, real DMG) and the gh path
-against the real private repo.
+--update-client-id <GitHub App client id> --update-client-secret-env VAR`).
+GitHub refuses anonymous reads of a private repo's releases, so the app
+authenticates **as the colleague**. `SignIn.swift`:
 
-Which app to register: a **GitHub App** (Contents: read, Device Flow on,
-*User-to-server token expiration* opted out — else tokens die after 8 h
-and refresh handling would be needed; measured: `ghu_` token, no
-`expires_in`) gives tokens capped to one repo. Anyone can *create* it under
-a personal account; it must be *installed* on the org's repo, which only an
-org owner can do (members file the install request from the app page).
-Preferred. An **OAuth App under any personal account**
-(Settings → Developer settings → OAuth Apps; *Enable Device Flow*) needs no
-owner and no installation; its `repo` scope is broad (everything the user
-can see, like `gh`'s own token). **But** if the org enforces *OAuth app
-access restrictions* — measured 2026-10-05 for the deployment's org: a
-freshly granted token answered **403** with GitHub's "the organization has
-enabled OAuth App access restrictions" message — an owner must approve the
-app **once**; a member requests it from their own
-Settings → Applications → Authorized OAuth Apps → the app → *Organization
-access* → Request, and the owner approves under the org's Settings →
-Third-party access. The updater recognises that 403 and says so instead of
-"HTTP 403". After approval every colleague's sign-in works with no further
-owner involvement. The client id is public either way; no client secret
-is involved in the device flow.
+- **Web application flow with PKCE and a loopback redirect** (RFC 8252),
+  the preferred path: *Sign in…* → the browser opens
+  `github.com/login/oauth/authorize` → the user clicks **Authorize** →
+  GitHub redirects to `http://127.0.0.1:47831/dsh-updates/callback`, a
+  tiny `NWListener` the app runs for the duration (same loopback-only
+  setup as `PortForward.swift`) → `state` checked, code exchanged
+  (`client_secret` + `code_verifier`) → the app comes to the front with the
+  token stored. The port is **fixed** because GitHub matches callback URLs
+  exactly (no port wildcard; measured in the docs); the URL must be
+  registered on the GitHub App. GitHub requires the **client secret** for
+  the exchange even with PKCE, so the build bakes it in — acceptable
+  because with the callback pinned to loopback and PKCE on, the secret
+  alone lets nobody obtain anyone's code (GitHub Desktop ships its secret
+  the same way). Verified end to end against a fake GitHub that checks
+  secret and PKCE: Authorize in the browser → straight back into the app →
+  the normal *update available* prompt.
+- **Device flow** (RFC 8628) as the fallback — no secret baked, loopback
+  port busy, or *Use a Code Instead*: a code to enter at
+  `github.com/login/device`, polled for on a **background thread with
+  synchronous requests** (not run-loop blocks: those are not reliably
+  drained under a modal and a real authorization went uncollected once),
+  every answer logged. Verified against real GitHub (47 × pending, then
+  authorized, then the update).
 
-**Trap, twice:** polling from inside `NSAlert.runModal()`. (1)
-`DispatchQueue.main` is **not drained** while the alert runs modally — the
-first attempt never polled once. (2) The second attempt used a `Timer` in
-`.common` modes plus `RunLoop.main.perform(inModes:)` for the results: it
-passed the fake-GitHub test (grant within 3 s) and **failed the real one**
-— the maintainer authorized on github.com, GitHub confirmed, and the dialog
-sat there: a run-loop block scheduled from URLSession's thread does not
-wake the loop, so over a multi-minute session results were collected only
-by luck, and nothing was logged per poll. Final shape, measured against
-real GitHub (47 `authorization_pending` answers, then `authorized`, then
-the update): polling on a **background thread with synchronous requests**
-(semaphore), every answer logged, and the dialog ended from that thread
-with `NSApp.abortModal()` — its documented cross-thread use — nothing
-routed through the main queue or run loop at all.
-
-**Dialog rules learnt the hard way:** the code must be *selectable* (a
-`labelWithString` field is not); the verification link both selectable
-and clickable (attributed `.link` in a selectable field); **never write the
-clipboard unasked** — a *Copy Code* button (its `target`/`action`
-replaced so it does not end the modal) and an *Open GitHub* button; the
-text must say *"then Authorize"* (GitHub's second page is the step that
-gets missed); on success the app comes to the front with *Signed in to
-GitHub* — the device flow cannot redirect a browser back to a native app —
-and checks for updates at once.
+Everything is a **sheet on the main window**, never an application-modal
+alert — the page keeps rendering, the user keeps working. Dialog rules:
+the code *selectable*, the link selectable **and** clickable (attributed
+`.link` with a centred paragraph style — `alignment` alone is ignored for
+attributed strings), **Copy Code** / **Open GitHub** buttons, **never**
+write the clipboard unasked, say *"then Authorize"* (GitHub's second page
+is the step that gets missed). After a sign-in the updater runs a
+*user-initiated* check — the ordinary "update available" / "up to date"
+dialogs; the `dsh.update.autoInstall` default is a headless-test knob and
+never ships set. Token storage: 0600 under
+`~/Library/Application Support/<bundle id>/`, not the Keychain (an ad-hoc
+app's identity is its cdhash, different after every update). Order of what
+the updater tries: stored sign-in → built-in token (below) → `gh auth
+token` through the login shell → anonymous → *Sign in…*. **401 vs 404** on
+a stored sign-in: 401 = invalid → deleted, offered again; 404 = GitHub
+hides the repo from a *valid* token (GitHub App not installed on the org
+yet) → kept, explained. Which app: a **GitHub App** (Contents: read, Device
+Flow on, *user token expiration* opted out — measured `ghu_`, no
+`expires_in`) gives tokens capped to one repo; anyone can create it, an org
+owner installs it on the repo. An OAuth App needs no install but the org's
+*OAuth App access restrictions* block it until approved org-wide (measured
+403).
 
 **Private release feeds — built-in token** (`--update-token-env VAR`).
 A thin client for an internal deployment names its host in the release tag
