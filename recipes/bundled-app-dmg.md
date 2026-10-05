@@ -546,17 +546,24 @@ update, so Keychain ACLs would prompt or refuse each time. From then on the
 feed and assets are read with that token (assets through their API `url` +
 `Accept: application/octet-stream`; a private asset's browser URL 404s). An
 automatic check asks at most once per launch and never after *Not now*;
-Check for Updates… always asks; a stored token answered 401/404 is dropped
-and the sign-in offered again. The order of what the updater tries: stored
+Check for Updates… always asks. **401 vs 404** on a stored sign-in differ:
+401 = the token is invalid → deleted, sign-in offered again; 404 = GitHub
+hides the repo from a *valid* token — for a GitHub App, "not installed on
+the organisation yet" (measured: a fresh `ghu_` token answered 404 before
+the install) — the token is kept and the app says so. The order of what the updater tries: stored
 sign-in → built-in token (below) → the user's own `gh auth token` (through
 the login shell, so Homebrew's PATH applies) → anonymous → *Sign in…*.
 Verified end to end against a fake GitHub (device code, two
 `authorization_pending` polls, grant, gated feed, real DMG) and the gh path
 against the real private repo.
 
-Which app to register: a **GitHub App** (Contents: read, Device Flow on)
-gives tokens capped to one repo — but it must be *installed* on the org,
-which only an org owner can do. An **OAuth App under any personal account**
+Which app to register: a **GitHub App** (Contents: read, Device Flow on,
+*User-to-server token expiration* opted out — else tokens die after 8 h
+and refresh handling would be needed; measured: `ghu_` token, no
+`expires_in`) gives tokens capped to one repo. Anyone can *create* it under
+a personal account; it must be *installed* on the org's repo, which only an
+org owner can do (members file the install request from the app page).
+Preferred. An **OAuth App under any personal account**
 (Settings → Developer settings → OAuth Apps; *Enable Device Flow*) needs no
 owner and no installation; its `repo` scope is broad (everything the user
 can see, like `gh`'s own token). **But** if the org enforces *OAuth app

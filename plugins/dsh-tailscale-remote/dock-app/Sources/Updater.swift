@@ -131,25 +131,28 @@ final class Updater: NSObject {
                     if let error { throw UpdateError.badFeed(error.localizedDescription) }
                     guard let http = response as? HTTPURLResponse, let data else { throw UpdateError.badFeed("no response") }
                     if http.statusCode == 401 || http.statusCode == 404 {
-                        // Unreadable with what we sent: drop that source for this process and try the next one;
-                        // when nothing is left, offer the sign-in (if the build carries a client id).
+                        // 401: what we sent is not a valid credential → drop it (a stored sign-in is deleted) and
+                        //      try the next way in; when nothing is left, offer the sign-in.
+                        // 404: GitHub hides the repo from this credential. For a stored sign-in that is "the app
+                        //      is not installed on the organisation yet" — the token is fine, keep it, say so.
+                        //      For anything else, try the next way in, then offer the sign-in.
                         if let used = usedSource {
-                            self.log("update: feed answered HTTP \(http.statusCode) with the \(used.rawValue); trying the next way in")
+                            self.log("update: feed answered HTTP \(http.statusCode) with the \(used.rawValue)")
                             self.rejected.insert(used)
-                            if used == .signIn { self.clearStoredToken() }
+                            if used == .signIn, http.statusCode == 401 { self.clearStoredToken() }
                             if self.bearer() != nil { self.check(userInitiated: userInitiated); return }
+                            if used == .signIn, http.statusCode == 404 {
+                                throw UpdateError.badFeed("your GitHub sign-in is valid, but the app is not installed on the repository yet — an organisation owner must install it")
+                            }
+                        }
+                        if self.storedToken() != nil {
+                            // Signed in already (and that token was not invalid, or it would be gone): the repo is simply not reachable for it.
+                            throw UpdateError.badFeed("your GitHub sign-in is valid, but the app is not installed on the repository yet — an organisation owner must install it")
                         }
                         if self.spec.clientId != nil {
                             self.offerSignIn(userInitiated: userInitiated) { ok in if ok { self.check(userInitiated: userInitiated) } }
                             return
                         }
-                    }
-                    if http.statusCode == 403, let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let message = body["message"] as? String, message.contains("OAuth App access restrictions") {
-                        // A valid sign-in that the organisation does not (yet) let this app use: an org owner
-                        // must approve the app once. GitHub's own message says so; show it rather than "HTTP 403".
-                        if usedSource == .signIn { self.log("update: the organisation has not approved this app yet (OAuth App access restrictions)") }
-                        throw UpdateError.badFeed("your GitHub sign-in is valid, but the repository's organisation has not approved this app yet — an organisation owner must allow it under Settings → Third-party access")
                     }
                     guard http.statusCode == 200 else { throw UpdateError.badFeed("HTTP \(http.statusCode)") }
                     let info = try Updater.parse(data, channel: self.channel, appName: self.appName, viaAPI: self.bearer() != nil)
