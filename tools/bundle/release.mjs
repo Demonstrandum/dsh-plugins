@@ -87,7 +87,7 @@ async function main() {
       await run('node', [join(HERE, 'fetch-node.mjs')])
       await run('node', [join(HERE, 'stage-dsh.mjs'), '--checkout', checkout, ...(args.includes('--skip-pack') ? ['--skip-pack'] : [])])
     }
-    const passthrough = ['--remote', '--channel', '--glyph-color', '--bundle-id', '--update-feed', '--update-token-env'].flatMap(f => args.includes(f) ? [f, args[args.indexOf(f) + 1]] : [])
+    const passthrough = ['--remote', '--channel', '--glyph-color', '--bundle-id', '--update-feed', '--update-token-env', '--update-client-id'].flatMap(f => args.includes(f) ? [f, args[args.indexOf(f) + 1]] : [])
     await run('node', [join(HERE, 'build-app.mjs'), '--build', String(build), '--update-repo', REPO, '--name', appName, ...passthrough])
   }
   const manifest = JSON.parse(await readFile(join(OUT, `${appName}.app`, 'Contents', 'Resources', 'dsh-app-release.json'), 'utf8'))

@@ -32,12 +32,17 @@ struct UpdateSpec: Decodable {
     /// for a thin client. Flavours share one repo; each only ever sees its own
     /// releases, so a thin client cannot "update" itself into the server app.
     var channel: String?
-    /// For a PRIVATE release repo: a GitHub token with read access to its
-    /// contents (a fine-grained PAT scoped to that one repo, Contents: read).
-    /// Sent as a bearer on the feed and asset requests; assets are then fetched
-    /// through the API (`url` + `Accept: application/octet-stream`), since the
-    /// browser download URL of a private asset needs a web session.
+    /// For a PRIVATE release repo, the preferred way in: the client id of a
+    /// GitHub App with Contents: read on that repo and Device Flow enabled. When
+    /// the feed cannot be read the app offers "Sign in…": GitHub's device flow
+    /// (a code to enter at github.com/login/device), the resulting user token is
+    /// kept in Application Support and used from then on. Public value.
+    var clientId: String?
+    /// Optional built-in token (a fine-grained PAT scoped to the repo, Contents:
+    /// read). Tried after a stored sign-in; a 401/404 falls through.
     var token: String?
+    /// Test seam: the GitHub web origin for the device flow (default https://github.com).
+    var oauthBase: String?
 }
 
 struct ReleaseInfo {
@@ -114,6 +119,8 @@ final class Updater: NSObject {
         var request = URLRequest(url: feedURL)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("dsh-canary-updater/\(currentBuild)", forHTTPHeaderField: "User-Agent")
+        let usedSource = bearer()?.source
+        if let usedSource { log("update: reading the feed with the \(usedSource.rawValue)") }
         authorize(&request)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 15
@@ -123,8 +130,22 @@ final class Updater: NSObject {
                 do {
                     if let error { throw UpdateError.badFeed(error.localizedDescription) }
                     guard let http = response as? HTTPURLResponse, let data else { throw UpdateError.badFeed("no response") }
+                    if http.statusCode == 401 || http.statusCode == 404 {
+                        // Unreadable with what we sent: drop that source for this process and try the next one;
+                        // when nothing is left, offer the sign-in (if the build carries a client id).
+                        if let used = usedSource {
+                            self.log("update: feed answered HTTP \(http.statusCode) with the \(used.rawValue); trying the next way in")
+                            self.rejected.insert(used)
+                            if used == .signIn { self.clearStoredToken() }
+                            if self.bearer() != nil { self.check(userInitiated: userInitiated); return }
+                        }
+                        if self.spec.clientId != nil {
+                            self.offerSignIn(userInitiated: userInitiated) { ok in if ok { self.check(userInitiated: userInitiated) } }
+                            return
+                        }
+                    }
                     guard http.statusCode == 200 else { throw UpdateError.badFeed("HTTP \(http.statusCode)") }
-                    let info = try Updater.parse(data, channel: self.channel, appName: self.appName, viaAPI: self.spec.token != nil)
+                    let info = try Updater.parse(data, channel: self.channel, appName: self.appName, viaAPI: self.bearer() != nil)
                     self.log("update: latest build \(info.build) (\(info.name)); running \(self.currentBuild)")
                     if info.build > self.currentBuild {
                         let skipped = UserDefaults.standard.integer(forKey: Updater.skipKey)
@@ -147,9 +168,169 @@ final class Updater: NSObject {
     /// Accepts either one release object or a list of them; picks the newest
     /// non-draft, non-prerelease whose tag is `<channel>-<build>` and whose DMG
     /// is named for this app (`<App-Name>-…dmg`, spaces as dashes).
-    /// Adds the bearer token of a private feed, when configured.
+    // MARK: feed authentication — stored sign-in → built-in token → the user's gh login → anonymous (→ offer Sign in…)
+
+    enum Source: String { case signIn = "GitHub sign-in", baked = "built-in token", gh = "gh login" }
+    private var rejected: Set<Source> = []
+    private var ghToken: String?? = nil
+    private var promptedThisLaunch = false
+    private static let declinedKey = "dsh.update.signInDeclined"
+
+    /// Where the device-flow token lives: outside the bundle (survives updates), 0600.
+    /// Not the Keychain: an ad-hoc signed app's identity is its cdhash, which changes
+    /// with every update, so Keychain ACLs would prompt or refuse after each one.
+    private var tokenFile: URL {
+        let id = Bundle.main.bundleIdentifier ?? "io.github.taliesinb.dsh-app"
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent(id, isDirectory: true)
+        return dir.appendingPathComponent("github-token-" + spec.repo.replacingOccurrences(of: "/", with: "_"))
+    }
+    private func storedToken() -> String? {
+        guard let t = try? String(contentsOf: tokenFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+        return t
+    }
+    private func storeToken(_ token: String) {
+        try? FileManager.default.createDirectory(at: tokenFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? token.write(to: tokenFile, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tokenFile.path)
+    }
+    private func clearStoredToken() { try? FileManager.default.removeItem(at: tokenFile) }
+
+    /// The bearer to use now and where it came from (for the log; never the token itself).
+    func bearer() -> (token: String, source: Source)? {
+        if !rejected.contains(.signIn), let t = storedToken() { return (t, .signIn) }
+        if !rejected.contains(.baked), let t = spec.token, !t.isEmpty { return (t, .baked) }
+        if !rejected.contains(.gh) {
+            if ghToken == nil { ghToken = .some(Updater.readGhToken()) }
+            if case .some(let t?) = ghToken { return (t, .gh) }
+        }
+        return nil
+    }
+
     func authorize(_ request: inout URLRequest) {
-        if let token = spec.token, !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if let b = bearer() { request.setValue("Bearer \(b.token)", forHTTPHeaderField: "Authorization") }
+    }
+
+    /// The token of the user's own GitHub CLI login, if `gh` is installed and signed in.
+    /// Through the login shell so Homebrew's / nix's PATH applies (a GUI app's own PATH
+    /// is the bare system one); `gh auth token` prints without prompting.
+    static func readGhToken() -> String? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        p.arguments = ["-lc", "command -v gh >/dev/null 2>&1 && exec gh auth token 2>/dev/null"]
+        let out = Pipe(); p.standardOutput = out; p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return nil }
+        let group = DispatchGroup(); group.enter()
+        DispatchQueue.global().async { p.waitUntilExit(); group.leave() }
+        if group.wait(timeout: .now() + .seconds(10)) == .timedOut { p.terminate(); return nil }
+        guard p.terminationStatus == 0 else { return nil }
+        let token = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return token.isEmpty ? nil : token
+    }
+
+    // MARK: GitHub device flow ("Sign in…")
+
+    private var oauthBase: String { spec.oauthBase ?? "https://github.com" }
+
+    /// Offer the sign-in; `then(true)` once a token is stored. Automatic checks ask at most
+    /// once per launch and never again after "Not now"; Check for Updates… always asks.
+    private func offerSignIn(userInitiated: Bool, then: @escaping (Bool) -> Void) {
+        guard spec.clientId != nil else { then(false); return }
+        if !userInitiated {
+            if promptedThisLaunch || UserDefaults.standard.bool(forKey: Updater.declinedKey) { then(false); return }
+            promptedThisLaunch = true
+        }
+        let alert = NSAlert()
+        alert.messageText = "Sign in to GitHub for \(appName) updates"
+        alert.informativeText = "Updates for \(appName) are published privately."
+        alert.addButton(withTitle: "Sign in…")
+        alert.addButton(withTitle: "Not now")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            if !userInitiated { UserDefaults.standard.set(true, forKey: Updater.declinedKey) }
+            then(false); return
+        }
+        UserDefaults.standard.removeObject(forKey: Updater.declinedKey)
+        deviceFlow(then: then)
+    }
+
+    private func post(_ path: String, _ form: [String: String], completion: @escaping ([String: Any]?) -> Void) {
+        var request = URLRequest(url: URL(string: oauthBase + path)!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue("dsh-canary-updater/\(currentBuild)", forHTTPHeaderField: "User-Agent")
+        var cs = CharacterSet.urlQueryAllowed; cs.remove(charactersIn: "&+=")
+        request.httpBody = form.map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: cs) ?? "")" }.joined(separator: "&").data(using: .utf8)
+        request.timeoutInterval = 20
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+            // Not DispatchQueue.main: while an NSAlert runs modally the main queue is NOT drained
+            // (measured — the poll never ran); the main run loop in .common modes is.
+            RunLoop.main.perform(inModes: [.common]) { completion(json) }
+        }.resume()
+    }
+
+    /// RFC 8628 as GitHub does it: device code → user enters the code on the web → poll for the token.
+    private func deviceFlow(then: @escaping (Bool) -> Void) {
+        guard let clientId = spec.clientId else { then(false); return }
+        post("/login/device/code", ["client_id": clientId, "scope": "repo"]) { [weak self] json in
+            guard let self else { return }
+            guard let json, let device = json["device_code"] as? String, let userCode = json["user_code"] as? String,
+                  let verify = json["verification_uri"] as? String else {
+                self.log("update: device flow: no device code (\(json?["error_description"] as? String ?? json?["error"] as? String ?? "no response"))")
+                self.fail(UpdateError.badFeed("GitHub did not start the sign-in (\(json?["error"] as? String ?? "no response")); check the app's client id"))
+                then(false); return
+            }
+            let interval = max(json["interval"] as? Double ?? 5, 1)
+            let expires = Date().addingTimeInterval(json["expires_in"] as? Double ?? 900)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(userCode, forType: .string)
+            if let url = URL(string: verify) { NSWorkspace.shared.open(url) }
+
+            let alert = NSAlert()
+            alert.messageText = "Enter this code on GitHub"
+            alert.informativeText = "\(verify)\nThe code is on your clipboard."
+            let code = NSTextField(labelWithString: userCode)
+            code.font = NSFont.monospacedSystemFont(ofSize: 28, weight: .semibold)
+            code.alignment = .center
+            code.frame = NSRect(x: 0, y: 0, width: 260, height: 40)
+            alert.accessoryView = code
+            alert.addButton(withTitle: "Cancel")
+
+            var granted: String?
+            var cancelled = false
+            var wait = interval
+            var inFlight = false
+            // A Timer in .common modes fires inside the modal session; the completion lands on the run loop too.
+            let timer = Timer(timeInterval: 1, repeats: true) { _ in
+                guard !cancelled else { return }
+                guard Date() < expires else { NSApp.abortModal(); return }
+                wait -= 1
+                guard wait <= 0, !inFlight else { return }
+                inFlight = true; wait = interval
+                self.post("/login/oauth/access_token", ["client_id": clientId, "device_code": device,
+                                                        "grant_type": "urn:ietf:params:oauth:grant-type:device_code"]) { json in
+                    inFlight = false
+                    guard !cancelled else { return }
+                    if let token = json?["access_token"] as? String { granted = token; NSApp.abortModal(); return }
+                    switch json?["error"] as? String {
+                    case "authorization_pending": break
+                    case "slow_down": wait += 5
+                    default:
+                        self.log("update: device flow ended: \(json?["error"] as? String ?? "no response")")
+                        NSApp.abortModal()
+                    }
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            let response = alert.runModal()
+            timer.invalidate()
+            if response != .abort { cancelled = true }      // the Cancel button
+            guard let token = granted else { then(false); return }
+            self.storeToken(token)
+            self.rejected.remove(.signIn)
+            self.log("update: signed in to GitHub; token stored at \(self.tokenFile.path)")
+            then(true)
+        }
     }
 
     /// `viaAPI`: use each asset's API `url` (works with a token on private repos) instead of `browser_download_url`.

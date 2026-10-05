@@ -69,6 +69,12 @@ const UPDATES = !args.includes('--no-update')
  * into the app's config so the updater can read releases and fetch assets.
  * The variable name, never the token, appears in any command line or log.
  */
+/**
+ * `--update-client-id ID`: the GitHub App (Contents: read on the release repo,
+ * Device Flow enabled) whose client id the updater uses to offer "Sign in…"
+ * when the feed is private and nothing else gets in. A public value.
+ */
+const UPDATE_CLIENT_ID = opt('--update-client-id') ?? null
 const UPDATE_TOKEN = (() => {
   const v = opt('--update-token-env')
   if (!v) return null
@@ -325,7 +331,7 @@ async function main() {
         name: NAME,
         url: remote,
         glyphColor: GLYPH,
-        ...(UPDATES ? { update: { repo: REPO_SLUG, channel: CHANNEL, intervalHours: 6, feed: opt('--update-feed') ?? null, ...(UPDATE_TOKEN ? { token: UPDATE_TOKEN } : {}) } } : {}),
+        ...(UPDATES ? { update: { repo: REPO_SLUG, channel: CHANNEL, intervalHours: 6, feed: opt('--update-feed') ?? null, ...(UPDATE_CLIENT_ID ? { clientId: UPDATE_CLIENT_ID } : {}), ...(UPDATE_TOKEN ? { token: UPDATE_TOKEN } : {}), ...(opt('--update-oauth-base') ? { oauthBase: opt('--update-oauth-base') } : {}) } } : {}),
       }
     : {
         name: NAME,
@@ -339,7 +345,7 @@ async function main() {
           profileTemplate: 'profile-template',
           dshHome: DSH_HOME,
         },
-        ...(UPDATES ? { update: { repo: REPO_SLUG, channel: CHANNEL, intervalHours: 6, feed: opt('--update-feed') ?? null, ...(UPDATE_TOKEN ? { token: UPDATE_TOKEN } : {}) } } : {}),
+        ...(UPDATES ? { update: { repo: REPO_SLUG, channel: CHANNEL, intervalHours: 6, feed: opt('--update-feed') ?? null, ...(UPDATE_CLIENT_ID ? { clientId: UPDATE_CLIENT_ID } : {}), ...(UPDATE_TOKEN ? { token: UPDATE_TOKEN } : {}), ...(opt('--update-oauth-base') ? { oauthBase: opt('--update-oauth-base') } : {}) } } : {}),
       }
   await writeFile(join(resources, 'dsh-dock-app.json'), JSON.stringify(config, null, 2) + '\n')
   await writeFile(join(resources, 'dsh-app-release.json'), JSON.stringify(remote

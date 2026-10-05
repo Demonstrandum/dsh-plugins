@@ -532,7 +532,47 @@ wrapper, and must never "update" itself into the 52 MB server app. So:
   `release.mjs --remote …`: no harness stage, no pin check (nothing of the
   harness is inside), ~1 min.
 
-**Private release feeds** (`--update-repo <private org/repo> --update-token-env VAR`).
+**Private release feeds — "Sign in…"** (`--update-repo <private org/repo>
+--update-client-id <OAuth/GitHub App client id>`). GitHub refuses anonymous
+reads of a private repo's releases, so the app authenticates **as the
+colleague**: when the feed cannot be read it offers *Sign in to GitHub for
+<App> updates* → GitHub's **device flow** (RFC 8628, what `gh auth login`
+does): the app POSTs `/login/device/code`, puts the user code on the
+clipboard, opens `github.com/login/device`, shows the code in a dialog and
+polls `/login/oauth/access_token` until GitHub grants a user token, which is
+stored 0600 under `~/Library/Application Support/<bundle id>/` — **not the
+Keychain**: an ad-hoc app's identity is its cdhash, different after every
+update, so Keychain ACLs would prompt or refuse each time. From then on the
+feed and assets are read with that token (assets through their API `url` +
+`Accept: application/octet-stream`; a private asset's browser URL 404s). An
+automatic check asks at most once per launch and never after *Not now*;
+Check for Updates… always asks; a stored token answered 401/404 is dropped
+and the sign-in offered again. The order of what the updater tries: stored
+sign-in → built-in token (below) → the user's own `gh auth token` (through
+the login shell, so Homebrew's PATH applies) → anonymous → *Sign in…*.
+Verified end to end against a fake GitHub (device code, two
+`authorization_pending` polls, grant, gated feed, real DMG) and the gh path
+against the real private repo.
+
+Which app to register: a **GitHub App** (Contents: read, Device Flow on)
+gives tokens capped to one repo — but it must be *installed* on the org,
+which only an org owner can do. An **OAuth App under any personal account**
+(Settings → Developer settings → OAuth Apps; *Enable Device Flow*) needs no
+owner and no installation; its `repo` scope is broad (everything the user
+can see, like `gh`'s own token), and if the org enforces *OAuth app access
+restrictions* an owner must approve the app once (the app page offers
+"Request approval"). The client id is public either way; no client secret
+is involved in the device flow.
+
+**Trap:** polling from inside `NSAlert.runModal()` — `DispatchQueue.main`
+is **not drained** while the alert runs modally (the first attempt never
+polled once; the clipboard had the code, the browser was open, nothing
+happened). A `Timer` added to the main run loop in `.common` modes fires
+inside the modal session, and completions must come back through
+`RunLoop.main.perform(inModes: [.common])`, not the main queue;
+`NSApp.abortModal()` ends the alert from the callback.
+
+**Private release feeds — built-in token** (`--update-token-env VAR`).
 A thin client for an internal deployment names its host in the release tag
 and its colleagues in the titles, so its releases belong on a *private*
 repo. GitHub refuses anonymous reads there (feed → 404), so the app carries
