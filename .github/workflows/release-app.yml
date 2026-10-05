@@ -1,10 +1,18 @@
 # Build the bundled macOS app and publish it as a GitHub Release — the feed
 # the installed app's updater polls (Updater.swift reads releases/latest).
 #
+# Two flavours, each its own release channel (tag prefix) in this one repo:
+#   app     the full self-hosting DSH.app (Node + harness + plugins), tags canary-<build>
+#   remote  a thin client "DSH <Name>" opening a remote DSH over the tailnet,
+#           tags remote-<host>-<build>; no harness inside, ~1 min
+# Each installed app follows only its own channel (Updater.swift).
+#
 # Triggers:
-#   - manually (Actions ▸ Release app ▸ Run workflow), optional notes / draft;
-#   - a push to main whose head commit subject starts with `release:` — the
-#     rest of the subject becomes the release notes.
+#   - manually (Actions ▸ Release app ▸ Run workflow): flavour, and for remote
+#     the target and name; optional notes / draft;
+#   - a push to main whose head commit subject starts with `release:` releases
+#     the app; the rest of the subject becomes the notes. (Remote releases name
+#     a host and are therefore manual, or driven from the private extras repo.)
 #
 # What runs is exactly `pnpm release-app` (tools/bundle/release.mjs): build
 # number YYYYMMDDnn from the existing canary-* tags, fetch Node, stage the
@@ -21,6 +29,20 @@ name: Release app
 on:
   workflow_dispatch:
     inputs:
+      flavour:
+        description: What to release
+        required: true
+        type: choice
+        default: app
+        options: [app, remote]
+      remote:
+        description: 'remote only: the DSH to open, host[/path] or URL (e.g. node.example.ts.net/dsh)'
+        required: false
+        type: string
+      name:
+        description: 'remote only: app name (e.g. "DSH Alpha"); default DSH'
+        required: false
+        type: string
       notes:
         description: Release notes (markdown); default = commit subjects since the previous release
         required: false
@@ -53,6 +75,7 @@ jobs:
         with:
           fetch-depth: 0            # release.mjs reads canary-* tags and commit subjects
       - name: Harness submodule (pinned commit, over HTTPS)
+        if: inputs.flavour != 'remote'
         # .gitmodules uses SSH URLs and `extras` is private: init only the
         # harness, rewriting its URL, rather than `submodules: true`.
         run: |
@@ -66,8 +89,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: deepseek-harness/pnpm-lock.yaml
 
       # A clean harness tree needs two passes (verified from scratch under
       # Node 24, 2026-09-30): the host tsc pass fails on two client files that
@@ -78,6 +99,7 @@ jobs:
       # upstream (the host tsconfig chain reaches client sources); this is the
       # workaround, not the design.
       - name: Build the harness (pinned commit)
+        if: inputs.flavour != 'remote'
         working-directory: deepseek-harness
         run: |
           pnpm install --frozen-lockfile
@@ -111,6 +133,11 @@ jobs:
         shell: bash
         run: |
           args=(--repo "$GITHUB_REPOSITORY")
+          if [ "${{ inputs.flavour }}" = "remote" ]; then
+            [ -n "${{ inputs.remote }}" ] || { echo "::error::flavour=remote needs the 'remote' input (host[/path] or URL)"; exit 1; }
+            args+=(--remote "${{ inputs.remote }}" --glyph-color '#0090FF')
+            [ -n "${{ inputs.name }}" ] && args+=(--name "${{ inputs.name }}")
+          fi
           [ "${{ steps.notes.outputs.has }}" = "1" ] && args+=(--notes "$(cat /tmp/notes.md)")
           [ "${{ inputs.draft }}" = "true" ] && args+=(--draft)
           node tools/bundle/release.mjs "${args[@]}"
