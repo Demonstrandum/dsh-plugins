@@ -144,6 +144,13 @@ final class Updater: NSObject {
                             return
                         }
                     }
+                    if http.statusCode == 403, let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let message = body["message"] as? String, message.contains("OAuth App access restrictions") {
+                        // A valid sign-in that the organisation does not (yet) let this app use: an org owner
+                        // must approve the app once. GitHub's own message says so; show it rather than "HTTP 403".
+                        if usedSource == .signIn { self.log("update: the organisation has not approved this app yet (OAuth App access restrictions)") }
+                        throw UpdateError.badFeed("your GitHub sign-in is valid, but the repository's organisation has not approved this app yet — an organisation owner must allow it under Settings → Third-party access")
+                    }
                     guard http.statusCode == 200 else { throw UpdateError.badFeed("HTTP \(http.statusCode)") }
                     let info = try Updater.parse(data, channel: self.channel, appName: self.appName, viaAPI: self.bearer() != nil)
                     self.log("update: latest build \(info.build) (\(info.name)); running \(self.currentBuild)")

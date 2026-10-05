@@ -559,9 +559,16 @@ gives tokens capped to one repo — but it must be *installed* on the org,
 which only an org owner can do. An **OAuth App under any personal account**
 (Settings → Developer settings → OAuth Apps; *Enable Device Flow*) needs no
 owner and no installation; its `repo` scope is broad (everything the user
-can see, like `gh`'s own token), and if the org enforces *OAuth app access
-restrictions* an owner must approve the app once (the app page offers
-"Request approval"). The client id is public either way; no client secret
+can see, like `gh`'s own token). **But** if the org enforces *OAuth app
+access restrictions* — measured 2026-10-05 for the deployment's org: a
+freshly granted token answered **403** with GitHub's "the organization has
+enabled OAuth App access restrictions" message — an owner must approve the
+app **once**; a member requests it from their own
+Settings → Applications → Authorized OAuth Apps → the app → *Organization
+access* → Request, and the owner approves under the org's Settings →
+Third-party access. The updater recognises that 403 and says so instead of
+"HTTP 403". After approval every colleague's sign-in works with no further
+owner involvement. The client id is public either way; no client secret
 is involved in the device flow.
 
 **Trap:** polling from inside `NSAlert.runModal()` — `DispatchQueue.main`
