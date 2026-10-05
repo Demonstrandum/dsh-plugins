@@ -47,7 +47,13 @@ async function run(cmd, argv) {
     child.on('close', code => (code === 0 ? res() : rej(new Error(`${cmd} ${argv.join(' ')} exited ${code}`))))
   })
 }
+/** The channel's existing release tags — on THIS repo via git, on another repo (--repo elsewhere) via gh. */
 async function existingTags(channel) {
+  const remotes = await sh('git', ['remote', '-v']).catch(() => '')
+  if (!remotes.toLowerCase().includes(REPO.toLowerCase())) {
+    const out = await sh('gh', ['release', 'list', '--repo', REPO, '--limit', '200', '--json', 'tagName', '--jq', '.[].tagName']).catch(() => '')
+    return out.split('\n').filter(t => t.startsWith(`${channel}-`))
+  }
   await sh('git', ['fetch', '--tags', '--quiet']).catch(() => log('git fetch --tags failed; using local tags'))
   return (await sh('git', ['tag', '--list', `${channel}-*`])).split('\n').filter(Boolean)
 }
