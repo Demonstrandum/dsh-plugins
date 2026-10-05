@@ -578,13 +578,30 @@ Third-party access. The updater recognises that 403 and says so instead of
 owner involvement. The client id is public either way; no client secret
 is involved in the device flow.
 
-**Trap:** polling from inside `NSAlert.runModal()` — `DispatchQueue.main`
-is **not drained** while the alert runs modally (the first attempt never
-polled once; the clipboard had the code, the browser was open, nothing
-happened). A `Timer` added to the main run loop in `.common` modes fires
-inside the modal session, and completions must come back through
-`RunLoop.main.perform(inModes: [.common])`, not the main queue;
-`NSApp.abortModal()` ends the alert from the callback.
+**Trap, twice:** polling from inside `NSAlert.runModal()`. (1)
+`DispatchQueue.main` is **not drained** while the alert runs modally — the
+first attempt never polled once. (2) The second attempt used a `Timer` in
+`.common` modes plus `RunLoop.main.perform(inModes:)` for the results: it
+passed the fake-GitHub test (grant within 3 s) and **failed the real one**
+— the maintainer authorized on github.com, GitHub confirmed, and the dialog
+sat there: a run-loop block scheduled from URLSession's thread does not
+wake the loop, so over a multi-minute session results were collected only
+by luck, and nothing was logged per poll. Final shape, measured against
+real GitHub (47 `authorization_pending` answers, then `authorized`, then
+the update): polling on a **background thread with synchronous requests**
+(semaphore), every answer logged, and the dialog ended from that thread
+with `NSApp.abortModal()` — its documented cross-thread use — nothing
+routed through the main queue or run loop at all.
+
+**Dialog rules learnt the hard way:** the code must be *selectable* (a
+`labelWithString` field is not); the verification link both selectable
+and clickable (attributed `.link` in a selectable field); **never write the
+clipboard unasked** — a *Copy Code* button (its `target`/`action`
+replaced so it does not end the modal) and an *Open GitHub* button; the
+text must say *"then Authorize"* (GitHub's second page is the step that
+gets missed); on success the app comes to the front with *Signed in to
+GitHub* — the device flow cannot redirect a browser back to a native app —
+and checks for updates at once.
 
 **Private release feeds — built-in token** (`--update-token-env VAR`).
 A thin client for an internal deployment names its host in the release tag
