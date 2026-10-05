@@ -64,6 +64,19 @@ const DSH_HOME = opt('--dsh-home') ?? null
 /** `--no-update` leaves the update block out (a canary must not replace itself with the release). */
 const UPDATES = !args.includes('--no-update')
 /**
+ * `--update-token-env VAR`: the update feed is a PRIVATE repo; the token in
+ * $VAR (a fine-grained PAT scoped to that repo, Contents: read-only) is baked
+ * into the app's config so the updater can read releases and fetch assets.
+ * The variable name, never the token, appears in any command line or log.
+ */
+const UPDATE_TOKEN = (() => {
+  const v = opt('--update-token-env')
+  if (!v) return null
+  const t = process.env[v]
+  if (!t) throw new Error(`--update-token-env ${v}: that variable is empty; export the read-only release token there`)
+  return t
+})()
+/**
  * `--remote URL`: a thin client — the same wrapper, DMG, icon and updater, but no
  * Node, harness or profile inside; the window opens the given DSH over the
  * tailnet, admitted by this Mac's Tailscale identity (what `pnpm remote-app`
@@ -312,7 +325,7 @@ async function main() {
         name: NAME,
         url: remote,
         glyphColor: GLYPH,
-        ...(UPDATES ? { update: { repo: REPO_SLUG, channel: CHANNEL, intervalHours: 6, feed: opt('--update-feed') ?? null } } : {}),
+        ...(UPDATES ? { update: { repo: REPO_SLUG, channel: CHANNEL, intervalHours: 6, feed: opt('--update-feed') ?? null, ...(UPDATE_TOKEN ? { token: UPDATE_TOKEN } : {}) } } : {}),
       }
     : {
         name: NAME,
@@ -326,7 +339,7 @@ async function main() {
           profileTemplate: 'profile-template',
           dshHome: DSH_HOME,
         },
-        ...(UPDATES ? { update: { repo: REPO_SLUG, channel: CHANNEL, intervalHours: 6, feed: opt('--update-feed') ?? null } } : {}),
+        ...(UPDATES ? { update: { repo: REPO_SLUG, channel: CHANNEL, intervalHours: 6, feed: opt('--update-feed') ?? null, ...(UPDATE_TOKEN ? { token: UPDATE_TOKEN } : {}) } } : {}),
       }
   await writeFile(join(resources, 'dsh-dock-app.json'), JSON.stringify(config, null, 2) + '\n')
   await writeFile(join(resources, 'dsh-app-release.json'), JSON.stringify(remote

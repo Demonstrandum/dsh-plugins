@@ -532,6 +532,23 @@ wrapper, and must never "update" itself into the 52 MB server app. So:
   `release.mjs --remote …`: no harness stage, no pin check (nothing of the
   harness is inside), ~1 min.
 
+**Private release feeds** (`--update-repo <private org/repo> --update-token-env VAR`).
+A thin client for an internal deployment names its host in the release tag
+and its colleagues in the titles, so its releases belong on a *private*
+repo. GitHub refuses anonymous reads there (feed → 404), so the app carries
+a token: `$VAR` at build time — a **fine-grained PAT scoped to that one
+repo, Contents: read-only**, nothing more — is baked into
+`dsh-dock-app.json → update.token`; the updater sends it as a bearer on the
+feed request and fetches assets through their API `url` with
+`Accept: application/octet-stream` (a private asset's
+`browser_download_url` wants a web session and 404s). Measured against a
+real private repo: anonymous feed 404; bearer 200; API asset 200 with the
+published sha; browser URL 404; an installed app on an older build found
+the release, installed and relaunched. The variable *name*, never the
+token, appears in command lines, logs and this repo; rotation = a new
+release built with the new token (apps on the old one work until it
+expires, then Check for Updates… reports HTTP 401).
+
 **Where the concrete apps live.** The mechanism is public and host-free;
 the invocation for a real deployment names a tailnet host *and* the app's
 deployment-specific name, both of which belong in `extras/` by the ground

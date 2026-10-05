@@ -32,6 +32,12 @@ struct UpdateSpec: Decodable {
     /// for a thin client. Flavours share one repo; each only ever sees its own
     /// releases, so a thin client cannot "update" itself into the server app.
     var channel: String?
+    /// For a PRIVATE release repo: a GitHub token with read access to its
+    /// contents (a fine-grained PAT scoped to that one repo, Contents: read).
+    /// Sent as a bearer on the feed and asset requests; assets are then fetched
+    /// through the API (`url` + `Accept: application/octet-stream`), since the
+    /// browser download URL of a private asset needs a web session.
+    var token: String?
 }
 
 struct ReleaseInfo {
@@ -108,6 +114,7 @@ final class Updater: NSObject {
         var request = URLRequest(url: feedURL)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("dsh-canary-updater/\(currentBuild)", forHTTPHeaderField: "User-Agent")
+        authorize(&request)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 15
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
@@ -117,7 +124,7 @@ final class Updater: NSObject {
                     if let error { throw UpdateError.badFeed(error.localizedDescription) }
                     guard let http = response as? HTTPURLResponse, let data else { throw UpdateError.badFeed("no response") }
                     guard http.statusCode == 200 else { throw UpdateError.badFeed("HTTP \(http.statusCode)") }
-                    let info = try Updater.parse(data, channel: self.channel, appName: self.appName)
+                    let info = try Updater.parse(data, channel: self.channel, appName: self.appName, viaAPI: self.spec.token != nil)
                     self.log("update: latest build \(info.build) (\(info.name)); running \(self.currentBuild)")
                     if info.build > self.currentBuild {
                         let skipped = UserDefaults.standard.integer(forKey: Updater.skipKey)
@@ -140,7 +147,13 @@ final class Updater: NSObject {
     /// Accepts either one release object or a list of them; picks the newest
     /// non-draft, non-prerelease whose tag is `<channel>-<build>` and whose DMG
     /// is named for this app (`<App-Name>-…dmg`, spaces as dashes).
-    static func parse(_ data: Data, channel: String, appName: String) throws -> ReleaseInfo {
+    /// Adds the bearer token of a private feed, when configured.
+    func authorize(_ request: inout URLRequest) {
+        if let token = spec.token, !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+    }
+
+    /// `viaAPI`: use each asset's API `url` (works with a token on private repos) instead of `browser_download_url`.
+    static func parse(_ data: Data, channel: String, appName: String, viaAPI: Bool = false) throws -> ReleaseInfo {
         let any = try JSONSerialization.jsonObject(with: data)
         let releases: [[String: Any]]
         if let list = any as? [[String: Any]] { releases = list }
@@ -158,10 +171,10 @@ final class Updater: NSObject {
                       let n = name["name"] as? String ?? ""
                       return n.hasSuffix(".dmg") && n.hasPrefix(dmgPrefix)
                   }),
-                  let dmgURL = (dmg["browser_download_url"] as? String).flatMap(URL.init(string:)) else { continue }
+                  let dmgURL = (dmg[viaAPI ? "url" : "browser_download_url"] as? String).flatMap(URL.init(string:)) else { continue }
             let dmgName = dmg["name"] as? String ?? ""
             let sha = assets.first(where: { ($0["name"] as? String) == dmgName + ".sha256" })
-            let shaURL = (sha?["browser_download_url"] as? String).flatMap(URL.init(string:))
+            let shaURL = (sha?[viaAPI ? "url" : "browser_download_url"] as? String).flatMap(URL.init(string:))
             let info = ReleaseInfo(build: build, name: json["name"] as? String ?? tag, notes: json["body"] as? String ?? "",
                                    dmgURL: dmgURL, shaURL: shaURL, dmgSize: dmg["size"] as? Int ?? 0)
             if best == nil || info.build > best!.build { best = info }
@@ -243,7 +256,11 @@ final class Updater: NSObject {
             })
             let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
             self.session = session
-            session.downloadTask(with: info.dmgURL).resume()
+            var request = URLRequest(url: info.dmgURL)
+            request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
+            request.setValue("dsh-canary-updater/\(currentBuild)", forHTTPHeaderField: "User-Agent")
+            authorize(&request)
+            session.downloadTask(with: request).resume()
         }
     }
 
@@ -307,7 +324,9 @@ final class Updater: NSObject {
     private func fetchText(_ url: URL?, completion: @escaping (String?) -> Void) {
         guard let url else { completion(nil); return }
         var request = URLRequest(url: url)
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
         request.setValue("dsh-canary-updater/\(currentBuild)", forHTTPHeaderField: "User-Agent")
+        authorize(&request)
         URLSession.shared.dataTask(with: request) { data, _, _ in
             let text = data.flatMap { String(data: $0, encoding: .utf8) }
             DispatchQueue.main.async { completion(text) }
