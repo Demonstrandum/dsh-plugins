@@ -557,7 +557,14 @@ to download, name and version underneath, nothing else. GitHub has no stable
 current asset link baked in (resolved through `gh api`, the Updater's two
 locks: tag prefix + app-named DMG) and regenerated on every release run; a
 variant without a readable release renders greyed out with the reason in its
-tooltip. Private-repo links work in a browser signed in to GitHub with
+tooltip. The icons are **what macOS itself draws**, not the raw tile: on
+macOS 26 the system wraps every legacy icon in its Liquid Glass squircle
+(tighter corners, a glass highlight on the glyph), and that rendition comes
+from `NSWorkspace.icon(forFile:)` (`Tools/app-icon-png.swift`) — but only
+for a bundle **LaunchServices knows**: on an unregistered `.app` it returns
+the generic *document* icon (measured). So the generator writes a throwaway
+minimal `.app` per variant (Info.plist + the `make-icon` icns), `lsregister
+-f`s it, renders, and `lsregister -u`s it again; nothing stays registered. Private-repo links work in a browser signed in to GitHub with
 access to that repo (a web session is what the asset URL needs).
 
 **Where the concrete apps live.** The mechanism is public and host-free;

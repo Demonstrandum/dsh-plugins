@@ -18,8 +18,9 @@
  * in to GitHub with access to the repo; a release that cannot be read (no
  * access, or no release yet) renders the tile greyed out, without a link.
  *
- * Icons: rendered with the Dock app's own make-icon (the same tile every app
- * shows in the Dock), 256 px PNG, inlined as data URLs.
+ * Icons: the rendition macOS itself draws for the app (Liquid Glass squircle
+ * on macOS 26), obtained from the system for a throwaway registered bundle —
+ * see iconDataUrl(); 256 px PNG, inlined as data URLs.
  */
 import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
@@ -64,40 +65,65 @@ async function latest({ name, repo, channel }) {
   return best ?? { error: `no ${channel} release with a ${dmgPrefix}*.dmg in ${repo}` }
 }
 
-/** The Dock tile for this variant, 256 px PNG as a data URL. */
-async function iconDataUrl(glyph) {
+/**
+ * The icon macOS ITSELF shows for this variant, 256 px PNG as a data URL —
+ * not the raw tile: on macOS 26 the system wraps every icon in its own Liquid
+ * Glass squircle (tighter corners than the Big Sur tile, a glass highlight on
+ * the glyph), and that rendition is what the Dock, Finder and the DMG window
+ * draw. It is obtainable only for a REGISTERED bundle (`NSWorkspace.icon(forFile:)`
+ * on an unknown .app returns the generic document icon — measured), so a
+ * throwaway minimal .app is written with the variant's icns, registered with
+ * LaunchServices, rendered, and unregistered again.
+ */
+async function iconDataUrl(name, glyph) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-dl-icon-'))
+  const app = join(dir, `${name}.app`)
+  const lsregister = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
   try {
     const iconset = join(dir, 'app.iconset')
-    const tool = await iconToolPath()
-    await execFileAsync(tool, [join(dockApp.DOCK_APP_DIR, 'icon.svg'), iconset, '--glyph-color', glyph])
-    const files = await readdir(iconset)
-    const pick = files.find(f => /256x256\.png$/.test(f) && !/@2x/.test(f)) ?? files.find(f => f.endsWith('.png'))
-    const png = await readFile(join(iconset, pick))
-    return `data:image/png;base64,${png.toString('base64')}`
+    await execFileAsync(await iconToolPath(), [join(dockApp.DOCK_APP_DIR, 'icon.svg'), iconset, '--glyph-color', glyph])
+    await execFileAsync('mkdir', ['-p', join(app, 'Contents', 'Resources'), join(app, 'Contents', 'MacOS')])
+    await execFileAsync('/usr/bin/iconutil', ['-c', 'icns', iconset, '-o', join(app, 'Contents', 'Resources', 'AppIcon.icns')])
+    await writeFile(join(app, 'Contents', 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleName</key><string>${esc(name)}</string>
+<key>CFBundleIdentifier</key><string>io.github.taliesinb.dsh-download-page.${name.replace(/[^A-Za-z0-9]+/g, '-').toLowerCase()}</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
+<key>CFBundleExecutable</key><string>stub</string>
+</dict></plist>
+`)
+    await writeFile(join(app, 'Contents', 'MacOS', 'stub'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    await execFileAsync(lsregister, ['-f', app])
+    const png = join(dir, 'icon.png')
+    await execFileAsync(await toolPath('app-icon-png'), [app, png, '--size', '256'])
+    return `data:image/png;base64,${(await readFile(png)).toString('base64')}`
   } finally {
+    await execFileAsync(lsregister, ['-u', app]).catch(() => {})
     await rm(dir, { recursive: true, force: true })
   }
 }
 
-/** make-icon compiled on demand, like buildDockApp does. */
-async function iconToolPath() {
+/** A dock-app/Tools/<name>.swift helper, compiled on demand like buildDockApp does. */
+async function toolPath(name) {
   const build = join(dockApp.DOCK_APP_DIR, 'build')
-  const tool = join(build, 'make-icon')
-  const src = join(dockApp.DOCK_APP_DIR, 'Tools', 'make-icon.swift')
+  const tool = join(build, name)
+  const src = join(dockApp.DOCK_APP_DIR, 'Tools', `${name}.swift`)
   try { await readFile(tool) } catch {
     await execFileAsync('mkdir', ['-p', build])
     await execFileAsync('/usr/bin/xcrun', ['swiftc', '-O', '-o', tool, src, '-framework', 'Cocoa'], { maxBuffer: 8 * 1024 * 1024 })
   }
   return tool
 }
+const iconToolPath = () => toolPath('make-icon')
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 const mb = n => `${(n / 1048576).toFixed(n < 10 * 1048576 ? 1 : 0)} MB`
 
 const tiles = []
 for (const app of apps) {
-  const [rel, icon] = await Promise.all([latest(app), iconDataUrl(app.glyph)])
+  const [rel, icon] = await Promise.all([latest(app), iconDataUrl(app.name, app.glyph)])
   if (rel.error) console.error(`${app.name}: ${rel.error}`)
   else console.error(`${app.name}: ${rel.version} (build ${rel.build}, ${mb(rel.size)})`)
   tiles.push({ ...app, rel, icon })
