@@ -9,7 +9,7 @@
 //
 // Protocol (produced by tools/bundle/release.mjs):
 //   GET https://api.github.com/repos/<repo>/releases/latest  → JSON with
-//     tag_name  "canary-<build>"   build = integer, compared with CFBundleVersion
+//     tag_name  "<channel>-<build>"  channel = canary | remote-<host>; build = integer, compared with CFBundleVersion
 //     name      "DSH Canary 2026.9.24"
 //     body      release notes (shown in the prompt)
 //     assets[]  one *.dmg and its sibling *.dmg.sha256 (hex digest, first word)
@@ -28,6 +28,10 @@ struct UpdateSpec: Decodable {
     var repo: String
     var intervalHours: Double?
     var feed: String?
+    /// Release-tag prefix this app follows: `canary` for the full app, `remote-<host>`
+    /// for a thin client. Flavours share one repo; each only ever sees its own
+    /// releases, so a thin client cannot "update" itself into the server app.
+    var channel: String?
 }
 
 struct ReleaseInfo {
@@ -44,7 +48,7 @@ enum UpdateError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .badFeed(let why): return "The release feed could not be read: \(why)"
-        case .noAsset: return "The latest release carries no .dmg asset."
+        case .noAsset: return "No release for this app was found in the feed."
         case .checksum: return "The downloaded image does not match its published SHA-256; not installing it."
         case .mount(let why): return "The disk image could not be mounted: \(why)"
         case .translocated: return "This copy runs from a disk image (or is translocated). Move it to Applications, launch it from there, then update."
@@ -78,9 +82,14 @@ final class Updater: NSObject {
     var currentBuild: Int { Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "") ?? 0 }
     var currentVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?" }
 
+    var channel: String { spec.channel ?? "canary" }
+
+    /// With a channel the feed is the release LIST (newest first; GitHub's
+    /// `releases/latest` is one per repo and would cross flavours); `feed`
+    /// overrides it with any URL returning the same JSON shape (tests).
     var feedURL: URL {
         if let feed = spec.feed, let url = URL(string: feed) { return url }
-        return URL(string: "https://api.github.com/repos/\(spec.repo)/releases/latest")!
+        return URL(string: "https://api.github.com/repos/\(spec.repo)/releases?per_page=30")!
     }
 
     /// Start the periodic check: first one after `delay`, then every intervalHours.
@@ -108,7 +117,7 @@ final class Updater: NSObject {
                     if let error { throw UpdateError.badFeed(error.localizedDescription) }
                     guard let http = response as? HTTPURLResponse, let data else { throw UpdateError.badFeed("no response") }
                     guard http.statusCode == 200 else { throw UpdateError.badFeed("HTTP \(http.statusCode)") }
-                    let info = try Updater.parse(data)
+                    let info = try Updater.parse(data, channel: self.channel, appName: self.appName)
                     self.log("update: latest build \(info.build) (\(info.name)); running \(self.currentBuild)")
                     if info.build > self.currentBuild {
                         let skipped = UserDefaults.standard.integer(forKey: Updater.skipKey)
@@ -128,18 +137,37 @@ final class Updater: NSObject {
         }.resume()
     }
 
-    static func parse(_ data: Data) throws -> ReleaseInfo {
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw UpdateError.badFeed("not a JSON object") }
-        guard let tag = json["tag_name"] as? String else { throw UpdateError.badFeed("no tag_name") }
-        guard let build = Int(tag.split(separator: "-").last ?? "") else { throw UpdateError.badFeed("tag '\(tag)' carries no build number") }
-        let assets = json["assets"] as? [[String: Any]] ?? []
-        guard let dmg = assets.first(where: { ($0["name"] as? String)?.hasSuffix(".dmg") == true }),
-              let dmgURL = (dmg["browser_download_url"] as? String).flatMap(URL.init(string:)) else { throw UpdateError.noAsset }
-        let dmgName = dmg["name"] as? String ?? ""
-        let sha = assets.first(where: { ($0["name"] as? String) == dmgName + ".sha256" })
-        let shaURL = (sha?["browser_download_url"] as? String).flatMap(URL.init(string:))
-        return ReleaseInfo(build: build, name: json["name"] as? String ?? tag, notes: json["body"] as? String ?? "",
-                           dmgURL: dmgURL, shaURL: shaURL, dmgSize: dmg["size"] as? Int ?? 0)
+    /// Accepts either one release object or a list of them; picks the newest
+    /// non-draft, non-prerelease whose tag is `<channel>-<build>` and whose DMG
+    /// is named for this app (`<App-Name>-…dmg`, spaces as dashes).
+    static func parse(_ data: Data, channel: String, appName: String) throws -> ReleaseInfo {
+        let any = try JSONSerialization.jsonObject(with: data)
+        let releases: [[String: Any]]
+        if let list = any as? [[String: Any]] { releases = list }
+        else if let one = any as? [String: Any] { releases = [one] }
+        else { throw UpdateError.badFeed("not a JSON object or array") }
+        let prefix = channel + "-"
+        let dmgPrefix = appName.replacingOccurrences(of: " ", with: "-") + "-"
+        var best: ReleaseInfo?
+        for json in releases {
+            guard let tag = json["tag_name"] as? String, tag.hasPrefix(prefix) else { continue }
+            if json["draft"] as? Bool == true || json["prerelease"] as? Bool == true { continue }
+            guard let build = Int(tag.dropFirst(prefix.count)) else { continue }
+            let assets = json["assets"] as? [[String: Any]] ?? []
+            guard let dmg = assets.first(where: { name in
+                      let n = name["name"] as? String ?? ""
+                      return n.hasSuffix(".dmg") && n.hasPrefix(dmgPrefix)
+                  }),
+                  let dmgURL = (dmg["browser_download_url"] as? String).flatMap(URL.init(string:)) else { continue }
+            let dmgName = dmg["name"] as? String ?? ""
+            let sha = assets.first(where: { ($0["name"] as? String) == dmgName + ".sha256" })
+            let shaURL = (sha?["browser_download_url"] as? String).flatMap(URL.init(string:))
+            let info = ReleaseInfo(build: build, name: json["name"] as? String ?? tag, notes: json["body"] as? String ?? "",
+                                   dmgURL: dmgURL, shaURL: shaURL, dmgSize: dmg["size"] as? Int ?? 0)
+            if best == nil || info.build > best!.build { best = info }
+        }
+        guard let found = best else { throw UpdateError.noAsset }
+        return found
     }
 
     // MARK: offer
