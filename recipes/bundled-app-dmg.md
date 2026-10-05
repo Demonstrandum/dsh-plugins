@@ -549,6 +549,17 @@ token, appears in command lines, logs and this repo; rotation = a new
 release built with the new token (apps on the old one work until it
 expires, then Check for Updates… reports HTTP 401).
 
+**A download page** (`tools/bundle/download-page.mjs --out downloads.html
+--app "Name|owner/repo|channel|#glyph" …`): one self-contained HTML file —
+an icon per variant (the Dock tile, rendered by `make-icon`, inlined), click
+to download, name and version underneath, nothing else. GitHub has no stable
+"newest of this channel" URL, so the page is *generated* with each channel's
+current asset link baked in (resolved through `gh api`, the Updater's two
+locks: tag prefix + app-named DMG) and regenerated on every release run; a
+variant without a readable release renders greyed out with the reason in its
+tooltip. Private-repo links work in a browser signed in to GitHub with
+access to that repo (a web session is what the asset URL needs).
+
 **Where the concrete apps live.** The mechanism is public and host-free;
 the invocation for a real deployment names a tailnet host *and* the app's
 deployment-specific name, both of which belong in `extras/` by the ground
