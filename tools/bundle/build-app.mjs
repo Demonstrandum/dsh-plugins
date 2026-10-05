@@ -45,8 +45,13 @@ const NODE_DIR = join(INPUTS, 'node')
 // a different bundle id and Dock name, so the two never collide).
 /** Plain `DSH` for the release; `pnpm canary --app` passes its own label. Tags stay `canary-N` (release.mjs). */
 const NAME = opt('--name', 'DSH')
-/** Black whale for the plain `DSH` release, like the shipped GUI; `pnpm canary --app` passes the red. */
-const GLYPH = opt('--glyph-color', '#000000')
+/**
+ * Black whale for the plain `DSH` release, like the shipped GUI; blue for a thin
+ * client (`--remote`), the colour `pnpm remote-app` has always given remote
+ * windows so they are never mistaken for a local one; `pnpm canary --app`
+ * passes the red.
+ */
+const GLYPH = opt('--glyph-color', opt('--remote') ? '#0090FF' : '#000000')
 const PORT = Number(opt('--port', '3090'))
 const SIGN = opt('--sign', '-')
 const DMG = !args.includes('--no-dmg')

@@ -40,7 +40,7 @@ on:
         required: false
         type: string
       name:
-        description: 'remote only: app name (e.g. "DSH Alpha"); default DSH'
+        description: 'remote only: app name (e.g. "DSH Office"); default DSH'
         required: false
         type: string
       notes:
@@ -135,7 +135,7 @@ jobs:
           args=(--repo "$GITHUB_REPOSITORY")
           if [ "${{ inputs.flavour }}" = "remote" ]; then
             [ -n "${{ inputs.remote }}" ] || { echo "::error::flavour=remote needs the 'remote' input (host[/path] or URL)"; exit 1; }
-            args+=(--remote "${{ inputs.remote }}" --glyph-color '#0090FF')
+            args+=(--remote "${{ inputs.remote }}")   # blue glyph is build-app's default for remotes
             [ -n "${{ inputs.name }}" ] && args+=(--name "${{ inputs.name }}")
           fi
           [ "${{ steps.notes.outputs.has }}" = "1" ] && args+=(--notes "$(cat /tmp/notes.md)")

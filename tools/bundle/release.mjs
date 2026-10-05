@@ -119,7 +119,9 @@ async function main() {
   const onRemote = await sh('git', ['branch', '-r', '--contains', head]).catch(() => '')
   if (!onRemote && !DRY) throw new Error(`HEAD ${head.slice(0, 7)} is not on any remote branch; git push first so the release tag can point at it`)
   const title = `${appName} ${manifest.version}`
-  const ghArgs = ['release', 'create', tag, dmg, shaFile, '--repo', REPO, '--target', head, '--title', title, '--notes', notes, '--latest', ...(DRAFT ? ['--draft'] : [])]
+  // GitHub's single "Latest" badge (and the releases/latest URL humans click) belongs to the
+  // full app; other channels publish with --latest=false. The updaters read the channel list.
+  const ghArgs = ['release', 'create', tag, dmg, shaFile, '--repo', REPO, '--target', head, '--title', title, '--notes', notes, channel === 'canary' ? '--latest' : '--latest=false', ...(DRAFT ? ['--draft'] : [])]
   if (DRY) {
     log(`dry run — would execute:\n  gh ${ghArgs.map(a => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')}`)
     return
