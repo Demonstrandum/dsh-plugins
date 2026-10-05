@@ -26,3 +26,7 @@ import-sessions
 app-lifeline
 app-setup
 backup-restore
+anthropic-oauth-audit
+billing-status
+prompt-excision
+session-reference-picker
