@@ -506,6 +506,39 @@ Testing it needs the file on the repo's **default branch** (GitHub only
 registers `workflow_dispatch` there) — on the fork the default was
 temporarily switched to the PR branch for the trial run, then back.
 
+## Thin clients: `--remote` (2026-09-30)
+
+`pnpm build-app --remote <host[/path] | URL> --name "DSH <Name>"` (the glyph
+defaults to **blue `#0090FF`** for remotes — the thin-client colour since
+`pnpm remote-app` — so a remote window is never mistaken for a local one) builds the same wrapper, icon, DMG window and updater **without
+Node, the harness or a profile inside** (824 KB app, 2 MB DMG): the window
+opens the given DSH over the tailnet, admitted by the Mac's own Tailscale
+identity — what `pnpm remote-app` installs by hand, as a distributable
+colleagues can download. `pnpm release-app --remote … --name …` publishes it.
+
+**Updates per flavour.** A thin client has nothing to update but the
+wrapper, and must never "update" itself into the 52 MB server app. So:
+
+- `UpdateSpec.channel` — `canary` for the full app, `remote-<host>` for a
+  thin client (`--channel` overrides). Release tags are `<channel>-<build>`;
+  `release.mjs` numbers builds per channel.
+- The updater no longer reads `releases/latest` (one per repo) but the
+  release **list**, and takes the newest non-draft, non-prerelease release
+  whose tag has its channel prefix **and** whose DMG is named for the app
+  (`<App-Name>-…dmg`). Two independent locks; measured against the fork's
+  real feed: full app → build 08, thin client → none, thin client
+  misconfigured onto `canary` → none (asset name refuses).
+- Flavours therefore share one repo and one workflow. A remote release is
+  `release.mjs --remote …`: no harness stage, no pin check (nothing of the
+  harness is inside), ~1 min.
+
+**Where the concrete apps live.** The mechanism is public and host-free;
+the invocation for a real deployment names a tailnet host *and* the app's
+deployment-specific name, both of which belong in `extras/` by the ground
+rules (its tooling calls `pnpm build-app --remote … --name …` with the
+inventory's values). Nothing in this repo names either; examples use
+`<node>.example.ts.net` and "DSH Office".
+
 ## Known gaps / next
 
 - Still open from the milestone-2 design: port-conflict handling when 3090

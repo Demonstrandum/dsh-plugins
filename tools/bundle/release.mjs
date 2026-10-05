@@ -47,40 +47,48 @@ async function run(cmd, argv) {
     child.on('close', code => (code === 0 ? res() : rej(new Error(`${cmd} ${argv.join(' ')} exited ${code}`))))
   })
 }
-async function existingTags() {
+async function existingTags(channel) {
   await sh('git', ['fetch', '--tags', '--quiet']).catch(() => log('git fetch --tags failed; using local tags'))
-  return (await sh('git', ['tag', '--list', 'canary-*'])).split('\n').filter(Boolean)
+  return (await sh('git', ['tag', '--list', `${channel}-*`])).split('\n').filter(Boolean)
 }
 
 async function main() {
-  const tags = await existingTags()
+  // One tag namespace per flavour: `canary-N` for the full app, `remote-<host>-N`
+  // for a thin client (the updater only follows its own channel).
+  const remoteArg = opt('--remote')
+  const channel = opt('--channel') ?? (remoteArg ? `remote-${new URL(/^[a-z]+:\/\//i.test(remoteArg) ? remoteArg : `https://${remoteArg}`).host.replace(/[^a-z0-9]+/gi, '-')}` : 'canary')
+  const tags = await existingTags(channel)
   let build = Number(opt('--build', '0'))
   if (!build) {
     const day = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-    const today = tags.filter(t => t.startsWith(`canary-${day}`)).length
+    const today = tags.filter(t => t.startsWith(`${channel}-${day}`)).length
     build = Number(`${day}${String(today + 1).padStart(2, '0')}`)
   }
   const appName = args.includes('--name') ? args[args.indexOf('--name') + 1] : 'DSH'
-  const tag = `canary-${build}`
+  const tag = `${channel}-${build}`
   if (tags.includes(tag)) throw new Error(`tag ${tag} already exists`)
-  const previous = tags.map(t => Number(t.slice('canary-'.length))).filter(n => n < build).sort((a, b) => b - a)[0]
-  log(`build ${build} (tag ${tag}${previous ? `, previous canary-${previous}` : ', first release'})`)
+  const previous = tags.map(t => Number(t.slice(channel.length + 1))).filter(n => n < build).sort((a, b) => b - a)[0]
+  log(`build ${build} (tag ${tag}${previous ? `, previous ${channel}-${previous}` : ', first release'})`)
 
   // The harness the bundle packs must be the commit this repo pins, not whatever
   // the checkout happens to sit on: plugins on main are written against the pin
   // (import-sessions' storeSessionLogs import, 2026-09-29). `--checkout DIR`
   // (a worktree at the pin; see the recipe) is forwarded to stage-dsh.
+  const remote = args.includes('--remote')
   const checkout = opt('--checkout', join(REPO_DIR, 'deepseek-harness'))
-  const pinned = (await sh('git', ['ls-tree', 'HEAD', 'deepseek-harness'])).split(/\s+/)[2]
-  const actual = (await sh('git', ['-C', checkout, 'rev-parse', 'HEAD'])).trim()
+  const pinned = remote ? '' : (await sh('git', ['ls-tree', 'HEAD', 'deepseek-harness'])).split(/\s+/)[2]
+  const actual = remote ? '' : (await sh('git', ['-C', checkout, 'rev-parse', 'HEAD'])).trim()
   if (pinned && actual !== pinned) {
     throw new Error(`the harness checkout at ${checkout} is at ${actual.slice(0, 10)} but this repo pins ${pinned.slice(0, 10)}; build from a worktree at the pin (--checkout) or update the pin`)
   }
 
   if (!args.includes('--no-build')) {
-    await run('node', [join(HERE, 'fetch-node.mjs')])
-    await run('node', [join(HERE, 'stage-dsh.mjs'), '--checkout', checkout, ...(args.includes('--skip-pack') ? ['--skip-pack'] : [])])
-    await run('node', [join(HERE, 'build-app.mjs'), '--build', String(build), '--update-repo', REPO, '--name', appName])
+    if (!remote) {
+      await run('node', [join(HERE, 'fetch-node.mjs')])
+      await run('node', [join(HERE, 'stage-dsh.mjs'), '--checkout', checkout, ...(args.includes('--skip-pack') ? ['--skip-pack'] : [])])
+    }
+    const passthrough = ['--remote', '--channel', '--glyph-color', '--bundle-id', '--update-feed'].flatMap(f => args.includes(f) ? [f, args[args.indexOf(f) + 1]] : [])
+    await run('node', [join(HERE, 'build-app.mjs'), '--build', String(build), '--update-repo', REPO, '--name', appName, ...passthrough])
   }
   const manifest = JSON.parse(await readFile(join(OUT, `${appName}.app`, 'Contents', 'Resources', 'dsh-app-release.json'), 'utf8'))
   if (manifest.build !== build) throw new Error(`built app carries build ${manifest.build}, expected ${build} (pass --no-build only after building with --build ${build})`)
@@ -92,12 +100,14 @@ async function main() {
 
   let notes = opt('--notes')
   if (!notes) {
-    const range = previous ? `canary-${previous}..HEAD` : 'HEAD~20..HEAD'
+    const range = previous ? `${channel}-${previous}..HEAD` : 'HEAD~20..HEAD'
     const subjects = await sh('git', ['log', '--no-merges', '--format=- %s', range]).catch(() => '')
     notes = [
       `${appName} ${manifest.version} — build ${build}`,
       '',
-      `dsh ${manifest.dsh} · node ${manifest.node} · ${manifest.plugins.length} plugins · ad-hoc signed (first launch: right-click → Open)`,
+      manifest.remote
+        ? `thin client for ${manifest.remote} · ad-hoc signed (first launch: right-click → Open)`
+        : `dsh ${manifest.dsh} · node ${manifest.node} · ${manifest.plugins.length} plugins · ad-hoc signed (first launch: right-click → Open)`,
       '',
       subjects || '- (no commits since the previous release)',
     ].join('\n')
@@ -109,7 +119,9 @@ async function main() {
   const onRemote = await sh('git', ['branch', '-r', '--contains', head]).catch(() => '')
   if (!onRemote && !DRY) throw new Error(`HEAD ${head.slice(0, 7)} is not on any remote branch; git push first so the release tag can point at it`)
   const title = `${appName} ${manifest.version}`
-  const ghArgs = ['release', 'create', tag, dmg, shaFile, '--repo', REPO, '--target', head, '--title', title, '--notes', notes, '--latest', ...(DRAFT ? ['--draft'] : [])]
+  // GitHub's single "Latest" badge (and the releases/latest URL humans click) belongs to the
+  // full app; other channels publish with --latest=false. The updaters read the channel list.
+  const ghArgs = ['release', 'create', tag, dmg, shaFile, '--repo', REPO, '--target', head, '--title', title, '--notes', notes, channel === 'canary' ? '--latest' : '--latest=false', ...(DRAFT ? ['--draft'] : [])]
   if (DRY) {
     log(`dry run — would execute:\n  gh ${ghArgs.map(a => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')}`)
     return

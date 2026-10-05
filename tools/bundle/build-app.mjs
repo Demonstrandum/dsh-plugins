@@ -45,19 +45,34 @@ const NODE_DIR = join(INPUTS, 'node')
 // a different bundle id and Dock name, so the two never collide).
 /** Plain `DSH` for the release; `pnpm canary --app` passes its own label. Tags stay `canary-N` (release.mjs). */
 const NAME = opt('--name', 'DSH')
-/** Black whale for the plain `DSH` release, like the shipped GUI; `pnpm canary --app` passes the red. */
-const GLYPH = opt('--glyph-color', '#000000')
+/**
+ * Black whale for the plain `DSH` release, like the shipped GUI; blue for a thin
+ * client (`--remote`), the colour `pnpm remote-app` has always given remote
+ * windows so they are never mistaken for a local one; `pnpm canary --app`
+ * passes the red.
+ */
+const GLYPH = opt('--glyph-color', opt('--remote') ? '#0090FF' : '#000000')
 const PORT = Number(opt('--port', '3090'))
 const SIGN = opt('--sign', '-')
 const DMG = !args.includes('--no-dmg')
 const PRUNE = !args.includes('--no-prune')
 const WITH_OFFICE = args.includes('--with-office')
 /** `--bundle-id` lets a canary app coexist with the release app (separate WebKit store, no LSMultipleInstances clash). */
-const BUNDLE_ID = opt('--bundle-id', 'io.github.taliesinb.dsh-app')
+const BUNDLE_ID = opt('--bundle-id') ?? (opt('--remote') ? `io.github.taliesinb.dsh-app.remote-${new URL(normalizeRemote(opt('--remote'))).host.replace(/[^a-z0-9]+/gi, '-')}` : 'io.github.taliesinb.dsh-app')
 /** `--dsh-home DIR` pins the app to that DSH home (a canary's throwaway home); default: `$DSH_HOME` / `~/.dsh` at run time. */
 const DSH_HOME = opt('--dsh-home') ?? null
 /** `--no-update` leaves the update block out (a canary must not replace itself with the release). */
 const UPDATES = !args.includes('--no-update')
+/**
+ * `--remote URL`: a thin client — the same wrapper, DMG, icon and updater, but no
+ * Node, harness or profile inside; the window opens the given DSH over the
+ * tailnet, admitted by this Mac's Tailscale identity (what `pnpm remote-app`
+ * installs by hand, as a distributable). ~5 MB. The bundle id gets a suffix
+ * derived from the host so it coexists with the full app and other remotes.
+ */
+const REMOTE = opt('--remote') ?? null
+/** Release-tag prefix the updater follows; one per flavour so they share a repo without crossing. */
+const CHANNEL = opt('--channel') ?? (REMOTE ? `remote-${new URL(normalizeRemote(REMOTE)).host.replace(/[^a-z0-9]+/gi, '-')}` : 'canary')
 /** GitHub owner/repo whose Releases the app polls for updates (Updater.swift). */
 const REPO_SLUG = opt('--update-repo', 'taliesinb/dsh-plugins')
 
@@ -77,14 +92,14 @@ const readJson = async p => JSON.parse(await readFile(p, 'utf8'))
 async function version() {
   const build = Number(opt('--build', '0'))
   if (!Number.isSafeInteger(build) || build < 0) throw new Error(`--build must be a non-negative integer, got ${opt('--build')}`)
-  const stage = await readJson(join(STAGE, 'package.json'))
+  const stage = REMOTE ? null : await readJson(join(STAGE, 'package.json'))
   const { stdout } = await execFileAsync('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPO })
   let short = opt('--version')
   if (!short) {
     const m = /^(\d{4})(\d{2})(\d{2})(\d{2})$/.exec(String(build))
     short = m ? `${Number(m[1])}.${Number(m[2])}.${Number(m[3])}${Number(m[4]) > 1 ? `.${Number(m[4])}` : ''}` : '0.0.0'
   }
-  return { build, short, full: `${short} (build ${build}, dsh ${stage.version}, ${stdout.trim()})` }
+  return { build, short, full: stage ? `${short} (build ${build}, dsh ${stage.version}, ${stdout.trim()})` : `${short} (build ${build}, ${stdout.trim()})` }
 }
 
 /** Every Mach-O inside the resources that must carry a signature of its own. */
@@ -146,6 +161,15 @@ async function prune(root) {
     }
   }
   log(`pruned ${files} entries, ${(bytes / 1024 / 1024).toFixed(0)} MB`)
+}
+
+/** `host[/path]` or a URL → `https://host/path/` (the wrapper wants the trailing slash; see parseRemoteTarget). */
+function normalizeRemote(text) {
+  const raw = String(text).trim()
+  const url = /^[a-z]+:\/\//i.test(raw) ? raw : `https://${raw}`
+  const u = new URL(url)
+  if (!u.pathname.endsWith('/')) u.pathname += '/'
+  return u.toString()
 }
 
 /** Compile a dock-app/Tools/*.swift helper on demand (cached by mtime), like buildDockApp does for the icon renderer. */
@@ -233,13 +257,16 @@ async function setVolumeIconFlag(mount) {
 }
 
 async function main() {
-  const stagePkg = await readJson(join(STAGE, 'package.json'))
-  const nodeInfo = await readJson(join(NODE_DIR, 'current.json'))
+  const remote = REMOTE ? normalizeRemote(REMOTE) : null
+  const stagePkg = remote ? null : await readJson(join(STAGE, 'package.json'))
+  const nodeInfo = remote ? null : await readJson(join(NODE_DIR, 'current.json'))
   const ver = await version()
   const app = join(OUT, `${NAME}.app`)
   const contents = join(app, 'Contents')
   const resources = join(contents, 'Resources')
-  log(`building ${app} (dsh ${ver.full}, node ${nodeInfo.version}, ${stagePkg.dshBundle.plugins.length} plugins)`)
+  log(remote
+    ? `building ${app} (thin client for ${remote}, ${ver.full})`
+    : `building ${app} (dsh ${ver.full}, node ${nodeInfo.version}, ${stagePkg.dshBundle.plugins.length} plugins)`)
 
   const { executable, icns } = await dockApp.buildDockApp({ log, glyphColor: GLYPH })
 
@@ -252,6 +279,7 @@ async function main() {
   // main.swift's identityScript() loads this from Resources: without it the page keeps the stock whale and 'DSH'.
   await cp(dockApp.BRANDING_SCRIPT, join(resources, 'desktop-branding.js'))
 
+  if (!remote) {
   log('copying node')
   await mkdir(join(resources, 'node', 'bin'), { recursive: true })
   await cp(join(NODE_DIR, nodeInfo.dir, 'bin', 'node'), join(resources, 'node', 'bin', 'node'))
@@ -277,25 +305,34 @@ async function main() {
     name: 'dsh-profile-app', private: true, dependencies: Object.fromEntries(stagePkg.dshBundle.plugins.map(p => [p.name, p.version])), dsh: { profile: { bundles }, app: { templateBundles: bundles } },
   }, null, 2) + '\n')
   await writeFile(join(resources, 'profile-template', 'cordis.patch.yml'), '# Your overrides for the bundled DSH app (applied after every bundle layer).\n[]\n')
-
-  const config = {
-    name: NAME,
-    url: `http://127.0.0.1:${PORT}/`,
-    glyphColor: GLYPH,   // the page's sidebar whale follows the Dock icon (main.swift identityScript)
-    embedded: {
-      node: 'node/bin/node',
-      dsh: 'dsh/node_modules/@deepseek-ai/dsh/lib/bin.js',
-      profile: 'app',
-      port: PORT,
-      profileTemplate: 'profile-template',
-      dshHome: DSH_HOME,
-    },
-    ...(UPDATES ? { update: { repo: REPO_SLUG, intervalHours: 6, feed: opt('--update-feed') ?? null } } : {}),
   }
+
+  const config = remote
+    ? {
+        name: NAME,
+        url: remote,
+        glyphColor: GLYPH,
+        ...(UPDATES ? { update: { repo: REPO_SLUG, channel: CHANNEL, intervalHours: 6, feed: opt('--update-feed') ?? null } } : {}),
+      }
+    : {
+        name: NAME,
+        url: `http://127.0.0.1:${PORT}/`,
+        glyphColor: GLYPH,   // the page's sidebar whale follows the Dock icon (main.swift identityScript)
+        embedded: {
+          node: 'node/bin/node',
+          dsh: 'dsh/node_modules/@deepseek-ai/dsh/lib/bin.js',
+          profile: 'app',
+          port: PORT,
+          profileTemplate: 'profile-template',
+          dshHome: DSH_HOME,
+        },
+        ...(UPDATES ? { update: { repo: REPO_SLUG, channel: CHANNEL, intervalHours: 6, feed: opt('--update-feed') ?? null } } : {}),
+      }
   await writeFile(join(resources, 'dsh-dock-app.json'), JSON.stringify(config, null, 2) + '\n')
-  await writeFile(join(resources, 'dsh-app-release.json'), JSON.stringify({
-    build: ver.build, version: ver.short, dsh: stagePkg.version, node: nodeInfo.version, plugins: stagePkg.dshBundle.plugins, builtAt: new Date().toISOString(),
-  }, null, 2) + '\n')
+  await writeFile(join(resources, 'dsh-app-release.json'), JSON.stringify(remote
+    ? { build: ver.build, version: ver.short, channel: CHANNEL, remote, builtAt: new Date().toISOString() }
+    : { build: ver.build, version: ver.short, channel: CHANNEL, dsh: stagePkg.version, node: nodeInfo.version, plugins: stagePkg.dshBundle.plugins, builtAt: new Date().toISOString() },
+  null, 2) + '\n')
 
   let plist = dockApp.infoPlist({ name: NAME, version: ver.short, bundleId: BUNDLE_ID })
   plist = plist.replace(`<key>CFBundleVersion</key><string>${ver.short}</string>`, `<key>CFBundleVersion</key><string>${ver.build}</string>`)
