@@ -115,13 +115,19 @@ async function main() {
   // The tag must point at the commit that was built, which `gh` only does with
   // --target; and that commit must already be on the remote (the run is on
   // whatever branch is checked out, not necessarily the default one).
+  // The tag can only point at a commit of the repo it is created in. That is
+  // this repo for the normal case; a release published to ANOTHER repo (a
+  // thin client on a private feed, --repo elsewhere) carries no --target and
+  // GitHub tags that repo's default branch instead (built commit → notes).
   const head = await sh('git', ['rev-parse', 'HEAD'])
+  const sameRepo = await sh('git', ['remote', 'get-url', 'origin']).then(u => u.toLowerCase().includes(`/${REPO.toLowerCase()}`) || u.toLowerCase().includes(`:${REPO.toLowerCase()}`)).catch(() => false)
+    || await sh('git', ['remote', '-v']).then(v => v.toLowerCase().includes(REPO.toLowerCase())).catch(() => false)
   const onRemote = await sh('git', ['branch', '-r', '--contains', head]).catch(() => '')
-  if (!onRemote && !DRY) throw new Error(`HEAD ${head.slice(0, 7)} is not on any remote branch; git push first so the release tag can point at it`)
+  if (sameRepo && !onRemote && !DRY) throw new Error(`HEAD ${head.slice(0, 7)} is not on any remote branch; git push first so the release tag can point at it`)
   const title = `${appName} ${manifest.version}`
   // GitHub's single "Latest" badge (and the releases/latest URL humans click) belongs to the
   // full app; other channels publish with --latest=false. The updaters read the channel list.
-  const ghArgs = ['release', 'create', tag, dmg, shaFile, '--repo', REPO, '--target', head, '--title', title, '--notes', notes, channel === 'canary' ? '--latest' : '--latest=false', ...(DRAFT ? ['--draft'] : [])]
+  const ghArgs = ['release', 'create', tag, dmg, shaFile, '--repo', REPO, ...(sameRepo ? ['--target', head] : []), '--title', title, '--notes', sameRepo ? notes : `${notes}\n\nBuilt from ${head.slice(0, 10)} of the plugins repo.`, channel === 'canary' ? '--latest' : '--latest=false', ...(DRAFT ? ['--draft'] : [])]
   if (DRY) {
     log(`dry run — would execute:\n  gh ${ghArgs.map(a => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')}`)
     return
